@@ -57,6 +57,12 @@ class ApropriacaoOsService {
     );
   }
 
+  async excluir(projetoId: string, apontamentoId: string) {
+    return axiosApiService.delete<{ resumoAtualizado: ResultadoOsCalculado }>(
+      `${ENDPOINTS.PROJETOS}/${projetoId}/apontamentos/${apontamentoId}`
+    );
+  }
+
   async obterResumo(projetoId: string) {
     return axiosApiService.get<ResultadoOsCalculado>(
       `${ENDPOINTS.PROJETOS}/${projetoId}/apropriacao/resumo`

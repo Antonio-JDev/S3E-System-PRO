@@ -26,16 +26,16 @@ jest.mock('./vistoriaCelesc.service', () => ({
 }));
 
 import { prisma } from '../lib/prisma';
-import { ProjetosService } from './projetos.service';
+import { EstoqueInsuficienteError, ProjetosService } from './projetos.service';
 
-describe('ProjetosService.atualizarStatus — sem bloqueio de estoque', () => {
+describe('ProjetosService.atualizarStatus — validação de estoque', () => {
   const service = new ProjetosService();
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('aprova OS (APROVADO) mesmo com material sem estoque', async () => {
+  it('bloqueia APROVADO quando material sem estoque', async () => {
     (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
       id: 'p1',
       status: 'PROPOSTA',
@@ -49,20 +49,22 @@ describe('ProjetosService.atualizarStatus — sem bloqueio de estoque', () => {
             cotacaoId: null,
             quantidade: 10,
             descricao: 'Cabo',
-            material: { id: 'm1', nome: 'Cabo', estoque: 0 },
           },
         ],
       },
     });
-    (prisma.projeto.update as jest.Mock).mockResolvedValue({ id: 'p1', status: 'APROVADO' });
+    (prisma.material.findUnique as jest.Mock).mockResolvedValue({
+      id: 'm1',
+      nome: 'Cabo',
+      sku: 'CABO-1',
+      estoque: 0,
+    });
 
-    const r = await service.atualizarStatus('p1', 'APROVADO' as any);
-
-    expect(r.status).toBe('APROVADO');
-    expect(prisma.projeto.update).toHaveBeenCalled();
+    await expect(service.atualizarStatus('p1', 'APROVADO' as any)).rejects.toThrow(/APROVAÇÃO BLOQUEADA/);
+    expect(prisma.projeto.update).not.toHaveBeenCalled();
   });
 
-  it('vai para EXECUCAO com faltantes e marca iniciadoSemEstoque', async () => {
+  it('vai para EXECUCAO com ignorarEstoque e marca iniciadoSemEstoque', async () => {
     (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
       id: 'p1',
       status: 'APROVADO',
@@ -86,11 +88,16 @@ describe('ProjetosService.atualizarStatus — sem bloqueio de estoque', () => {
       nome: 'Cabo',
       estoque: 0,
     });
-    (prisma.projeto.update as jest.Mock)
-      .mockResolvedValueOnce({ id: 'p1', status: 'EXECUCAO', descricao: 'OS teste' })
-      .mockResolvedValueOnce({ id: 'p1', status: 'EXECUCAO' });
+    (prisma.projeto.update as jest.Mock).mockResolvedValue({
+      id: 'p1',
+      status: 'EXECUCAO',
+      descricao: 'OS teste',
+    });
 
-    await service.atualizarStatus('p1', 'EXECUCAO' as any);
+    await service.atualizarStatus('p1', 'EXECUCAO' as any, {
+      ignorarEstoque: true,
+      userId: 'user-1',
+    });
 
     expect(prisma.projeto.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -98,8 +105,36 @@ describe('ProjetosService.atualizarStatus — sem bloqueio de estoque', () => {
         data: expect.objectContaining({
           status: 'EXECUCAO',
           iniciadoSemEstoque: true,
+          iniciadoSemEstoquePorId: 'user-1',
         }),
-      })
+      }),
+    );
+  });
+
+  it('lança EstoqueInsuficienteError ao ir para EXECUCAO sem ignorar estoque', async () => {
+    (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
+      id: 'p1',
+      status: 'APROVADO',
+      tipo: 'Instalacao',
+      orcamento: {
+        items: [
+          {
+            tipo: 'MATERIAL',
+            materialId: 'm1',
+            quantidade: 5,
+            descricao: 'Cabo',
+          },
+        ],
+      },
+    });
+    (prisma.material.findUnique as jest.Mock).mockResolvedValue({
+      id: 'm1',
+      nome: 'Cabo',
+      estoque: 0,
+    });
+
+    await expect(service.atualizarStatus('p1', 'EXECUCAO' as any)).rejects.toBeInstanceOf(
+      EstoqueInsuficienteError,
     );
   });
 });

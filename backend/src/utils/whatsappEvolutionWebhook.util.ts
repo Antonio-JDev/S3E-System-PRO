@@ -470,6 +470,7 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
       Boolean(
         type &&
           type !== 'conversation' &&
+          type !== 'text' &&
           type !== 'location' &&
           type !== 'contact'
       ),

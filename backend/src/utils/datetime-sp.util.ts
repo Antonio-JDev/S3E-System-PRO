@@ -21,6 +21,44 @@ export function dataReferenciaDiaCivilUtc(ano: number, mes: number, dia: number)
 }
 
 /**
+ * Converte YYYY-MM-DD ou ISO em Date estável (meio-dia UTC no dia civil).
+ * Usar ao persistir vencimentos, gastos de frota, etc. — evita shift de timezone.
+ */
+export function parseDataDiaCivilInput(value: string | Date | null | undefined): Date | undefined {
+  if (value == null || value === '') return undefined;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return undefined;
+    return dataReferenciaDiaCivilUtc(
+      value.getUTCFullYear(),
+      value.getUTCMonth() + 1,
+      value.getUTCDate(),
+    );
+  }
+  const raw = value.trim();
+  const ymdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymdMatch) {
+    return dataReferenciaDiaCivilUtc(Number(ymdMatch[1]), Number(ymdMatch[2]), Number(ymdMatch[3]));
+  }
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return dataReferenciaDiaCivilUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/** YYYY-MM-DD a partir de Date (meio-dia UTC) ou string date-only/ISO da API. */
+export function ymdDeDataDiaCivil(value: Date | string | null | undefined): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return chaveDiaUtc(d);
+}
+
+/**
  * Combina dia civil com HH:mm como horário de Brasília (relógio de ponto em Itajaí).
  */
 export function dataHoraEmBrasilia(ano: number, mes: number, dia: number, hhmm: string): Date {

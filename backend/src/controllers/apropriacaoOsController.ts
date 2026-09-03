@@ -80,6 +80,30 @@ export async function atualizarApontamentoOs(
   }
 }
 
+export async function excluirApontamentoOs(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { projetoId, apontamentoId } = req.params;
+
+    const resultado = await apropriacaoOsService.excluirApontamento(
+      projetoId,
+      apontamentoId
+    );
+
+    res.json({
+      success: true,
+      resumoAtualizado: resultado.resumoAtualizado,
+      message: 'Apontamento excluído com sucesso',
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Erro ao excluir apontamento';
+    res.status(400).json({ success: false, error: message });
+  }
+}
+
 export async function obterResumoApropriacaoOs(
   req: Request,
   res: Response

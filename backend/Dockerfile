@@ -40,6 +40,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 EXPOSE 3001
 RUN npm install -g tsx
+ARG DATABASE_URL=postgresql://s3e_dev:dev_password_local@postgres:5432/s3e_dev?schema=public
+ENV DATABASE_URL=${DATABASE_URL}
 RUN npx prisma generate
 CMD ["npm", "run", "dev"]
 
@@ -47,6 +49,8 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ARG DATABASE_URL=postgresql://s3e_dev:dev_password_local@postgres:5432/s3e_dev?schema=public
+ENV DATABASE_URL=${DATABASE_URL}
 ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 # Limita pico de RAM do tsc (evita OOM/restart do Docker Desktop no Windows).
 ENV NODE_OPTIONS=--max-old-space-size=3072

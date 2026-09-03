@@ -4,7 +4,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
-import { calcValorARegistrar, calcValorBaseFromEfetivo, formatBRL, parseMoney } from '../utils/financeiroValor';
+import { calcValorARegistrar, calcValorBaseFromEfetivo, formatBRL, parseMoney, parcelaQuitadaPorPagamento } from '../utils/financeiroValor';
 import { canEditarContaFinanceiraManual } from '../utils/permissions';
 import {
     AlertDialog,
@@ -1164,9 +1164,12 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         }
 
         const tipoRh = (contaSelecionada as any).tipo === 'RH';
-        if (!tipoRh && Math.abs(valorARegistrar - contaSelecionada.valor) > 0.01) {
-            toast.error('Valor a registrar deve quitar o saldo da parcela.', {
-                description: `Saldo: R$ ${formatBRL(contaSelecionada.valor)} • Informado: R$ ${formatBRL(valorARegistrar)}`,
+        if (!tipoRh && !parcelaQuitadaPorPagamento(contaSelecionada.valor, valorBase, descontos, {
+            valorDescontoExistente: contaSelecionada.valorDesconto,
+            valorJurosExistente: contaSelecionada.valorJuros,
+        })) {
+            toast.error('Valor base deve quitar o saldo da parcela.', {
+                description: `Saldo: R$ ${formatBRL(contaSelecionada.valor)} • Base: R$ ${formatBRL(valorBase)}${descontos > 0 ? ` • Desconto: R$ ${formatBRL(descontos)}` : ''}`,
             });
             return;
         }
@@ -2680,7 +2683,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                             {novaContaTipoDespesa === 'FORNECEDOR' && (
                                 <div className="space-y-3">
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Origem do fornecedor *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Origem do fornecedor *</label>
                                     <div className="flex gap-2">
                                         <button
                                             type="button"
@@ -2721,7 +2724,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         </select>
                                     ) : (
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Beneficiário / Credor *</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Beneficiário / Credor *</label>
                                             <input
                                                 type="text"
                                                 value={novaContaCredor}
@@ -2738,7 +2741,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                 <div className="space-y-4">
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Tipo RH *</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Tipo RH *</label>
                                             <select
                                                 value={novaContaRhSubtipo}
                                                 onChange={(e) => setNovaContaRhSubtipo(e.target.value as 'ADIANTAMENTO' | 'VALE')}
@@ -2749,7 +2752,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Funcionário *</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Funcionário *</label>
                                             <select
                                                 value={novaContaFuncionarioId}
                                                 onChange={(e) => setNovaContaFuncionarioId(e.target.value)}
@@ -2767,7 +2770,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Desconto futuro *</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Desconto futuro *</label>
                                             <select
                                                 value={novaContaRhDescontoTipo}
                                                 onChange={(e) => setNovaContaRhDescontoTipo(e.target.value as 'UMA_VEZ' | 'PARCELADO')}
@@ -2778,7 +2781,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Competência inicial *</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Competência inicial *</label>
                                             <input
                                                 type="month"
                                                 value={novaContaRhReferencia}
@@ -2788,7 +2791,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         </div>
                                         {novaContaRhDescontoTipo === 'PARCELADO' && (
                                             <div>
-                                                <label className="block text-sm font-semibold text-gray-700 mb-2">Parcelas *</label>
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Parcelas *</label>
                                                 <input
                                                     type="number"
                                                     min="2"
@@ -2805,7 +2808,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                             {novaContaTipoDespesa === 'DESPESA_FIXA' && (
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Beneficiário / Credor</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Beneficiário / Credor</label>
                                     <input
                                         type="text"
                                         value={novaContaCredor}
@@ -2861,7 +2864,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             </div>
                             {novaContaMeioPagamento === 'CARTAO_CREDITO' && (
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Cartão de Crédito *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Cartão de Crédito *</label>
                                     <select
                                         value={novaContaCartaoId}
                                         onChange={(e) => setNovaContaCartaoId(e.target.value)}
@@ -2878,7 +2881,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             )}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Valor (R$) *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Valor (R$) *</label>
                                     <input
                                         type="number"
                                         inputMode="decimal"
@@ -2891,7 +2894,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Vencimento *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Vencimento *</label>
                                     <input
                                         type="date"
                                         value={novaContaVencimento}
@@ -2902,7 +2905,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Juros (R$)</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Juros (R$)</label>
                                     <input
                                         type="number"
                                         inputMode="decimal"
@@ -2915,7 +2918,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Desconto (R$)</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Desconto (R$)</label>
                                     <input
                                         type="number"
                                         inputMode="decimal"
@@ -2966,14 +2969,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                         {/* Header */}
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-red-50 to-orange-50">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/30 dark:to-orange-900/30">
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-900">Registrar Pagamento</h2>
-                                <p className="text-sm text-gray-600 mt-1">Dar baixa na conta a pagar</p>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Registrar Pagamento</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Dar baixa na conta a pagar</p>
                             </div>
                             <button
                                 onClick={handleClosePagamentoModal}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                className="p-2 text-gray-400 dark:text-dark-text-secondary hover:text-gray-600 dark:hover:text-dark-text hover:bg-white/80 dark:hover:bg-white/10 rounded-xl"
                             >
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
@@ -2982,28 +2985,28 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         {/* Body */}
                         <div className="p-6 space-y-6">
                             {/* Informações da Conta */}
-                            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                                <h3 className="font-semibold text-blue-900 mb-3">Informações da Conta</h3>
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                <h3 className="font-semibold text-blue-900 dark:text-blue-300 mb-3">Informações da Conta</h3>
                                 <div className="grid grid-cols-2 gap-4 text-sm">
                                     <div>
-                                        <span className="text-blue-700 font-medium">Fornecedor:</span>
-                                        <p className="text-blue-900 font-semibold">{contaSelecionada.fornecedorNome}</p>
+                                        <span className="text-blue-700 dark:text-blue-400 font-medium">Fornecedor:</span>
+                                        <p className="text-blue-900 dark:text-blue-200 font-semibold">{contaSelecionada.fornecedorNome}</p>
                                     </div>
                                     <div>
-                                        <span className="text-blue-700 font-medium">Descrição:</span>
-                                        <p className="text-blue-900">{contaSelecionada.descricao}</p>
+                                        <span className="text-blue-700 dark:text-blue-400 font-medium">Descrição:</span>
+                                        <p className="text-blue-900 dark:text-blue-200">{contaSelecionada.descricao}</p>
                                     </div>
                                     <div>
-                                        <span className="text-blue-700 font-medium">Vencimento:</span>
-                                        <p className="text-blue-900">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
+                                        <span className="text-blue-700 dark:text-blue-400 font-medium">Vencimento:</span>
+                                        <p className="text-blue-900 dark:text-blue-200">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
                                     </div>
                                     <div>
-                                        <span className="text-blue-700 font-medium">Saldo da parcela:</span>
-                                        <p className="text-blue-900 font-bold">
+                                        <span className="text-blue-700 dark:text-blue-400 font-medium">Saldo da parcela:</span>
+                                        <p className="text-blue-900 dark:text-blue-200 font-bold">
                                             R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                         {(contaSelecionada.valorJuros ?? 0) > 0 || (contaSelecionada.valorDesconto ?? 0) > 0 ? (
-                                            <p className="text-xs text-blue-700 mt-1">
+                                            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
                                                 Base: R$ {formatBRL(calcValorBaseFromEfetivo(
                                                     contaSelecionada.valor,
                                                     contaSelecionada.valorJuros ?? 0,
@@ -3020,7 +3023,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             {/* Formulário */}
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                         Data do Pagamento *
                                     </label>
                                     <input
@@ -3033,7 +3036,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                         Valor base (R$) *
                                     </label>
                                     <input
@@ -3045,19 +3048,19 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         required
                                         className="select-field focus:ring-red-500 focus:border-red-500"
                                     />
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
                                         Saldo a quitar: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        {' '}(base + juros − descontos)
+                                        {' '}— informe o valor base igual ao saldo; descontos negociados reduzem o valor pago.
                                     </p>
                                     {(contaSelecionada as any).tipo === 'RH' && (
-                                        <p className="text-xs text-amber-700 mt-1">
+                                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
                                             Para funcionário: pode registrar com desconto (ex.: faltas) e informar a justificativa no campo abaixo.
                                         </p>
                                     )}
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                         Meio de Pagamento
                                     </label>
                                     <select
@@ -3071,14 +3074,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         <option value="TRANSFERENCIA">Transferência</option>
                                         <option value="DINHEIRO">Cédulas</option>
                                     </select>
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
                                         Cartão de crédito: liquide pela aba Financeiro → Cartão de Crédito.
                                     </p>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                             Juros (R$)
                                         </label>
                                         <input
@@ -3091,7 +3094,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                             Descontos (R$)
                                         </label>
                                         <input
@@ -3106,7 +3109,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">
                                         {(contaSelecionada as any).tipo === 'RH' ? 'Justificativa / Observações' : 'Observações'}
                                     </label>
                                     <textarea
@@ -3120,15 +3123,15 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             </div>
 
                             {/* Resumo: Valor a Registrar = Valor Pago + Juros - Descontos */}
-                            <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 p-4 rounded-xl">
+                            <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/25 dark:to-orange-900/25 border-2 border-red-300 dark:border-red-800/50 p-4 rounded-xl">
                                 <div className="flex justify-between items-center">
-                                    <span className="text-sm font-semibold text-red-700">Valor a Registrar:</span>
-                                    <span className="text-2xl font-bold text-red-700">
+                                    <span className="text-sm font-semibold text-red-700 dark:text-red-400">Valor a Registrar:</span>
+                                    <span className="text-2xl font-bold text-red-700 dark:text-red-300">
                                         R$ {formatBRL(valorARegistrarPagamento)}
                                     </span>
                                 </div>
                                 {(parseMoney(jurosPagamento) > 0 || parseMoney(descontosPagamento) > 0) && (
-                                    <p className="text-xs text-red-600 mt-1">
+                                    <p className="text-xs text-red-600 dark:text-red-400/90 mt-1">
                                         {formatBRL(parseMoney(valorPago))}
                                         {parseMoney(jurosPagamento) > 0 ? ` + ${formatBRL(parseMoney(jurosPagamento))} (juros)` : ''}
                                         {parseMoney(descontosPagamento) > 0 ? ` - ${formatBRL(parseMoney(descontosPagamento))} (descontos)` : ''}
@@ -3138,7 +3141,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         </div>
 
                         {/* Footer */}
-                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100 dark:border-dark-border">
                             <button
                                 onClick={handleClosePagamentoModal}
                                 className="btn-secondary"
@@ -3246,7 +3249,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Parcelas</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Parcelas</label>
                                     <input
                                         type="number"
                                         min={1}
@@ -3256,7 +3259,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">1º vencimento</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">1º vencimento</label>
                                     <input
                                         type="date"
                                         value={unificarPrimeiroVencimento}
@@ -3265,7 +3268,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Intervalo (dias)</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Intervalo (dias)</label>
                                     <input
                                         type="number"
                                         min={1}

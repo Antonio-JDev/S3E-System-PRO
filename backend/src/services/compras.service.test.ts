@@ -8,6 +8,7 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     compra: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       count: jest.fn(),
     },
     obra: { findUnique: jest.fn() },
@@ -220,6 +221,47 @@ describe('ComprasService', () => {
         }),
       });
       expect(tx.reservaMaterialProjeto.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('buscarCompraDuplicadaPorNotaFiscal', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it('retorna null quando não há compra com a mesma NF e CNPJ', async () => {
+      (prisma.compra.findMany as jest.Mock).mockResolvedValue([]);
+      const result = await ComprasService.buscarCompraDuplicadaPorNotaFiscal({
+        numeroNF: '12345',
+        fornecedorCNPJ: '12.345.678/0001-90',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('retorna numeroSequencial quando NF e CNPJ já existem', async () => {
+      (prisma.compra.findMany as jest.Mock).mockResolvedValue([
+        { numeroSequencial: 87, fornecedorCNPJ: '12345678000190' },
+      ]);
+      const result = await ComprasService.buscarCompraDuplicadaPorNotaFiscal({
+        numeroNF: '12345',
+        fornecedorCNPJ: '12.345.678/0001-90',
+      });
+      expect(result).toEqual({ numeroSequencial: 87 });
+    });
+
+    it('ignora compras canceladas na busca', async () => {
+      await ComprasService.buscarCompraDuplicadaPorNotaFiscal({
+        numeroNF: '999',
+        fornecedorCNPJ: '12345678000190',
+      });
+      expect(prisma.compra.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            numeroNF: '999',
+            status: { not: 'Cancelado' },
+          }),
+        })
+      );
     });
   });
 });

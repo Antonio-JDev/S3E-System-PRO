@@ -1275,8 +1275,8 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                         <div className="space-y-6 animate-fade-in">
                             <div className="flex justify-between items-center">
                                 <div>
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Gerenciamento de Usuários</h2>
-                                    <p className="text-gray-600">Gerencie permissões e acessos dos usuários do sistema</p>
+                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-2">Gerenciamento de Usuários</h2>
+                                    <p className="text-gray-600 dark:text-dark-text-secondary">Gerencie permissões e acessos dos usuários do sistema</p>
                                 </div>
                                 <button
                                     onClick={handleOpenModalUsuario}
@@ -1296,7 +1296,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                         placeholder="Buscar por nome, email ou setor..."
                                         value={searchUsuarios}
                                         onChange={(e) => setSearchUsuarios(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-dark-input text-gray-900 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
                                     />
                                 </div>
                                 <select
@@ -1323,62 +1323,64 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                             {loadingUsuarios ? (
                                 <div className="text-center py-12">
                                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                                    <p className="text-gray-600">Carregando usuários...</p>
+                                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando usuários...</p>
                                 </div>
                             ) : usuariosFiltrados.length === 0 ? (
-                                <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-16 text-center">
-                                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                        <UsersIcon className="w-10 h-10 text-gray-400" />
+                                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-md border border-gray-200 dark:border-dark-border p-16 text-center">
+                                    <div className="w-20 h-20 bg-gray-100 dark:bg-dark-elevated rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <UsersIcon className="w-10 h-10 text-gray-400 dark:text-dark-muted" />
                                     </div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhum usuário encontrado</h3>
-                                    <p className="text-gray-500">
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">Nenhum usuário encontrado</h3>
+                                    <p className="text-gray-500 dark:text-dark-text-secondary">
                                         {searchUsuarios || roleFilter !== 'Todos'
                                             ? 'Tente ajustar os filtros de busca'
                                             : 'Nenhum usuário cadastrado no sistema'}
                                     </p>
                                 </div>
                             ) : (
-                                <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+                                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-md border border-gray-200 dark:border-dark-border overflow-hidden">
                                     <div className="overflow-x-auto">
-                                        <table className="min-w-full divide-y divide-gray-200">
-                                            <thead className="bg-gray-50">
+                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-dark-border">
+                                            <thead className="bg-gray-50 dark:bg-dark-elevated">
                                                 <tr>
-                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Usuário</th>
-                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Email</th>
-                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Setor</th>
-                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Função</th>
-                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Admin</th>
-                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
-                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Ações</th>
+                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Usuário</th>
+                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Email</th>
+                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Setor</th>
+                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Função</th>
+                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Admin</th>
+                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Status</th>
+                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-dark-text-secondary uppercase tracking-wider">Ações</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="bg-white divide-y divide-gray-200">
+                                            <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
                                                 {usuariosFiltrados.map((usuario) => {
                                                     const contaProtegida = !!usuario.contaProtegida;
                                                     const isSelf = usuario.id === user?.id;
-                                                    const podeEditarCadastro = !contaProtegida || isSelf;
                                                     const temPermissaoGerenciar = user?.role?.toLowerCase() === 'gerente'
                                                         || user?.role?.toLowerCase() === 'admin'
                                                         || user?.role?.toLowerCase() === 'desenvolvedor'
                                                         || user?.isAdmin === true;
                                                     return (
-                                                    <tr key={usuario.id} className="hover:bg-gray-50 transition-colors">
+                                                    <tr key={usuario.id} className="hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors">
                                                         <td className="px-6 py-4 whitespace-nowrap">
-                                                            <div className="font-semibold text-gray-900">{usuario.name}</div>
+                                                            <div className="font-semibold text-gray-900 dark:text-dark-text">{usuario.name}</div>
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap">
-                                                            <div className="text-sm text-gray-600">{usuario.email}</div>
+                                                            <div className="text-sm text-gray-600 dark:text-dark-text-secondary">{usuario.email}</div>
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap">
-                                                            <div className="text-sm text-gray-700">{usuario.setor?.trim() || '—'}</div>
+                                                            <div className="text-sm text-gray-700 dark:text-dark-text-secondary">{usuario.setor?.trim() || '—'}</div>
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                            {contaProtegida ? (
+                                                                <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${getRoleBadgeClass(usuario.role)}`}>
+                                                                    {getRoleLabel(usuario.role)}
+                                                                </span>
+                                                            ) : (
                                                             <select
                                                                 value={usuario.role}
                                                                 onChange={(e) => handleAtualizarRole(usuario.id, e.target.value)}
-                                                                disabled={contaProtegida}
-                                                                title={contaProtegida ? 'Conta protegida do sistema' : undefined}
-                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getRoleBadgeClass(usuario.role)} border-0 ${contaProtegida ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getRoleBadgeClass(usuario.role)} border-0 cursor-pointer dark:bg-dark-input dark:text-dark-text`}
                                                             >
                                                                 <option value="admin">Administrador</option>
                                                                 <option value="gerente">Gerente</option>
@@ -1392,40 +1394,44 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                                 <option value="compras">Compras</option>
                                                                 <option value="user">Usuário</option>
                                                             </select>
+                                                            )}
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                                                            {(() => {
-                                                                const bloqueado = contaProtegida;
-                                                                return (
+                                                            {contaProtegida ? (
+                                                                <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${
+                                                                    usuario.isAdmin
+                                                                        ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200'
+                                                                        : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
+                                                                }`}>
+                                                                    {usuario.isAdmin ? '👑 Sim' : 'Não'}
+                                                                </span>
+                                                            ) : (
                                                                     <button
-                                                                        onClick={() => !bloqueado && handleToggleIsAdmin(usuario.id, !!usuario.isAdmin)}
-                                                                        disabled={bloqueado}
-                                                                        title={contaProtegida
-                                                                            ? 'Conta protegida do sistema'
-                                                                            : (usuario.isAdmin ? 'Remover permissão de administrador' : 'Conceder permissão de administrador (acesso universal exceto Logs)')}
+                                                                        onClick={() => handleToggleIsAdmin(usuario.id, !!usuario.isAdmin)}
+                                                                        title={usuario.isAdmin ? 'Remover permissão de administrador' : 'Conceder permissão de administrador (acesso universal exceto Logs)'}
                                                                         className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
-                                                                            bloqueado
-                                                                                ? 'bg-red-100 text-red-800 ring-1 ring-red-300 cursor-not-allowed opacity-90'
-                                                                                : usuario.isAdmin
-                                                                                    ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200 hover:bg-purple-200'
-                                                                                    : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-200'
+                                                                            usuario.isAdmin
+                                                                                ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200 hover:bg-purple-200'
+                                                                                : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-200'
                                                                         }`}
                                                                     >
                                                                         {usuario.isAdmin ? '👑 Sim' : 'Não'}
                                                                     </button>
-                                                                );
-                                                            })()}
+                                                            )}
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                            {contaProtegida ? (
+                                                                <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${
+                                                                    usuario.active
+                                                                        ? 'bg-green-100 text-green-800 ring-1 ring-green-200'
+                                                                        : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                                                                }`}>
+                                                                    {usuario.active ? '✅ Ativo' : '❌ Inativo'}
+                                                                </span>
+                                                            ) : (
                                                             <button
-                                                                onClick={() => !contaProtegida && handleToggleStatus(usuario.id, usuario.active)}
-                                                                disabled={contaProtegida}
-                                                                title={contaProtegida ? 'Conta protegida do sistema' : undefined}
+                                                                onClick={() => handleToggleStatus(usuario.id, usuario.active)}
                                                                 className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
-                                                                    contaProtegida
-                                                                        ? 'cursor-not-allowed opacity-70'
-                                                                        : ''
-                                                                } ${
                                                                     usuario.active
                                                                         ? 'bg-green-100 text-green-800 ring-1 ring-green-200 hover:bg-green-200'
                                                                         : 'bg-red-100 text-red-800 ring-1 ring-red-200 hover:bg-red-200'
@@ -1433,43 +1439,33 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                             >
                                                                 {usuario.active ? '✅ Ativo' : '❌ Inativo'}
                                                             </button>
+                                                            )}
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                                                            <div className="flex items-center justify-center gap-2">
-                                                                {/* Botão Editar - Gerente, admin, desenvolvedor ou usuário com isAdmin */}
-                                                                {(temPermissaoGerenciar || isSelf) && podeEditarCadastro && (
+                                                            {!contaProtegida ? (
+                                                                <div className="flex items-center justify-center gap-2">
+                                                                    {(temPermissaoGerenciar || isSelf) && (
+                                                                        <button
+                                                                            onClick={() => handleOpenModalEditar(usuario)}
+                                                                            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 ring-1 ring-blue-200 hover:bg-blue-200 transition-colors"
+                                                                            title="Editar usuário"
+                                                                        >
+                                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                            </svg>
+                                                                            Editar
+                                                                        </button>
+                                                                    )}
                                                                     <button
-                                                                        onClick={() => handleOpenModalEditar(usuario)}
-                                                                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 ring-1 ring-blue-200 hover:bg-blue-200 transition-colors"
-                                                                        title={isSelf && contaProtegida ? 'Editar seu cadastro (conta protegida)' : 'Editar usuário'}
+                                                                        onClick={() => handleOpenModalExcluir(usuario)}
+                                                                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-100 text-red-800 ring-1 ring-red-200 hover:bg-red-200 transition-colors"
+                                                                        title="Excluir usuário"
                                                                     >
-                                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                                        </svg>
-                                                                        Editar
+                                                                        <TrashIcon className="w-4 h-4" />
+                                                                        Excluir
                                                                     </button>
-                                                                )}
-                                                                {!contaProtegida && (
-                                                                <button
-                                                                    onClick={() => handleOpenModalExcluir(usuario)}
-                                                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-100 text-red-800 ring-1 ring-red-200 hover:bg-red-200 transition-colors"
-                                                                    title="Excluir usuário"
-                                                                >
-                                                                    <TrashIcon className="w-4 h-4" />
-                                                                    Excluir
-                                                                </button>
-                                                                )}
-                                                                {contaProtegida && !isSelf && (
-                                                                    <span className="text-xs font-semibold text-red-700 bg-red-50 px-2 py-1 rounded-lg ring-1 ring-red-200" title="Conta protegida do sistema">
-                                                                        🔒 Protegida
-                                                                    </span>
-                                                                )}
-                                                                {contaProtegida && isSelf && (
-                                                                    <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-lg ring-1 ring-amber-200" title="Somente você pode editar este cadastro">
-                                                                        🔒 Só você edita
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                                                                </div>
+                                                            ) : null}
                                                         </td>
                                                     </tr>
                                                 );})}
@@ -1478,9 +1474,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     </div>
                                     
                                     {/* Contador */}
-                                    <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                                        <p className="text-sm text-gray-600">
-                                            Exibindo <span className="font-bold text-gray-900">{usuariosFiltrados.length}</span> de <span className="font-bold text-gray-900">{usuarios.length}</span> usuários
+                                    <div className="px-6 py-4 bg-gray-50 dark:bg-dark-elevated border-t border-gray-200 dark:border-dark-border">
+                                        <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                            Exibindo <span className="font-bold text-gray-900 dark:text-dark-text">{usuariosFiltrados.length}</span> de <span className="font-bold text-gray-900 dark:text-dark-text">{usuarios.length}</span> usuários
                                         </p>
                                     </div>
                                 </div>

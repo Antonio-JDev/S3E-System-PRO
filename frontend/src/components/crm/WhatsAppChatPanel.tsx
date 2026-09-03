@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Archive,
@@ -41,7 +41,6 @@ import {
   fetchWhatsappProviderContacts,
   fetchWhatsappProviderContactsSearch,
   fetchWhatsappProviderGroups,
-  fetchWhatsappProviderProfilePicture,
   fetchWhatsappGroupParticipantCache,
   fetchWhatsappProviderContactMeta,
   postWhatsappUpsertContactCache,
@@ -94,7 +93,6 @@ import {
   postEvolutionGroupUpdateSetting,
   postEvolutionGroupToggleEphemeral,
   deleteEvolutionGroupLeave,
-  postEvolutionFetchProfilePicture,
   postEvolutionProfileFetchContact,
   postEvolutionProfileFetchBusiness,
   postEvolutionProfileUpdateName,
@@ -120,6 +118,11 @@ import { clientesService, type Cliente } from '../../services/clientesService';
 import { listContatosS3e, type ContatoS3eDto } from '../../services/contatosS3eService';
 import { getEmojiOnlyCount } from '../../utils/emojiOnly';
 import { getBackoffRemainingMs, registerBackoffSuccess, registerRateLimitBackoff } from '../../utils/rateLimitBackoff';
+import {
+  clearWhatsappProfilePictureMissing,
+  isWhatsappProfilePictureMissing,
+  markWhatsappProfilePictureMissing,
+} from '../../utils/whatsappProfilePictureSessionCache';
 import { onlyDigits } from '../../utils/masks';
 import { downloadInNewTab, openInNewTab } from '../../utils/browserLinks';
 import WhatsAppActionsDrawer from './WhatsAppActionsDrawer';
@@ -156,6 +159,7 @@ import {
   displayNameForChatHeader,
   resolveChatPreviewLabels,
   isWhatsappGroupChatId,
+  isWhatsappLidChatId,
   shortGroupIdLabel,
   stripOutboundPrefixForEdit,
   canonicalWhatsappChatId,
@@ -178,14 +182,30 @@ import {
   readStoredSidebarFilter,
   isCrmAdminUser,
 } from '../../utils/whatsappCrmHelpers';
+import { getWhatsAppProviderDashboardUrl } from '../../config/api';
 
-const FALLBACK_WHATSAPP_PROVIDER_DASHBOARD =
-  import.meta.env.VITE_WHATSAPP_PROVIDER_DASHBOARD_URL || 'http://localhost:3333/manager';
 const WHATSAPP_QR_ROTATION_MS = 75_000;
 
 const chatsQueryKey = ['whatsapp-chats'] as const;
 const archivedChatsQueryKey = ['whatsapp-archived-chats'] as const;
 const messagesQueryKey = (chatId: string) => ['whatsapp-messages', canonicalWhatsappChatId(chatId)] as const;
+/** Teto do cache local de mensagens por conversa (fetch inicial + socket). */
+const WA_MESSAGES_CACHE_MAX = 150;
+const WA_MESSAGES_QUERY_GC_MS = 2 * 60_000;
+
+function appendMessageCapped(
+  list: WhatsappMessageDto[],
+  msg: WhatsappMessageDto,
+  max = WA_MESSAGES_CACHE_MAX
+): WhatsappMessageDto[] {
+  if (list.some((x) => x.id === msg.id)) return list;
+  const next = [...list, msg];
+  return next.length <= max ? next : next.slice(-max);
+}
+
+function trimMessagesCache(list: WhatsappMessageDto[], max = WA_MESSAGES_CACHE_MAX): WhatsappMessageDto[] {
+  return list.length <= max ? list : list.slice(-max);
+}
 
 type SendTextMutationVars = {
   text: string;
@@ -203,30 +223,6 @@ const WA_SEND_CONTACT_MAX = 3;
 const WA_SEND_CONTACT_API_GAP_MS = 520;
 /** Máximo de linhas renderizadas no picker (evita travar o React). */
 const WA_SEND_CONTACT_PICKER_RENDER_CAP = 450;
-/** Máximo de fotos buscadas na agenda lateral (Evolution). */
-const WA_AGENDA_AVATAR_FETCH_CAP = 72;
-/** Máximo de chats da sidebar sem cache que disparam fetch de avatar. */
-const WA_LIST_AVATAR_FETCH_CAP = 24;
-/** Concorrência de fetches de avatar no browser (lista + agenda). */
-const WA_AVATAR_CLIENT_CONCURRENCY = 3;
-
-let waAvatarClientInFlight = 0;
-const waAvatarClientWaiters: Array<() => void> = [];
-
-async function withWhatsappAvatarClientSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (waAvatarClientInFlight >= WA_AVATAR_CLIENT_CONCURRENCY) {
-    await new Promise<void>((resolve) => {
-      waAvatarClientWaiters.push(resolve);
-    });
-  }
-  waAvatarClientInFlight += 1;
-  try {
-    return await fn();
-  } finally {
-    waAvatarClientInFlight -= 1;
-    waAvatarClientWaiters.shift()?.();
-  }
-}
 
 function pickFirstNonEmptyString(obj: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -937,23 +933,30 @@ const ContactAvatar = memo(function ContactAvatar({
   imageUrl,
   label,
   size,
+  eagerLoadProfilePicture = false,
   children,
 }: {
   chatId?: string;
   imageUrl?: string | null;
   label: string;
   size: 'list' | 'header';
+  /** Tenta o proxy `/profile-picture/image` mesmo sem URL cacheada (ex.: agenda aberta). */
+  eagerLoadProfilePicture?: boolean;
   children?: React.ReactNode;
 }) {
   const [imgErr, setImgErr] = useState(false);
   const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-12 w-12 text-[15px]';
-  const avatarSrc = chatId
-    ? whatsappProfilePictureImageUrl(chatId, true)
-    : whatsappCdnImageProxyUrl(imageUrl);
+  const hasPictureHint = Boolean((imageUrl || '').trim()) || eagerLoadProfilePicture;
+  const avatarSrc =
+    chatId && !isWhatsappProfilePictureMissing(chatId)
+      ? whatsappProfilePictureImageUrl(chatId, hasPictureHint)
+      : chatId
+        ? undefined
+        : whatsappCdnImageProxyUrl(imageUrl);
 
   useEffect(() => {
     setImgErr(false);
-  }, [chatId, imageUrl]);
+  }, [chatId, imageUrl, eagerLoadProfilePicture]);
 
   const showImg = Boolean(avatarSrc && !imgErr);
   return (
@@ -964,7 +967,13 @@ const ContactAvatar = memo(function ContactAvatar({
           alt=""
           className="h-full w-full rounded-full object-cover"
           loading="lazy"
-          onError={() => setImgErr(true)}
+          onLoad={() => {
+            if (chatId) clearWhatsappProfilePictureMissing(chatId);
+          }}
+          onError={() => {
+            if (chatId) markWhatsappProfilePictureMissing(chatId);
+            setImgErr(true);
+          }}
         />
       ) : (
         <div
@@ -2528,8 +2537,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         )
       );
     },
-    // Fallback se o Socket.io falhar (CORS, proxy, etc.)
-    refetchInterval: realtime.connected ? 60_000 : 20_000,
+    // Socket-first: lista atualiza via `whatsapp:chat_list_update`; polling só offline.
+    refetchInterval: realtime.connected ? false : 20_000,
     refetchIntervalInBackground: false,
   });
 
@@ -2567,12 +2576,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const cid = canonicalWhatsappChatId(chatId);
       const r = await fetchWhatsappMessages(cid);
       if (!r.success || !Array.isArray(r.data)) return [];
-      return r.data;
+      return trimMessagesCache(r.data);
     },
     enabled: Boolean(chatId),
     // Socket-first: quando tempo real está online, não precisa polling agressivo.
     refetchInterval: Boolean(chatId) ? (realtime.connected ? false : 60_000) : false,
     refetchIntervalInBackground: false,
+    gcTime: WA_MESSAGES_QUERY_GC_MS,
     retry: 1,
     retryDelay: 2_000,
   });
@@ -2999,73 +3009,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
   }, [chatId, contactMetaUpdatedAt, queryClient]);
 
-  const chatsNeedingAvatarFetch = useMemo(
-    () =>
-      chatList
-        .filter((c) => !(c.cachedProfilePictureUrl || '').trim())
-        .slice(0, WA_LIST_AVATAR_FETCH_CAP),
-    [chatList]
-  );
-
-  const profilePictures = useQueries({
-    queries: chatsNeedingAvatarFetch.map((c) => ({
-      queryKey: ['whatsapp-profile-picture', c.chatId] as const,
-      queryFn: async (): Promise<string | null> =>
-        withWhatsappAvatarClientSlot(async () => {
-          const r = await fetchWhatsappProviderProfilePicture(c.chatId);
-          if (!r.success || !r.data) return null;
-          return r.data.url ?? null;
-        }),
-      staleTime: 30 * 60 * 1000,
-      gcTime: 60 * 60 * 1000,
-      retry: false,
-      refetchOnWindowFocus: false,
-    })),
-  });
-
-  const profileUrlByChatId = useMemo(() => {
-    const m = new Map<string, string | null>();
-    chatsNeedingAvatarFetch.forEach((c, i) => {
-      m.set(c.chatId, profilePictures[i]?.data ?? null);
-    });
-    return m;
-  }, [chatsNeedingAvatarFetch, profilePictures]);
-
-  const agendaRowsForAvatarFetch = useMemo(
-    () => agendaDisplayedRowsSorted.slice(0, WA_AGENDA_AVATAR_FETCH_CAP),
-    [agendaDisplayedRowsSorted]
-  );
-
-  const contactAvatarQueries = useQueries({
-    queries: agendaRowsForAvatarFetch.map((row) => ({
-      queryKey: ['whatsapp-evolution-contact-avatar', row.id] as const,
-      queryFn: async (): Promise<string | null> =>
-        withWhatsappAvatarClientSlot(async () => {
-          try {
-            const r = await postEvolutionFetchProfilePicture({ number: row.id.trim() });
-            if (!r.success) return null;
-            const u = r.data?.profilePictureUrl;
-            return typeof u === 'string' && u.length > 0 ? u : null;
-          } catch {
-            return null;
-          }
-        }),
-      staleTime: 30 * 60 * 1000,
-      gcTime: 60 * 60 * 1000,
-      retry: false,
-      refetchOnWindowFocus: false,
-      enabled: contactsPanelOpen && agendaRowsForAvatarFetch.length > 0,
-    })),
-  });
-
-  const contactPicByContactId = useMemo(() => {
-    const m = new Map<string, string | null>();
-    agendaRowsForAvatarFetch.forEach((row, i) => {
-      m.set(row.id, contactAvatarQueries[i]?.data ?? null);
-    });
-    return m;
-  }, [agendaRowsForAvatarFetch, contactAvatarQueries]);
-
   const filteredChats = useMemo(() => {
     let list = chatList;
     if (chatSidebarFilter === 'unread') list = list.filter((c) => (c.unreadCount ?? 0) > 0);
@@ -3182,7 +3125,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   useEffect(() => {
     const c = connectionStatus?.connected;
-    const dash = connectionStatus?.dashboardUrl || FALLBACK_WHATSAPP_PROVIDER_DASHBOARD;
+    const dash = connectionStatus?.dashboardUrl || getWhatsAppProviderDashboardUrl();
     if (c === undefined) return;
     const prev = prevProviderConnRef.current;
     prevProviderConnRef.current = c;
@@ -3334,6 +3277,19 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     activeContactMeta?.group,
     providerContactRows,
     title,
+  ]);
+
+  /** Conversa @lid sem telefone real na agenda — envio falharia no backend. */
+  const lidOutboundUnresolved = useMemo(() => {
+    if (!chatId || isWhatsappGroupChatId(chatId) || !isWhatsappLidChatId(chatId)) return false;
+    const phoneDigits = onlyDigits(
+      activeContactMeta?.numeroContatoS3e ?? activePreview?.phoneNumberFromS3e ?? ''
+    );
+    return phoneDigits.length < 10;
+  }, [
+    chatId,
+    activeContactMeta?.numeroContatoS3e,
+    activePreview?.phoneNumberFromS3e,
   ]);
 
   const composerReplyMeta = useMemo(() => {
@@ -3822,11 +3778,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       }
       const normalizedMsg = { ...msg, chatId: storageCid };
 
-      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(storageCid), (old) => {
-        const merged = old ?? [];
-        if (merged.some((x) => x.id === normalizedMsg.id)) return merged;
-        return [...merged, normalizedMsg];
-      });
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(storageCid), (old) =>
+        appendMessageCapped(old ?? [], normalizedMsg)
+      );
 
       if (storageCid !== cid) {
         queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
@@ -4932,6 +4886,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     [deleteMessageMut]
   );
 
+  const handleDeleteForMe = useCallback(
+    (messageId: string) => {
+      if (deleteForMeMut.isPending) return;
+      deleteForMeMut.mutate(messageId);
+    },
+    [deleteForMeMut]
+  );
+
+  const handleReplyToMessage = useCallback((msg: WhatsappMessageDto) => {
+    setReplyToMessage(msg);
+  }, []);
+
+  const handleImageClick = useCallback((url: string) => {
+    setSelectedImageUrl(url);
+  }, []);
+
   useEffect(() => {
     setEditingId(null);
     setEditDraft('');
@@ -5554,8 +5524,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const normalized = { ...data, chatId: localCid };
       queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(localCid), (old) => {
         const list = (old ?? []).filter((x) => x.id !== variables.optimisticId);
-        if (list.some((x) => x.id === normalized.id)) return list;
-        return [...list, normalized];
+        return appendMessageCapped(list, normalized);
       });
       const serverCid = canonicalWhatsappChatId(data.chatId);
       if (serverCid !== localCid) {
@@ -5582,6 +5551,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const handleSend = useCallback(() => {
     const t = draftRef.current.trim();
     if (!t) return;
+    if (lidOutboundUnresolved) {
+      toast.error(
+        'Telefone deste contato não confirmado. Informe o número em Contatos S3E ou use "Buscar perfil" antes de enviar.'
+      );
+      return;
+    }
 
     const replySnapshot = replyToMessage;
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -5602,7 +5577,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     refocusComposer();
 
     sendMut.mutate({ text: t, optimisticId, replySnapshot });
-  }, [sendMut, refocusComposer, replyToMessage, outboundChatId, mergeMessage]);
+  }, [sendMut, refocusComposer, replyToMessage, outboundChatId, mergeMessage, lidOutboundUnresolved]);
 
   const handleOpenPhoneFromText = useCallback(
     async (rawDigits: string) => {
@@ -5710,7 +5685,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     window.open(
-                      connectionStatus?.dashboardUrl || FALLBACK_WHATSAPP_PROVIDER_DASHBOARD,
+                      connectionStatus?.dashboardUrl || getWhatsAppProviderDashboardUrl(),
                       '_blank',
                       'noopener,noreferrer'
                     );
@@ -6041,7 +6016,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             const rowPic =
               c.cachedProfilePictureUrl ||
               (c.chatId === chatId ? activeContactMeta?.profilePictureUrl : null) ||
-              profileUrlByChatId.get(c.chatId) ||
               null;
             return (
               <div
@@ -6261,7 +6235,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   onClick={() =>
-                    window.open(connectionStatus?.dashboardUrl || FALLBACK_WHATSAPP_PROVIDER_DASHBOARD, '_blank', 'noopener,noreferrer')
+                    window.open(connectionStatus?.dashboardUrl || getWhatsAppProviderDashboardUrl(), '_blank', 'noopener,noreferrer')
                   }
                   className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#008f6f]"
                 >
@@ -6622,8 +6596,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 Boolean(
                   activePreview?.cachedProfilePictureUrl ||
                     activeContactMeta?.profilePictureUrl ||
-                    profileUrlByChatId.get(chatId)
-                )
+                    contactPanelOpen
+                ) && !isWhatsappProfilePictureMissing(chatId)
               ) ? (
                 <img
                   src={
@@ -6632,12 +6606,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       Boolean(
                         activePreview?.cachedProfilePictureUrl ||
                           activeContactMeta?.profilePictureUrl ||
-                          profileUrlByChatId.get(chatId)
+                          contactPanelOpen
                       )
                     )!
                   }
                   alt=""
                   className="h-28 w-28 rounded-full object-cover shadow-md"
+                  onError={() => {
+                    if (chatId) markWhatsappProfilePictureMissing(chatId);
+                  }}
                 />
               ) : (
                 <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#dfe5e7] text-3xl font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
@@ -7322,7 +7299,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   waDigits.length >= 10
                     ? formatPhoneForDisplay(`${waDigits.replace(/^\+/, '')}@c.us`)
                     : row.number?.trim() || (String(row.id || '').toLowerCase().endsWith('@lid') ? 'ID interno (sem número na agenda)' : row.id);
-                const rowPic = contactPicByContactId.get(row.id) ?? null;
                 return (
                   <button
                     key={row.id}
@@ -7355,7 +7331,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   >
                     <ContactAvatar
                       chatId={canonicalWhatsappChatId(row.id)}
-                      imageUrl={rowPic}
+                      imageUrl={null}
+                      eagerLoadProfilePicture={contactsPanelOpen}
                       label={primary}
                       size="list"
                     />
@@ -7510,7 +7487,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   imageUrl={
                     activePreview?.cachedProfilePictureUrl ||
                     activeContactMeta?.profilePictureUrl ||
-                    profileUrlByChatId.get(chatId) ||
                     null
                   }
                   label={
@@ -7809,22 +7785,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               showGroupParticipant={activeIsGroup}
                               groupParticipantLabel={activeIsGroup ? resolveGroupParticipantLabel(m.participant) : null}
                               onDeleteMessage={handleDeleteMessage}
-                      onDeleteForMe={(messageId) => {
-                        if (deleteForMeMut.isPending) return;
-                        deleteForMeMut.mutate(messageId);
-                      }}
-                              onStartForwardSelection={(messageId) => startForwardSelectionMode(messageId)}
-                      onReplyToMessage={(msg) => {
-                        setReplyToMessage(msg);
-                      }}
-                      onEditMessage={startEditMessage}
-                      onReactToMessage={(msg, emoji) => {
-                        void reactToMessage(msg, emoji);
-                      }}
-                      onToggleFavoriteMessage={toggleFavoriteMessage}
-                      isFavoriteMessage={isFavoriteMessage}
-                              onImageClick={(url) => setSelectedImageUrl(url)}
-                              onNavigateWhatsappChat={(jid, label) => onNavigateChat?.(jid, label)}
+                              onDeleteForMe={handleDeleteForMe}
+                              onStartForwardSelection={startForwardSelectionMode}
+                              onReplyToMessage={handleReplyToMessage}
+                              onEditMessage={startEditMessage}
+                              onReactToMessage={reactToMessage}
+                              onToggleFavoriteMessage={toggleFavoriteMessage}
+                              isFavoriteMessage={isFavoriteMessage}
+                              onImageClick={handleImageClick}
+                              onNavigateWhatsappChat={onNavigateChat}
                               onOpenPhoneFromText={handleOpenPhoneFromText}
                               actionsDisabled={isInForwardSelectionMode}
                             />
@@ -8053,6 +8022,16 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   </div>
                 ) : null}
                 <div className="flex min-h-[52px] flex-col gap-2">
+                  {lidOutboundUnresolved ? (
+                    <div
+                      className="rounded-lg border border-amber-300/80 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+                      role="status"
+                    >
+                      Telefone deste contato ainda não foi confirmado. Cadastre o número em{' '}
+                      <strong>Contatos S3E</strong> ou use <strong>Buscar perfil</strong> no menu do chat antes de
+                      enviar mensagens.
+                    </div>
+                  ) : null}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -8300,7 +8279,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={!draft.trim()}
+                          disabled={!draft.trim() || lidOutboundUnresolved}
                           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
                           aria-label="Enviar"
                         >

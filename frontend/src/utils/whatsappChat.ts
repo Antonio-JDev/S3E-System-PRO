@@ -13,6 +13,10 @@ export function waJidToDigits(jid: string): string {
   return onlyDigits((jid || '').split('@')[0] || jid);
 }
 
+export function isWhatsappLidChatId(chatId: string): boolean {
+  return (chatId || '').trim().toLowerCase().endsWith('@lid');
+}
+
 /**
  * DM: `55...@c.us`. Grupos/newsletter preservam sufixo.
  * `@lid` deve ser preservado (evita colisão de cache e “vazamento” de nomes entre chats).

@@ -2,8 +2,14 @@ import { HORAS_COMERCIAIS_POR_DIA } from './apropriacaoOs';
 
 export { HORAS_COMERCIAIS_POR_DIA as HORAS_POR_DIARIA };
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+/** 4 casas — evita 1h virar 0,13d e reabrir como 1,04h (bug do round2 em 0,125). */
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+function roundHoras(n: number): number {
+  const r = Math.round(n * 100) / 100;
+  return Math.abs(r - Math.round(r)) < 0.001 ? Math.round(r) : r;
 }
 
 /** Converte dias + horas parciais em diárias equivalentes (ex.: 1d + 4h = 1,5d). */
@@ -14,15 +20,15 @@ export function diariasEquivalentes(dias: number, horas: number): number {
     d += Math.floor(h / HORAS_COMERCIAIS_POR_DIA);
     h = h % HORAS_COMERCIAIS_POR_DIA;
   }
-  return round2(d + h / HORAS_COMERCIAIS_POR_DIA);
+  return round4(d + h / HORAS_COMERCIAIS_POR_DIA);
 }
 
 /** Separa quantidade em diárias inteiras + horas restantes (para edição). */
 export function splitDiariasEquivalentes(qtd: number): { dias: number; horas: number } {
   const total = Number.isFinite(qtd) ? Math.max(0, qtd) : 0;
-  const diasInteiros = Math.floor(total);
+  const diasInteiros = Math.floor(total + 1e-9);
   const fracao = total - diasInteiros;
-  const horas = round2(fracao * HORAS_COMERCIAIS_POR_DIA);
+  const horas = roundHoras(fracao * HORAS_COMERCIAIS_POR_DIA);
   return { dias: diasInteiros, horas };
 }
 

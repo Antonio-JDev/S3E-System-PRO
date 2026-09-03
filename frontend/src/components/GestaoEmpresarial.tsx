@@ -17,6 +17,13 @@ import { getUploadUrl } from '../config/api';
 import { maskCpf, maskTelefoneBr, onlyDigits } from '../utils/masks';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/timeFormat';
 import { formatDatePtBrInSaoPaulo, formatDateTimePtBrInSaoPaulo, nowYmdInSaoPaulo } from '../utils/date';
+import {
+    botaoAtivoConferencia,
+    botaoHabilitadoConferencia,
+    ehFaltaDiaConferencia,
+    temCreditoAvaliacaoConferencia,
+    temDebitoAvaliacaoConferencia,
+} from '../utils/conferenciaPontoRh.util';
 import BIDashboard from './BIDashboard';
 import ResumoAdministrativo from './ResumoAdministrativo';
 import { DollarSign, Minus, Plus } from 'lucide-react';
@@ -622,6 +629,8 @@ const RHView: React.FC = () => {
     >({});
     const [salvandoComentarioRhDia, setSalvandoComentarioRhDia] = useState<number | null>(null);
     const [salvandoAvaliacaoRhDia, setSalvandoAvaliacaoRhDia] = useState<number | null>(null);
+    const [diasSelecionadosConferencia, setDiasSelecionadosConferencia] = useState<Set<number>>(new Set());
+    const [salvandoAvaliacaoRhLote, setSalvandoAvaliacaoRhLote] = useState(false);
     const [salvandoFeriadoDia, setSalvandoFeriadoDia] = useState<number | null>(null);
     const [faltaJustificadaModal, setFaltaJustificadaModal] = useState<{
         dia: number;
@@ -748,7 +757,7 @@ const RHView: React.FC = () => {
         try {
             setLoading(true);
             const [funcResp, metricasResp, beneficiosResp, shiftsResp] = await Promise.all([
-                funcionariosService.listar(),
+                funcionariosService.listar(rhCompetencia),
                 funcionariosService.obterMetricas(rhCompetencia),
                 beneficiosService.listar(),
                 rhService.listarWorkShifts(),
@@ -853,6 +862,10 @@ const RHView: React.FC = () => {
         }
         setComentariosRhEdicao(next);
     }, [folhaDetalhada]);
+
+    useEffect(() => {
+        setDiasSelecionadosConferencia(new Set());
+    }, [folhaDetalhada?.referencia?.ano, folhaDetalhada?.referencia?.mes, funcionarioFolha?.id]);
 
     useEffect(() => {
         setValorSimuladoBanco(null);
@@ -1129,6 +1142,101 @@ const RHView: React.FC = () => {
             toast.error('Erro ao salvar avaliação RH');
         } finally {
             setSalvandoAvaliacaoRhDia(null);
+        }
+    };
+
+    const handleAvaliacaoRhLote = async (botao: 'A' | 'B' | 'P' | 'D') => {
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia) return;
+        const dias = Array.from(diasSelecionadosConferencia).sort((a, b) => a - b);
+        if (dias.length === 0) {
+            toast.info('Selecione ao menos um dia.');
+            return;
+        }
+        setSalvandoAvaliacaoRhLote(true);
+        try {
+            const r = await rhService.salvarAvaliacaoDiaLote({
+                funcionarioId: funcionarioFolha.id,
+                referenciaAno: folhaDetalhada.referencia.ano,
+                referenciaMes: folhaDetalhada.referencia.mes,
+                dias,
+                botao,
+            });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao salvar avaliações em lote',
+                );
+                return;
+            }
+            const data = (r as { data?: { aplicados?: number[]; ignorados?: unknown[]; falhas?: unknown[] } })
+                .data;
+            const aplicados = data?.aplicados?.length ?? 0;
+            const ignorados = data?.ignorados?.length ?? 0;
+            const falhas = data?.falhas?.length ?? 0;
+            const labels: Record<string, string> = {
+                A: 'Abonado',
+                B: 'Banco de horas',
+                P: 'Pagar HE',
+                D: 'Descontar',
+            };
+            if (falhas > 0) {
+                toast.error(`${falhas} dia(s) com erro · ${aplicados} aplicado(s).`);
+            } else if (aplicados === 0) {
+                toast.info(`Nenhum dia elegível para ${labels[botao]} entre os selecionados.`);
+            } else {
+                toast.success(
+                    `${labels[botao]}: ${aplicados} dia(s)${ignorados > 0 ? ` · ${ignorados} ignorado(s)` : ''}`,
+                );
+            }
+            setDiasSelecionadosConferencia(new Set());
+            await recarregarFolhaAberta();
+            if (funcionarioVerDados?.id === funcionarioFolha.id) {
+                await carregarDados();
+                try {
+                    const resp = await axiosApiService.get(
+                        `/api/rh/folha/${funcionarioFolha.id}/${folhaMesRef || rhCompetencia}`,
+                    );
+                    const folha =
+                        resp && typeof resp === 'object' && 'data' in resp && (resp as any).data != null
+                            ? (resp as any).data
+                            : null;
+                    const resumo = folha?.bancoHorasResumo;
+                    if (resumo) {
+                        setBancoResumoVerDados({
+                            horasPositivas: Number(resumo.horasPositivas ?? 0),
+                            horasNegativas: Number(resumo.horasNegativas ?? 0),
+                            horasTotalLiquido: Number(resumo.horasTotalLiquido ?? 0),
+                        });
+                        setFuncionarioVerDados((prev: any) =>
+                            prev
+                                ? {
+                                      ...prev,
+                                      saldoHorasNegativas: Number(resumo.horasNegativas ?? 0),
+                                      saldoBancoHoras: Number(
+                                          folha?.registrado?.saldoBancoHorasAtual ?? resumo.horasPositivas ?? 0,
+                                      ),
+                                      saldoBancoHorasNormaisExcedente: Number(
+                                          folha?.registrado?.saldoBancoHorasNormaisAtual ??
+                                              resumo.horasPositivas ??
+                                              0,
+                                      ),
+                                      saldoBancoHorasExtras100: Number(
+                                          folha?.registrado?.saldoBancoHorasExtras100Atual ?? 0,
+                                      ),
+                                  }
+                                : prev,
+                        );
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao aplicar avaliações em lote');
+        } finally {
+            setSalvandoAvaliacaoRhLote(false);
         }
     };
 
@@ -4808,10 +4916,107 @@ const RHView: React.FC = () => {
                                                     Feriados nacionais e municipais (Itajaí/SC) aparecem na coluna ao lado — inclusive em segunda a sexta.
                                                 </span>
                                             </p>
+                                            {(() => {
+                                                const diasConferencia = (
+                                                    folhaDetalhada.conferenciaPonto as Array<{ dia: number }>
+                                                ).map((row) => row.dia);
+                                                const todosSelecionados =
+                                                    diasConferencia.length > 0 &&
+                                                    diasConferencia.every((dia) =>
+                                                        diasSelecionadosConferencia.has(dia),
+                                                    );
+                                                const algunsSelecionados =
+                                                    diasSelecionadosConferencia.size > 0 && !todosSelecionados;
+                                                return (
+                                                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between rounded-lg border border-indigo-200 dark:border-indigo-800/50 bg-indigo-50/60 dark:bg-indigo-950/20 px-3 py-2">
+                                                        <label className="inline-flex items-center gap-2 text-[11px] font-medium text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="rounded border-gray-300 dark:border-dark-border"
+                                                                checked={todosSelecionados}
+                                                                ref={(el) => {
+                                                                    if (el) el.indeterminate = algunsSelecionados;
+                                                                }}
+                                                                disabled={salvandoAvaliacaoRhLote || diasConferencia.length === 0}
+                                                                onChange={() => {
+                                                                    if (todosSelecionados) {
+                                                                        setDiasSelecionadosConferencia(new Set());
+                                                                    } else {
+                                                                        setDiasSelecionadosConferencia(new Set(diasConferencia));
+                                                                    }
+                                                                }}
+                                                            />
+                                                            Selecionar todos
+                                                            {diasSelecionadosConferencia.size > 0 && (
+                                                                <span className="text-indigo-700 dark:text-indigo-300">
+                                                                    ({diasSelecionadosConferencia.size} dia
+                                                                    {diasSelecionadosConferencia.size === 1 ? '' : 's'})
+                                                                </span>
+                                                            )}
+                                                        </label>
+                                                        <div
+                                                            className="flex flex-wrap items-center gap-1.5"
+                                                            title="Aplicar avaliação A/B/P/D nos dias selecionados"
+                                                        >
+                                                            <span className="text-[10px] text-gray-600 dark:text-gray-400 mr-1">
+                                                                Aplicar em lote:
+                                                            </span>
+                                                            {(
+                                                                [
+                                                                    {
+                                                                        key: 'A' as const,
+                                                                        title: 'Abonar atraso/falta nos dias selecionados',
+                                                                    },
+                                                                    {
+                                                                        key: 'B' as const,
+                                                                        title: 'Banco de horas nos dias selecionados',
+                                                                    },
+                                                                    {
+                                                                        key: 'P' as const,
+                                                                        title: 'Pagar HE na folha nos dias selecionados',
+                                                                    },
+                                                                    {
+                                                                        key: 'D' as const,
+                                                                        title: 'Descontar na folha nos dias selecionados',
+                                                                    },
+                                                                ] as const
+                                                            ).map((btn) => (
+                                                                <button
+                                                                    key={btn.key}
+                                                                    type="button"
+                                                                    title={btn.title}
+                                                                    disabled={
+                                                                        salvandoAvaliacaoRhLote ||
+                                                                        diasSelecionadosConferencia.size === 0
+                                                                    }
+                                                                    onClick={() => void handleAvaliacaoRhLote(btn.key)}
+                                                                    className={`min-w-[calc(1.5rem+10px)] min-h-[calc(1.5rem+10px)] rounded px-2 py-1 text-[12px] font-bold border transition-colors disabled:opacity-40 ${
+                                                                        btn.key === 'D'
+                                                                            ? 'bg-red-600 text-white border-red-700 hover:bg-red-700'
+                                                                            : btn.key === 'A'
+                                                                              ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700'
+                                                                              : btn.key === 'P'
+                                                                                ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'
+                                                                                : 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700'
+                                                                    }`}
+                                                                >
+                                                                    {salvandoAvaliacaoRhLote ? '…' : btn.key}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                             <div className="overflow-x-auto">
                                                 <table className="w-full text-xs border-collapse min-w-[980px]">
                                                     <thead>
                                                         <tr className="bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-gray-300">
+                                                            <th
+                                                                className="px-1 py-1.5 text-center border border-gray-200 dark:border-dark-border w-8"
+                                                                title="Selecionar dia para aplicação em lote"
+                                                            >
+                                                                <span className="sr-only">Sel.</span>
+                                                            </th>
                                                             <th className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border w-10">Dia</th>
                                                             <th className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border w-12">Sem.</th>
                                                             <th className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border w-36">
@@ -4829,7 +5034,7 @@ const RHView: React.FC = () => {
                                                                     HH:mm
                                                                 </span>
                                                             </th>
-                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Atraso na entrada além da tolerância de 5 minutos">
+                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title={`Atraso na entrada além da tolerância de ${folhaDetalhada.jornada?.toleranciaMinutos ?? 5} minutos`}>
                                                                 Atraso
                                                             </th>
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Saída antecipada (vermelho) ou horas extras além da jornada no dia (verde)">
@@ -4880,6 +5085,7 @@ const RHView: React.FC = () => {
                                                             minutosAtraso?: number;
                                                             minutosHorasDevidas?: number;
                                                             minutosExtra20?: number;
+                                                            minutosExtraTotal?: number;
                                                             intervaloAlmocoInicio?: string | null;
                                                             intervaloAlmocoFim?: string | null;
                                                             comentarioRh?: string | null;
@@ -4895,37 +5101,10 @@ const RHView: React.FC = () => {
                                                                 minutosDescontarFolha: number;
                                                             } | null;
                                                         }) => {
-                                                            const ehFaltaDia =
-                                                                !d.temRegistro &&
-                                                                !d.ehFimDeSemana &&
-                                                                !d.ehFeriado &&
-                                                                !d.faltaJustificada;
-                                                            const temDebitoAvaliacao =
-                                                                (d.minutosAtraso ?? 0) > 0 ||
-                                                                (d.minutosHorasDevidas ?? 0) > 0 ||
-                                                                ehFaltaDia ||
-                                                                d.tratamentoDebito === 'A' ||
-                                                                d.tratamentoDebito === 'B' ||
-                                                                d.tratamentoDebito === 'D';
-                                                            const temCreditoAvaliacao =
-                                                                (d.minutosExtraTotal ?? 0) > 0 ||
-                                                                (d.minutosExtra20 ?? 0) > 0 ||
-                                                                (d.ehFimDeSemana &&
-                                                                    d.temRegistro &&
-                                                                    Number(d.horasLiquidas ?? 0) > 0) ||
-                                                                d.tratamentoCredito === 'P' ||
-                                                                d.tratamentoCredito === 'B';
-                                                            const botaoAtivo: 'A' | 'B' | 'P' | 'D' | null =
-                                                                d.tratamentoDebito === 'A'
-                                                                    ? 'A'
-                                                                    : d.tratamentoDebito === 'D'
-                                                                      ? 'D'
-                                                                      : d.tratamentoCredito === 'P'
-                                                                        ? 'P'
-                                                                        : d.tratamentoDebito === 'B' ||
-                                                                            d.tratamentoCredito === 'B'
-                                                                          ? 'B'
-                                                                          : null;
+                                                            const ehFaltaDia = ehFaltaDiaConferencia(d);
+                                                            const temDebitoAvaliacao = temDebitoAvaliacaoConferencia(d);
+                                                            const temCreditoAvaliacao = temCreditoAvaliacaoConferencia(d);
+                                                            const botaoAtivo = botaoAtivoConferencia(d);
                                                             const bgRow = ehFaltaDia
                                                                 ? 'bg-red-50/90 dark:bg-red-950/30'
                                                                 : d.statusCompensacaoRh === 'PENDENTE'
@@ -5002,6 +5181,23 @@ const RHView: React.FC = () => {
                                                                 (d.decisaoRh != null && d.decisaoRh !== 'PENDENTE');
                                                             return (
                                                                 <tr key={d.dia} className={bgRow}>
+                                                                    <td className="px-1 py-1 border border-gray-200 dark:border-dark-border text-center align-top">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="rounded border-gray-300 dark:border-dark-border"
+                                                                            checked={diasSelecionadosConferencia.has(d.dia)}
+                                                                            disabled={salvandoAvaliacaoRhLote}
+                                                                            onChange={() => {
+                                                                                setDiasSelecionadosConferencia((prev) => {
+                                                                                    const next = new Set(prev);
+                                                                                    if (next.has(d.dia)) next.delete(d.dia);
+                                                                                    else next.add(d.dia);
+                                                                                    return next;
+                                                                                });
+                                                                            }}
+                                                                            title="Selecionar para aplicação em lote"
+                                                                        />
+                                                                    </td>
                                                                     <td
                                                                         className={`px-2 py-1 border border-gray-200 dark:border-dark-border align-top ${
                                                                             ehFaltaDia
@@ -5185,7 +5381,7 @@ const RHView: React.FC = () => {
                                                                         {(d.minutosAtraso ?? 0) > 0 ? (
                                                                             <span
                                                                                 className="font-mono font-bold text-red-600 dark:text-red-400"
-                                                                                title="Entrada além da tolerância de 5 minutos"
+                                                                                title={`Entrada além da tolerância de ${folhaDetalhada.jornada?.toleranciaMinutos ?? 5} minutos`}
                                                                             >
                                                                                 {minutesToHHmm(d.minutosAtraso ?? 0)}
                                                                             </span>
@@ -5198,7 +5394,7 @@ const RHView: React.FC = () => {
                                                                             {(d.minutosHorasDevidas ?? 0) > 0 ? (
                                                                                 <span
                                                                                     className="font-mono font-bold text-red-600 dark:text-red-400"
-                                                                                    title="Saída antes do horário previsto além da tolerância de 5 minutos"
+                                                                                    title={`Saída antes do horário previsto além da tolerância de ${folhaDetalhada.jornada?.toleranciaMinutos ?? 5} minutos`}
                                                                                 >
                                                                                     −{minutesToHHmm(d.minutosHorasDevidas ?? 0)}
                                                                                 </span>
@@ -5362,7 +5558,8 @@ const RHView: React.FC = () => {
                                                                                                 type="button"
                                                                                                 title={btn.title}
                                                                                                 disabled={
-                                                                                                    salvandoAvaliacaoRhDia === d.dia
+                                                                                                    salvandoAvaliacaoRhDia === d.dia ||
+                                                                                                    salvandoAvaliacaoRhLote
                                                                                                 }
                                                                                                 onClick={() => {
                                                                                                     if (!btn.enabled) {

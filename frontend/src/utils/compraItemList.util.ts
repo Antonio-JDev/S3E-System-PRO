@@ -1,3 +1,5 @@
+import { roundMoney } from './financeiroValor';
+
 /** Campos editáveis de um item na listagem da compra */
 export type CompraItemEditDraft = {
   productName: string;
@@ -17,6 +19,19 @@ export type CompraItemComTotais = {
   sku?: string;
   unidadeMedida?: string;
 };
+
+export function calcItemTotalCost(quantity: number, unitCost: number): number {
+  return roundMoney(quantity * unitCost);
+}
+
+function normalizarValoresMonetariosItem<T extends CompraItemComTotais>(item: T): T {
+  const unitCost = roundMoney(item.unitCost);
+  return {
+    ...item,
+    unitCost,
+    totalCost: calcItemTotalCost(item.quantity, unitCost),
+  };
+}
 
 export function itemParaDraft(item: CompraItemComTotais): CompraItemEditDraft {
   return {
@@ -41,7 +56,7 @@ export function aplicarDraftNoItem<T extends CompraItemComTotais>(
     return null;
   }
 
-  return {
+  return normalizarValoresMonetariosItem({
     ...item,
     productName,
     quantity,
@@ -50,7 +65,7 @@ export function aplicarDraftNoItem<T extends CompraItemComTotais>(
     ncm: draft.ncm.trim() || undefined,
     sku: draft.sku.trim() || undefined,
     unidadeMedida: draft.unidadeMedida || 'un'
-  };
+  });
 }
 
 export function atualizarCampoNumericoItem<T extends CompraItemComTotais>(
@@ -66,12 +81,12 @@ export function atualizarCampoNumericoItem<T extends CompraItemComTotais>(
 
   const quantity = campo === 'quantity' ? parsed : item.quantity;
   const unitCost = campo === 'unitCost' ? parsed : item.unitCost;
-  return {
+  return normalizarValoresMonetariosItem({
     ...item,
     quantity,
     unitCost,
     totalCost: quantity * unitCost
-  };
+  });
 }
 
 /** Converte texto digitado (aceita vírgula) em número decimal */
@@ -92,12 +107,12 @@ export function commitInlineNumericDraft<T extends CompraItemComTotais>(
   if (quantity === null || quantity <= 0 || unitCost === null || unitCost < 0) {
     return null;
   }
-  return {
+  return normalizarValoresMonetariosItem({
     ...item,
     quantity,
     unitCost,
     totalCost: quantity * unitCost
-  };
+  });
 }
 
 export function getInlineNumericDisplay(

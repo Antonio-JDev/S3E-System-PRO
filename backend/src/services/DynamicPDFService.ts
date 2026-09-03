@@ -381,7 +381,7 @@ export class DynamicPDFService {
 
             // Configurar conteúdo
             await page.setContent(html, {
-                waitUntil: 'networkidle0'
+                waitUntil: 'load'
             });
 
             // Gerar PDF

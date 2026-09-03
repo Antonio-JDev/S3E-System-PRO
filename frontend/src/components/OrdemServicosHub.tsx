@@ -19,7 +19,7 @@ import ActionsDropdown from './ui/ActionsDropdown';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses, compactNavTabClasses, compactActionBtnClasses, compactPagePaddingClasses, pageTabBarContainerClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
-import { calcularHomemHoraTotal, formatMoeda } from '../utils/apropriacaoOs';
+import { formatMoeda } from '../utils/apropriacaoOs';
 import {
   calcularCustoTempoOrcado,
   calcularDiasEstimadosTexto,
@@ -28,7 +28,7 @@ import {
 import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
-import { serverDateToInput, formatDateDisplay } from '../utils/date';
+import { serverDateToInput, formatDateDisplay, nowYmdInSaoPaulo, addDaysToYmd } from '../utils/date';
 import { projetoMatchesBusca } from '../utils/buscaOs.util';
 
 // ==================== ICONS ====================
@@ -296,12 +296,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [buscaOrcamento, setBuscaOrcamento] = useState('');
     const [openDropdownCliente, setOpenDropdownCliente] = useState(false);
     const [openDropdownOrcamento, setOpenDropdownOrcamento] = useState(false);
-
-    const homemHoraReservado = useMemo(() => {
-        const h = Number(formState.horasEngenhariaOrcadas) || 0;
-        const d = Number(formState.diariasEquipeOrcadas) || 0;
-        return calcularHomemHoraTotal(h, d);
-    }, [formState.horasEngenhariaOrcadas, formState.diariasEquipeOrcadas]);
 
     // ==================== CARREGAMENTO DE DADOS ====================
     useEffect(() => {
@@ -735,19 +729,16 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             toast.error('Selecione o gerente do projeto');
             return;
         }
-        if (!formState.dataInicio || !formState.dataPrevisao) {
-            toast.error('Informe as datas de início e fim');
-            return;
-        }
-        const horas = Number(formState.horasEngenhariaOrcadas) || 0;
-        const diarias = Number(formState.diariasEquipeOrcadas) || 0;
-        if (horas <= 0 && diarias <= 0) {
-            toast.error('Informe horas de engenharia ou diárias de equipe orçadas');
-            return;
-        }
         try {
             if (projetoToEdit) {
-                const { orcamentoId: _orcamentoId, ...updatePayload } = formState;
+                const updatePayload: UpdateProjetoData = {
+                    titulo: formState.titulo,
+                    descricao: formState.descricao,
+                    tipo: formState.tipo,
+                    clienteId: formState.clienteId,
+                    responsavelId: formState.responsavelId,
+                    exigeVistoriaCelesc: formState.exigeVistoriaCelesc,
+                };
                 const response = await projetosService.atualizar(projetoToEdit.id, updatePayload);
                 if (response.success && response.data) {
                     const updated = response.data;
@@ -767,7 +758,27 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     toast.success('Ordem de serviço atualizada');
                 }
             } else {
-                const response = await projetosService.criar(formState);
+                const orcamento = orcamentos.find((o) => o.id === formState.orcamentoId);
+                const hoje = nowYmdInSaoPaulo();
+                const amanha = addDaysToYmd(hoje, 1);
+                const createPayload: CreateProjetoData = {
+                    ...formState,
+                    dataInicio:
+                        formState.dataInicio ||
+                        (orcamento?.previsaoInicio
+                            ? serverDateToInput(orcamento.previsaoInicio)
+                            : hoje),
+                    dataPrevisao:
+                        formState.dataPrevisao ||
+                        (orcamento?.previsaoTermino
+                            ? serverDateToInput(orcamento.previsaoTermino)
+                            : amanha),
+                    horasEngenhariaOrcadas: 0,
+                    diariasEquipeOrcadas: 0,
+                    valorHoraEngenharia: null,
+                    valorDiariaEquipe: null,
+                };
+                const response = await projetosService.criar(createPayload);
                 if (response.success && response.data) {
                     const created = response.data;
                     const responsavelUsuario = created.responsavelId
@@ -1686,14 +1697,14 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         <p className="text-sm text-gray-700">
-                                            {new Date(projeto.dataInicio).toLocaleDateString('pt-BR')}
+                                            {formatDateDisplay(projeto.dataInicio as string)}
                                         </p>
                                         {(projeto.status === 'CONCLUIDO' || projeto.dataConclusao || projeto.dataFim) && (
                                             <p className="text-xs text-emerald-700 mt-1">
                                                 Conc.:{' '}
-                                                {new Date(
+                                                {formatDateDisplay(
                                                     (projeto.dataConclusao || projeto.dataFim) as string
-                                                ).toLocaleDateString('pt-BR')}
+                                                )}
                                                 {projeto.concluidoPor?.nome
                                                     ? ` · ${projeto.concluidoPor.nome}`
                                                     : ''}
@@ -1765,16 +1776,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                         placeholder="Descreva a ordem de serviço..."
                                     />
-                                </div>
-
-                                <div className="md:col-span-2 p-4 rounded-xl bg-indigo-50 dark:bg-dark-elevated border border-indigo-200 dark:border-indigo-800/40">
-                                    <div className="text-sm font-semibold text-indigo-900 dark:text-indigo-300">Recursos reservados (homem-hora)</div>
-                                    <div className="text-2xl font-bold text-indigo-700 dark:text-indigo-300 mt-1">
-                                        {homemHoraReservado.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h
-                                    </div>
-                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                        {Number(formState.horasEngenhariaOrcadas) || 0}h engenharia + {Number(formState.diariasEquipeOrcadas) || 0} diárias × 8h
-                                    </p>
                                 </div>
 
                                 <div className="relative">
@@ -1905,86 +1906,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                             ⚠️ Nenhum orçamento aprovado encontrado. Crie e aprove um orçamento primeiro.
                                         </p>
                                     )}
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Data de Início
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={formState.dataInicio}
-                                        onChange={(e) => setFormState({...formState, dataInicio: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Data Fim *
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={formState.dataPrevisao}
-                                        onChange={(e) => setFormState({...formState, dataPrevisao: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Horas Engenharia Orçadas *
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.5"
-                                        value={formState.horasEngenhariaOrcadas ?? 0}
-                                        onChange={(e) => setFormState({...formState, horasEngenhariaOrcadas: Number(e.target.value)})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Execução orçada (diárias) *
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.5"
-                                        value={formState.diariasEquipeOrcadas ?? 0}
-                                        onChange={(e) => setFormState({...formState, diariasEquipeOrcadas: Number(e.target.value)})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Valor Hora Engenharia (R$)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={formState.valorHoraEngenharia ?? ''}
-                                        onChange={(e) => setFormState({...formState, valorHoraEngenharia: e.target.value === '' ? null : Number(e.target.value)})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Valor execução (R$/diária)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={formState.valorDiariaEquipe ?? ''}
-                                        onChange={(e) => setFormState({...formState, valorDiariaEquipe: e.target.value === '' ? null : Number(e.target.value)})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
                                 </div>
 
                                 <div className="md:col-span-2">

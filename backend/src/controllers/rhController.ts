@@ -31,6 +31,7 @@ import {
 import { buildContentDisposition } from '../utils/filename.util';
 import {
   salvarAvaliacaoRhDia,
+  salvarAvaliacaoRhDiaLote,
   salvarComentarioConferenciaDia,
 } from '../services/rhComentarioConferencia.service';
 import {
@@ -822,6 +823,56 @@ export const RhController = {
       return res
         .status(400)
         .json({ success: false, message: error?.message ?? 'Erro ao salvar avaliação RH' });
+    }
+  },
+
+  /** PUT /api/rh/conferencia-ponto/avaliacao-lote — A/B/P/D em vários dias */
+  async salvarAvaliacaoConferenciaLote(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const { funcionarioId, referenciaAno, referenciaMes, dias, botao } = body as {
+        funcionarioId?: unknown;
+        referenciaAno?: unknown;
+        referenciaMes?: unknown;
+        dias?: unknown;
+        botao?: unknown;
+      };
+
+      if (!funcionarioId || referenciaAno == null || referenciaMes == null) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno e referenciaMes são obrigatórios',
+        });
+      }
+
+      if (!Array.isArray(dias) || dias.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Informe ao menos um dia em dias[]',
+        });
+      }
+
+      const botaoNorm = String(botao ?? '').trim().toUpperCase();
+      if (botaoNorm !== 'A' && botaoNorm !== 'B' && botaoNorm !== 'P' && botaoNorm !== 'D') {
+        return res.status(400).json({
+          success: false,
+          message: 'botao deve ser A, B, P ou D',
+        });
+      }
+
+      const data = await salvarAvaliacaoRhDiaLote({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: parseInt(String(referenciaAno), 10),
+        referenciaMes: parseInt(String(referenciaMes), 10),
+        dias: dias.map((d) => parseInt(String(d), 10)),
+        botao: botaoNorm,
+      });
+
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao salvar avaliações em lote' });
     }
   },
 

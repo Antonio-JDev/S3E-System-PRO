@@ -1,25 +1,34 @@
-/** Dias até a data de vencimento (negativo = já vencido). */
-export function calcularDiasAteVencimento(data: Date | string | null | undefined): number | null {
-  if (data == null || data === '') return null;
-  const raw = typeof data === 'string' ? data.trim() : data;
-  const venc =
-    typeof raw === 'string'
-      ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T12:00:00` : raw)
-      : new Date(raw);
-  if (Number.isNaN(venc.getTime())) return null;
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-  venc.setHours(0, 0, 0, 0);
-  return Math.round((venc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+import {
+  dataReferenciaDiaCivilUtc,
+  parseDataDiaCivilInput,
+  ymdCivilBrasilia,
+  ymdDeDataDiaCivil,
+} from './datetime-sp.util';
+/** Dias até a data de vencimento (negativo = já vencido). Referência: dia civil em Brasília. */
+export function calcularDiasAteVencimento(
+  data: Date | string | null | undefined,
+  agora: Date = new Date(),
+): number | null {
+  const vencYmd = ymdDeDataDiaCivil(data);
+  if (!vencYmd) return null;
+  const [vy, vm, vd] = vencYmd.split('-').map(Number);
+  const hoje = ymdCivilBrasilia(agora);
+  const vencDate = dataReferenciaDiaCivilUtc(vy, vm, vd);
+  const hojeDate = dataReferenciaDiaCivilUtc(hoje.ano, hoje.mes, hoje.dia);
+  return Math.round((vencDate.getTime() - hojeDate.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-export function enriquecerVencimentosVeiculo(veiculo: {
-  dataVencimentoIpva?: Date | string | null;
-  dataVencimentoLicenciamento?: Date | string | null;
-}) {
-  const diasAteVencimentoIpva = calcularDiasAteVencimento(veiculo.dataVencimentoIpva);
+export function enriquecerVencimentosVeiculo(
+  veiculo: {
+    dataVencimentoIpva?: Date | string | null;
+    dataVencimentoLicenciamento?: Date | string | null;
+  },
+  agora: Date = new Date(),
+) {
+  const diasAteVencimentoIpva = calcularDiasAteVencimento(veiculo.dataVencimentoIpva, agora);
   const diasAteVencimentoLicenciamento = calcularDiasAteVencimento(
-    veiculo.dataVencimentoLicenciamento
+    veiculo.dataVencimentoLicenciamento,
+    agora,
   );
   return {
     diasAteVencimentoIpva,
@@ -30,3 +39,6 @@ export function enriquecerVencimentosVeiculo(veiculo: {
       diasAteVencimentoLicenciamento != null && diasAteVencimentoLicenciamento <= 30,
   };
 }
+
+/** Reexport para serviços de frota persistirem datas sem shift de timezone. */
+export { parseDataDiaCivilInput };

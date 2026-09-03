@@ -49,8 +49,10 @@ import { upsertContatoS3eFromInboundMessage } from './contatosS3e.service';
 import * as EvoChat from './whatsappEvolutionChat.service';
 import { isEvolutionProviderKind } from './whatsappProvider.evolution';
 import { withWhatsappSendLock } from './whatsappSendQueue.service';
+import fs from 'node:fs/promises';
 import {
   isLocalInboundMediaUrl,
+  resolveLocalInboundMediaPath,
   saveInboundMediaBase64ToDisk
 } from './whatsappInboundMedia.service';
 
@@ -2028,15 +2030,34 @@ export async function persistWhatsappContactCache(params: {
     }
   }
 
-  // Compatibilidade: se houver caches antigos salvos em variações de chatId (ex.: @lid),
-  // mantém os registros alinhados sem criar novas linhas extras.
-  const variants = storageChatIdVariants(cid).filter((v) => canonicalWhatsappChatId(v) === cid && v !== cid);
-  if (variants.length > 0) {
-    await prisma.whatsappContactCache.updateMany({
-      where: { chatId: { in: variants } },
-      data: updateData
-    });
+  // Replica cache para variantes LID↔PN do mesmo contato lógico.
+  try {
+    const identities = await loadWhatsappChatIdentities();
+    const allVariants = expandedStorageChatIdVariants(cid, identities);
+    for (const variant of allVariants) {
+      const vCanon = canonicalWhatsappChatId(variant);
+      if (!vCanon || vCanon === cid) continue;
+      const vPhoneKey = normalizePhoneDigitsKey(waJidToDigits(vCanon));
+      const vStorePhone =
+        Boolean(vPhoneKey) &&
+        vPhoneKey.length >= 10 &&
+        vPhoneKey.length <= 15 &&
+        !vCanon.toLowerCase().endsWith('@lid');
+      await prisma.whatsappContactCache.upsert({
+        where: { chatId: vCanon },
+        create: {
+          chatId: vCanon,
+          displayName: dn,
+          profilePictureUrl: pic,
+          phoneDigits: vStorePhone ? vPhoneKey : null
+        },
+        update: updateData
+      });
+    }
+  } catch {
+    // best-effort
   }
+
   const saved = await prisma.whatsappContactCache.findUnique({ where: { chatId: cid }, select: { displayName: true, profilePictureUrl: true } });
   emitWhatsAppChatMeta({ chatId: cid, displayName: saved?.displayName ?? dn, profilePictureUrl: saved?.profilePictureUrl ?? pic });
 }
@@ -2507,11 +2528,24 @@ async function readMediaBytesForRow(row: {
   chatId: string;
   fromMe?: boolean;
   mediaUrl?: string | null;
+  mediaMimetype?: string | null;
   providerMessageId?: string | null;
 }): Promise<{ buffer: Buffer; contentType: string }> {
   const rangeHeader = undefined;
   let res: Response | null = null;
   const mu = (row.mediaUrl || '').trim();
+  if (mu && isLocalInboundMediaUrl(mu)) {
+    const abs = resolveLocalInboundMediaPath(mu);
+    if (!abs) throw new Error('Referência de mídia local inválida.');
+    try {
+      const buffer = await fs.readFile(abs);
+      const contentType =
+        (row.mediaMimetype || 'application/octet-stream').trim() || 'application/octet-stream';
+      return { buffer, contentType };
+    } catch {
+      throw new Error('Arquivo de mídia não encontrado em disco para encaminhar.');
+    }
+  }
   if (mu) {
     const internal = resolveWhatsappProviderInternalFetchUrl(mu);
     if (internal) {
@@ -2597,7 +2631,9 @@ export async function forwardWhatsappMessagesFromUser(params: {
 
     const { buffer, contentType } = await readMediaBytesForRow({
       chatId: row.chatId,
+      fromMe: row.fromMe,
       mediaUrl: row.mediaUrl,
+      mediaMimetype: row.mediaMimetype,
       providerMessageId: row.providerMessageId,
     });
     const mediaType = providerMediaTypeFromRow({

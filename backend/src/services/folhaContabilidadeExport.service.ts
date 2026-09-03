@@ -7,8 +7,7 @@ import {
   resolverEmpresaFiscalExportacao,
 } from './folhaContabilidadeConfig.service';
 import {
-  competenciaParaSerialExcel,
-  linhaTemDados,
+  formatarCompetenciaMesAno,
   montarLinhaContabil,
   montarMatrizPlanilhaContabil,
   somarAjudaCustoBeneficios,
@@ -103,17 +102,16 @@ export async function gerarExportacaoFolhaContabil(mes: string): Promise<{
     });
   });
 
-  const linhasComDados = linhasExport.filter(linhaTemDados);
   const matriz = montarMatrizPlanilhaContabil(
     {
       codigoEmpresa: config.codigoEmpresaContabil ?? '329',
       razaoSocial: empresa.razaoSocial,
       cnpj: empresa.cnpj,
-      competenciaSerial: competenciaParaSerialExcel(ano, mesNum),
+      competenciaLabel: formatarCompetenciaMesAno(ano, mesNum),
       percentualHe: config.percentualHeFolhaContabil,
       rubricas: config.rubricasFolhaContabil,
     },
-    linhasComDados.length > 0 ? linhasComDados : linhasExport,
+    linhasExport,
   );
 
   const ws = XLSX.utils.aoa_to_sheet(matriz);
@@ -125,7 +123,16 @@ export async function gerarExportacaoFolhaContabil(mes: string): Promise<{
     ano,
     mes: mesNum,
     totalColaboradores: funcionarios.length,
-    colaboradoresComDados: linhasComDados.length,
+    colaboradoresComDados: linhasExport.filter((l) =>
+      l.heConfiguravel !== '' ||
+      l.he100 !== '' ||
+      l.noturno !== '' ||
+      l.dsrFaltasH !== '' ||
+      l.ajudaCusto !== '' ||
+      l.adiantamento !== '' ||
+      l.diasFaltas !== '' ||
+      l.faltasParciais !== ''
+    ).length,
     avisos,
     linhas: linhasExport.slice(0, 50).map((l) => ({
       nome: l.nome,

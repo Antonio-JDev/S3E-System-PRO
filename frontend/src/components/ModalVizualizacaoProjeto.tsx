@@ -31,6 +31,12 @@ import { ordemServicosService } from '../services/ordemServicosService';
 import type { Obra } from '../services/obrasService';
 import OsVisaoGeralTab from './os/OsVisaoGeralTab';
 import { statusBadgeClass, statusLabel } from '../utils/osStatus.util';
+import {
+  entregaQuadroVazia,
+  exigeFormularioEntregaQuadro,
+  extrairEntregaQuadro,
+  validarEntregaQuadroForm,
+} from '../utils/osWorkflow.util';
 import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util';
 import OsCronogramaAlocacaoTab from './os/OsCronogramaAlocacaoTab';
 import {
@@ -101,6 +107,7 @@ export interface ProjetoDetalhe {
   id: string;
   titulo: string;
   descricao?: string | null;
+  tipo?: string;
   cliente: ClienteRef;
   orcamento?: OrcamentoRef;
   status: ProjetoStatus;
@@ -197,8 +204,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     responsaveisIds?: string[];
     responsavelNome?: string;
     criadoPorNome?: string;
+    metadados?: unknown;
   }
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [alterandoTipoOs, setAlterandoTipoOs] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskEditando, setTaskEditando] = useState<Task | null>(null);
   const [previewTask, setPreviewTask] = useState<Task | null>(null);
@@ -209,7 +218,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     dataInicio: '',
     responsavelId: '',
     responsavelIds: [] as string[],
-    status: 'A Fazer' as 'A Fazer' | 'Em Andamento' | 'Concluído'
+    status: 'A Fazer' as 'A Fazer' | 'Em Andamento' | 'Concluído',
+    entregaQuadro: entregaQuadroVazia(),
   });
   const [usuariosDisponiveis, setUsuariosDisponiveis] = useState<any[]>([]);
   const [kanbanSearch, setKanbanSearch] = useState('');
@@ -324,7 +334,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     if (isOpen && activeTab === 'Cronograma & Alocação') {
       carregarObraVinculada();
     }
-    if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status === 'EXECUCAO' || projeto.status === 'CONCLUIDO')) {
+    if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status !== 'CANCELADO')) {
       void carregarResumoApropriacao();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -340,10 +350,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
   }
 
-  useF1Key(
-    isOpen && projeto.status === 'EXECUCAO' && !apontamentoOpen,
-    () => setApontamentoOpen(true)
-  );
+  const podeApontar =
+    isOpen && projeto.status !== 'CANCELADO' && !apontamentoOpen;
+
+  useF1Key(podeApontar, () => setApontamentoOpen(true));
 
   async function carregarUsuarios() {
     try {
@@ -374,7 +384,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : undefined,
           responsavelId: t.responsavel || '',
           responsaveisIds: Array.isArray(t.responsaveisIds) ? t.responsaveisIds : (t.responsavel ? [t.responsavel] : []),
-          criadoPorNome: t.criadoPor?.name || undefined
+          criadoPorNome: t.criadoPor?.name || undefined,
+          metadados: t.metadados ?? undefined,
         }));
         setTasks(tasksFormatadas);
       }
@@ -1399,11 +1410,40 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   useEscapeKey(uploadModalOpen, () => setUploadModalOpen(false));
   useEscapeKey(clienteModalOpen, () => setClienteModalOpen(false));
 
+  async function handleAlterarTipoOs(novoTipo: string) {
+    if (projeto.status === 'CONCLUIDO' || novoTipo === projeto.tipo) return;
+    setAlterandoTipoOs(true);
+    try {
+      const response = await projetosService.atualizar(projeto.id, { tipo: novoTipo });
+      if (response.success) {
+        const criadas = (response as { tasksWorkflowCriadas?: number }).tasksWorkflowCriadas ?? 0;
+        toast.success(
+          criadas > 0
+            ? `Tipo atualizado. ${criadas} tarefa(s) adicionadas ao Kanban.`
+            : 'Tipo da ordem de serviço atualizado.',
+        );
+        if (onRefresh) await onRefresh();
+        await carregarTasks();
+        if (criadas > 0) setActiveTab('Kanban');
+      } else {
+        toast.error(response.error || 'Erro ao alterar tipo da OS');
+      }
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Erro ao alterar tipo da OS';
+      toast.error(message);
+    } finally {
+      setAlterandoTipoOs(false);
+    }
+  }
+
   // Funções de Tasks
   function handleAbrirModalTask(task?: Task) {
     if (task) {
       setTaskEditando(task);
       const ids = (task.responsaveisIds && task.responsaveisIds.length) ? task.responsaveisIds : (task.responsavelId ? [task.responsavelId] : []);
+      const entregaSalva = extrairEntregaQuadro(task.metadados);
       setTaskForm({
         titulo: task.titulo,
         descricao: task.descricao,
@@ -1413,7 +1453,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         dataInicio: task.dataInicio || localYmdFromDate(new Date()),
         responsavelId: ids[0] || '',
         responsavelIds: ids,
-        status: task.status
+        status: task.status,
+        entregaQuadro: entregaSalva
+          ? { ...entregaQuadroVazia(), ...entregaSalva }
+          : entregaQuadroVazia(),
       });
     } else {
       setTaskEditando(null);
@@ -1424,7 +1467,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         dataInicio: localYmdFromDate(new Date()),
         responsavelId: '',
         responsavelIds: [],
-        status: 'A Fazer'
+        status: 'A Fazer',
+        entregaQuadro: entregaQuadroVazia(),
       });
     }
     setTaskModalOpen(true);
@@ -1436,21 +1480,35 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       return;
     }
 
-    // Mapear status do frontend para o backend
+    const tituloEfetivo = taskForm.titulo;
+    const exigeEntrega = exigeFormularioEntregaQuadro(projeto.tipo, tituloEfetivo);
     const statusBackend = taskForm.status === 'A Fazer' ? 'ToDo' : taskForm.status === 'Em Andamento' ? 'Doing' : 'Done';
+
+    if (exigeEntrega && statusBackend === 'Done') {
+      const erroEntrega = validarEntregaQuadroForm(taskForm.entregaQuadro);
+      if (erroEntrega) {
+        toast.error(erroEntrega);
+        return;
+      }
+    }
+
     const responsaveis = (taskForm.responsavelIds && taskForm.responsavelIds.length) ? taskForm.responsavelIds : (taskForm.responsavelId ? [taskForm.responsavelId] : []);
     const prazoEfetivo = taskForm.prazo || addDaysToYmd(localYmdFromDate(new Date()), 1);
+    const payloadBase: Record<string, unknown> = {
+      titulo: taskForm.titulo,
+      descricao: taskForm.descricao,
+      prazo: prazoEfetivo,
+      dataInicio: taskForm.dataInicio || null,
+      status: statusBackend,
+      responsaveis: responsaveis.length ? responsaveis : undefined,
+    };
+    if (exigeEntrega) {
+      payloadBase.metadados = { entregaQuadro: taskForm.entregaQuadro };
+    }
 
     try {
       if (taskEditando) {
-        const response = await axiosApiService.put(`/api/projetos/${projeto.id}/tasks/${taskEditando.id}`, {
-          titulo: taskForm.titulo,
-          descricao: taskForm.descricao,
-          prazo: prazoEfetivo,
-          dataInicio: taskForm.dataInicio || null,
-          status: statusBackend,
-          responsaveis: responsaveis.length ? responsaveis : undefined
-        });
+        const response = await axiosApiService.put(`/api/projetos/${projeto.id}/tasks/${taskEditando.id}`, payloadBase);
 
         if (response.success) {
           toast.success('✅ Tarefa atualizada com sucesso!');
@@ -1460,12 +1518,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         }
       } else {
         const response = await axiosApiService.post(`/api/projetos/${projeto.id}/tasks`, {
-          titulo: taskForm.titulo,
-          descricao: taskForm.descricao,
-          prazo: prazoEfetivo,
+          ...payloadBase,
           dataInicio: taskForm.dataInicio || undefined,
-          status: statusBackend,
-          responsaveis: responsaveis.length ? responsaveis : undefined
         });
 
         if (response.success) {
@@ -1485,15 +1539,32 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         dataInicio: localYmdFromDate(new Date()),
         responsavelId: '',
         responsavelIds: [],
-        status: 'A Fazer'
+        status: 'A Fazer',
+        entregaQuadro: entregaQuadroVazia(),
       });
     } catch (error: any) {
       console.error('Erro ao salvar task:', error);
-      toast.error('❌ Erro ao salvar tarefa: ' + (error.message || 'Erro desconhecido'));
+      toast.error('❌ Erro ao salvar tarefa: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
     }
   }
 
   async function handleMoverTask(taskId: string, novoStatus: 'A Fazer' | 'Em Andamento' | 'Concluído') {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    if (
+      novoStatus === 'Concluído' &&
+      exigeFormularioEntregaQuadro(projeto.tipo, task.titulo) &&
+      validarEntregaQuadroForm(
+        extrairEntregaQuadro(task.metadados) ?? entregaQuadroVazia(),
+      )
+    ) {
+      handleAbrirModalTask(task);
+      setTaskForm((prev) => ({ ...prev, status: 'Concluído' }));
+      toast.info('Preencha os dados de entrega do quadro antes de concluir.');
+      return;
+    }
+
     // Mapear status do frontend para o backend
     const statusBackend = novoStatus === 'A Fazer' ? 'ToDo' : novoStatus === 'Em Andamento' ? 'Doing' : 'Done';
     
@@ -1935,6 +2006,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               onNavigate={onNavigate}
               onClose={onClose}
               onAbrirCronograma={() => setActiveTab('Cronograma & Alocação')}
+              tipoOs={projeto.tipo}
+              podeAlterarTipoOs={projeto.status !== 'CONCLUIDO' && projeto.status !== 'CANCELADO'}
+              alterandoTipoOs={alterandoTipoOs}
+              onAlterarTipoOs={handleAlterarTipoOs}
             />
           )}
 
@@ -2849,10 +2924,27 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         {formatMoeda(resumoApropriacao.custoRealizado)}
                       </div>
                       <div className="text-[10px] text-gray-500 mt-0.5">
-                        F1: {formatMoeda(resumoApropriacao.custoApontamento ?? 0)} · confirmado:{' '}
-                        {formatMoeda(resumoApropriacao.custoCalendario ?? 0)} · previsto:{' '}
+                        F1 confirmado: {formatMoeda(resumoApropriacao.custoApontamento ?? 0)} · F1 aguardando execução:{' '}
+                        {formatMoeda(resumoApropriacao.custoApontamentoPrevisto ?? 0)} · calendário confirmado:{' '}
+                        {formatMoeda(resumoApropriacao.custoCalendario ?? 0)} · calendário previsto:{' '}
                         {formatMoeda(resumoApropriacao.custoCalendarioPrevisto ?? 0)}
                       </div>
+                      {resumoApropriacao.valorFechado > 0 && (
+                        <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">
+                          Custo realizado vs valor orçado:{' '}
+                          {(
+                            (resumoApropriacao.custoRealizado / resumoApropriacao.valorFechado) *
+                            100
+                          ).toFixed(1)}
+                          % · projetado:{' '}
+                          {(
+                            ((resumoApropriacao.custoProjetado ?? resumoApropriacao.custoRealizado) /
+                              resumoApropriacao.valorFechado) *
+                            100
+                          ).toFixed(1)}
+                          %
+                        </div>
+                      )}
                       <div className="text-[10px] text-sky-700 dark:text-sky-300 mt-0.5">
                         Projetado (real + previsão): {formatMoeda(resumoApropriacao.custoProjetado ?? resumoApropriacao.custoRealizado)}
                       </div>
@@ -3021,6 +3113,101 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   />
                 </div>
 
+                {/* Entrega do quadro (OS Quadros e Painéis) */}
+                {exigeFormularioEntregaQuadro(projeto.tipo, taskForm.titulo || taskEditando?.titulo) && (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/10 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                      Entrega do quadro
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                          Data da entrega *
+                        </label>
+                        <input
+                          type="date"
+                          value={taskForm.entregaQuadro.dataEntrega || ''}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              entregaQuadro: { ...taskForm.entregaQuadro, dataEntrega: e.target.value },
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                          Entregue por *
+                        </label>
+                        <input
+                          type="text"
+                          value={taskForm.entregaQuadro.entregadorNome || ''}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              entregaQuadro: { ...taskForm.entregaQuadro, entregadorNome: e.target.value },
+                            })
+                          }
+                          placeholder="Nome de quem entregou"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                          Recebido por *
+                        </label>
+                        <input
+                          type="text"
+                          value={taskForm.entregaQuadro.recebedorNome || ''}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              entregaQuadro: { ...taskForm.entregaQuadro, recebedorNome: e.target.value },
+                            })
+                          }
+                          placeholder="Nome de quem recebeu"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                          Local de entrega/recebimento *
+                        </label>
+                        <input
+                          type="text"
+                          value={taskForm.entregaQuadro.localRecebimento || ''}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              entregaQuadro: { ...taskForm.entregaQuadro, localRecebimento: e.target.value },
+                            })
+                          }
+                          placeholder="Ex.: Obra do cliente, fábrica S3E..."
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(taskForm.entregaQuadro.recebidoNoLocal)}
+                        onChange={(e) =>
+                          setTaskForm({
+                            ...taskForm,
+                            entregaQuadro: {
+                              ...taskForm.entregaQuadro,
+                              recebidoNoLocal: e.target.checked,
+                            },
+                          })
+                        }
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      Recebido no local da obra/cliente
+                    </label>
+                  </div>
+                )}
+
                 {/* Status */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -3083,6 +3270,20 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     <span className="font-semibold text-gray-800 dark:text-gray-200">Responsável(is): </span>
                     {getNomesResponsaveisTask(previewTask, usuariosDisponiveis)}
                   </span>
+                  {exigeFormularioEntregaQuadro(projeto.tipo, previewTask.titulo) && (() => {
+                    const entrega = extrairEntregaQuadro(previewTask.metadados);
+                    if (!entrega) return null;
+                    return (
+                      <div className="sm:col-span-2 mt-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 text-xs space-y-1">
+                        <p className="font-semibold text-amber-900 dark:text-amber-200">Entrega do quadro</p>
+                        {entrega.dataEntrega && <p>Data: {formatDateDisplay(entrega.dataEntrega)}</p>}
+                        {entrega.entregadorNome && <p>Entregue por: {entrega.entregadorNome}</p>}
+                        {entrega.recebedorNome && <p>Recebido por: {entrega.recebedorNome}</p>}
+                        {entrega.localRecebimento && <p>Local: {entrega.localRecebimento}</p>}
+                        <p>{entrega.recebidoNoLocal ? 'Recebido no local' : 'Recebido fora do local'}</p>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   <span className="font-semibold text-gray-800 dark:text-gray-200">Tarefa criada por </span>
@@ -3786,12 +3987,16 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         data={kitComposicaoModal.data}
       />
 
-      {projeto.status === 'EXECUCAO' && isOpen && (
+      {podeApontar && (
         <button
           type="button"
           onClick={() => setApontamentoOpen(true)}
           className="fixed bottom-6 right-6 z-[70] px-4 py-3 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-lg text-sm"
-          title="Apontamento rápido (F1)"
+          title={
+            projeto.status === 'EXECUCAO' || projeto.status === 'CONCLUIDO'
+              ? 'Apontamento rápido (F1)'
+              : 'Apontamento aguardando execução (F1) — contabiliza ao iniciar a obra'
+          }
         >
           Apontar (F1)
         </button>

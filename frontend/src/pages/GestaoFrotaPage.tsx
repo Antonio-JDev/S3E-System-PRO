@@ -4,6 +4,7 @@ import { veiculosService, gastosVeiculoService } from '../services/gerenciamento
 import { financeiroService } from '../services/financeiroService';
 import { useAuth } from '../hooks/useAuth';
 import { hasPermission } from '../utils/permissions';
+import { formatDatePtBrInSaoPaulo, nowYmdInSaoPaulo, serverDateToInput } from '../utils/date';
 import { FleetIcon } from '../constants';
 import {
     AlertDialog,
@@ -37,17 +38,6 @@ interface GestaoFrotaPageProps {
     toggleSidebar: () => void;
 }
 
-function formatYmdForInput(raw: unknown): string {
-    if (raw == null || raw === '') return '';
-    if (typeof raw === 'string') {
-        const t = raw.trim();
-        if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-        if (t.length >= 10) return t.slice(0, 10);
-    }
-    if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw.toISOString().slice(0, 10);
-    return '';
-}
-
 function formatLabelDiasVencimento(dias: number | null | undefined): string {
     if (dias == null) return 'Sem data';
     if (dias < 0) return `Vencido há ${Math.abs(dias)} dia(s)`;
@@ -78,7 +68,7 @@ const gastoFormVazio = (veiculoId = '') => ({
     tipo: 'Combustível',
     descricao: '',
     valor: '',
-    data: new Date().toISOString().split('T')[0],
+    data: nowYmdInSaoPaulo(),
     km: '',
     litros: '',
     responsavel: '',
@@ -186,22 +176,25 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
     };
 
     const filtrarGastosPorPeriodo = () => {
-        const agora = new Date();
-        const filtrados = gastosVeiculo.filter(gasto => {
-            const dataGasto = new Date(gasto.data);
-            
+        const hojeYmd = nowYmdInSaoPaulo();
+        const [hy, hm] = hojeYmd.split('-').map(Number);
+
+        return gastosVeiculo.filter((gasto) => {
+            const gastoYmd = serverDateToInput(gasto.data);
+            if (!gastoYmd) return false;
+            const [gy, gm, gd] = gastoYmd.split('-').map(Number);
+
             if (filtroGastoPeriodo === 'semana') {
-                const umaSemanaAtras = new Date(agora);
-                umaSemanaAtras.setDate(agora.getDate() - 7);
-                return dataGasto >= umaSemanaAtras;
-            } else if (filtroGastoPeriodo === 'mes') {
-                return dataGasto.getMonth() === agora.getMonth() && 
-                       dataGasto.getFullYear() === agora.getFullYear();
-            } else { // ano
-                return dataGasto.getFullYear() === agora.getFullYear();
+                const hojeDate = new Date(hy, hm - 1, Number(hojeYmd.split('-')[2]));
+                const gastoDate = new Date(gy, gm - 1, gd);
+                const diffDias = Math.floor((hojeDate.getTime() - gastoDate.getTime()) / (1000 * 60 * 60 * 24));
+                return diffDias >= 0 && diffDias <= 7;
             }
+            if (filtroGastoPeriodo === 'mes') {
+                return gy === hy && gm === hm;
+            }
+            return gy === hy;
         });
-        return filtrados;
     };
 
     const handleExcluirVeiculo = (veiculoId: string, modelo: string, placa: string) => {
@@ -240,7 +233,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
 
         const valor = parseFloat(gastoVisualizando.valor);
         const descricao = `Frota - ${gastoVisualizando.tipo} | ${veiculoSelecionado.modelo} (${veiculoSelecionado.placa})`;
-        const dataVencimento = new Date(gastoVisualizando.data).toISOString().split('T')[0];
+        const dataVencimento = serverDateToInput(gastoVisualizando.data);
 
         try {
             // Criar conta a pagar tipo FROTA (não despesa fixa) e dar baixa = registra só nas movimentações
@@ -257,7 +250,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                 return;
             }
 
-            const hoje = new Date().toISOString().split('T')[0];
+            const hoje = nowYmdInSaoPaulo();
             const pagarRes = await financeiroService.pagarContaPagar(criarRes.data.id, {
                 dataPagamento: hoje,
                 valorPago: valor,
@@ -323,8 +316,8 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                 tipo: veiculo.tipo || 'Carro',
                 ano: veiculo.ano || new Date().getFullYear(),
                 kmAtual: veiculo.kmAtual ?? 0,
-                dataVencimentoIpva: formatYmdForInput(veiculo.dataVencimentoIpva),
-                dataVencimentoLicenciamento: formatYmdForInput(veiculo.dataVencimentoLicenciamento),
+                dataVencimentoIpva: serverDateToInput(veiculo.dataVencimentoIpva),
+                dataVencimentoLicenciamento: serverDateToInput(veiculo.dataVencimentoLicenciamento),
             });
         } else {
             setEditingVeiculoId(null);
@@ -347,7 +340,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                 tipo: gasto.tipo || 'Combustível',
                 descricao: gasto.descricao || '',
                 valor: String(gasto.valor ?? ''),
-                data: formatYmdForInput(gasto.data) || new Date().toISOString().split('T')[0],
+                data: serverDateToInput(gasto.data) || nowYmdInSaoPaulo(),
                 km: gasto.km != null ? String(gasto.km) : '',
                 litros: gasto.litros != null ? String(gasto.litros) : '',
                 responsavel: gasto.responsavel || '',
@@ -983,8 +976,8 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                 <div className="bg-gray-50 dark:bg-dark-elevated rounded-xl p-4">
                                     <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-1">💳 Vencimento IPVA</p>
                                     <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">
-                                        {formatYmdForInput(veiculoSelecionado.dataVencimentoIpva)
-                                            ? new Date(formatYmdForInput(veiculoSelecionado.dataVencimentoIpva)).toLocaleDateString('pt-BR')
+                                        {serverDateToInput(veiculoSelecionado.dataVencimentoIpva)
+                                            ? formatDatePtBrInSaoPaulo(veiculoSelecionado.dataVencimentoIpva)
                                             : 'Não informado'}
                                     </p>
                                     <p className={`text-xs mt-1 px-2 py-0.5 rounded inline-block ${badgeVencimentoClass(veiculoSelecionado.diasAteVencimentoIpva)}`}>
@@ -994,8 +987,8 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                 <div className="bg-gray-50 dark:bg-dark-elevated rounded-xl p-4">
                                     <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-1">📋 Vencimento Licenciamento</p>
                                     <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">
-                                        {formatYmdForInput(veiculoSelecionado.dataVencimentoLicenciamento)
-                                            ? new Date(formatYmdForInput(veiculoSelecionado.dataVencimentoLicenciamento)).toLocaleDateString('pt-BR')
+                                        {serverDateToInput(veiculoSelecionado.dataVencimentoLicenciamento)
+                                            ? formatDatePtBrInSaoPaulo(veiculoSelecionado.dataVencimentoLicenciamento)
                                             : 'Não informado'}
                                     </p>
                                     <p className={`text-xs mt-1 px-2 py-0.5 rounded inline-block ${badgeVencimentoClass(veiculoSelecionado.diasAteVencimentoLicenciamento)}`}>
@@ -1112,7 +1105,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                                 {filtrarGastosPorPeriodo().map((gasto) => (
                                                     <tr key={gasto.id} className="hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors">
                                                         <td className="px-4 py-3 text-sm text-gray-900 dark:text-dark-text">
-                                                            {new Date(gasto.data).toLocaleDateString('pt-BR')}
+                                                            {formatDatePtBrInSaoPaulo(gasto.data)}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm">
                                                             <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${
@@ -1245,7 +1238,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                 <div className="bg-gray-50 dark:bg-dark-elevated rounded-xl p-4">
                                     <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-1">📅 Data</p>
                                     <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">
-                                        {new Date(gastoVisualizando.data).toLocaleDateString('pt-BR')}
+                                        {formatDatePtBrInSaoPaulo(gastoVisualizando.data)}
                                     </p>
                                 </div>
                             </div>
@@ -1385,7 +1378,7 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                 <p className="text-gray-700 dark:text-dark-text-secondary">
                                     Tem certeza que deseja excluir o gasto de{' '}
                                     <span className="font-bold text-gray-900 dark:text-dark-text">{gastoParaDeletar?.tipo}</span>
-                                    {' '}({new Date(gastoParaDeletar?.data || '').toLocaleDateString('pt-BR')})?
+                                    {' '}({formatDatePtBrInSaoPaulo(gastoParaDeletar?.data)})?
                                 </p>
                                 <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
                                     R$ {gastoParaDeletar?.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

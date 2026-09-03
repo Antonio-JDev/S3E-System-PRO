@@ -4,6 +4,7 @@ import {
   calcValorARegistrar,
   calcValorBaseFromEfetivo,
   formatBRL,
+  parcelaQuitadaPorPagamento,
 } from './financeiroValor';
 
 describe('financeiroValor (frontend)', () => {
@@ -35,6 +36,16 @@ describe('financeiroValor (frontend)', () => {
 
     it('formatBRL formata em pt-BR', () => {
       expect(formatBRL(960)).toMatch(/960,00/);
+    });
+  });
+
+  describe('parcelaQuitadaPorPagamento', () => {
+    it('aceita base igual ao saldo com desconto na hora do pagamento', () => {
+      expect(parcelaQuitadaPorPagamento(1698.85, 1698.85, 8)).toBe(true);
+    });
+
+    it('aceita título com desconto embutido (base − desconto = saldo)', () => {
+      expect(parcelaQuitadaPorPagamento(900, 1000, 100)).toBe(true);
     });
   });
 });

@@ -1,3 +1,5 @@
+import { chaveDiaUtc, ymdDeDataDiaCivil } from './datetime-sp.util';
+
 export interface GastoCombustivelInput {
   data: Date | string;
   km: number | null | undefined;
@@ -34,14 +36,10 @@ const TIPO_COMBUSTIVEL = 'Combustível';
 const QUEDA_THRESHOLD = 0.15;
 
 function toYmd(d: Date | string): string {
-  if (typeof d === 'string') {
-    const t = d.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
-    const parsed = new Date(t);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-    return t.slice(0, 10);
-  }
-  return d.toISOString().slice(0, 10);
+  const ymd = ymdDeDataDiaCivil(d);
+  if (ymd) return ymd;
+  if (typeof d === 'string') return d.trim().slice(0, 10);
+  return chaveDiaUtc(d);
 }
 
 function mesKey(d: Date | string): string {

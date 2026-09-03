@@ -104,7 +104,7 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
             <div className="flex items-center justify-center py-16">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando dashboard financeiro...</p>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando dashboard financeiro...</p>
                 </div>
             </div>
         );
@@ -112,11 +112,11 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
 
     if (error) {
         return (
-            <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
-                <p className="text-red-800 font-medium">⚠️ {error}</p>
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-2xl p-6">
+                <p className="text-red-800 dark:text-red-300 font-medium">⚠️ {error}</p>
                 <button
                     onClick={loadDashboardData}
-                    className="mt-3 text-red-700 hover:text-red-900 font-medium underline"
+                    className="mt-3 text-red-700 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 font-medium underline"
                 >
                     Tentar novamente
                 </button>
@@ -129,13 +129,13 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
             {/* Cards de Estatísticas */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* Total a Receber */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 flex items-center justify-center">
-                            <ArrowTrendingUpIcon className="w-6 h-6 text-green-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/40 dark:to-green-800/30 flex items-center justify-center">
+                            <ArrowTrendingUpIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">A Receber</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">A Receber</p>
                             <p className="text-2xl font-bold text-green-600">
                                 R$ {(resumo?.contasReceber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
@@ -144,13 +144,13 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                 </div>
 
                 {/* Total a Pagar */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
-                            <ArrowTrendingDownIcon className="w-6 h-6 text-red-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/40 dark:to-red-800/30 flex items-center justify-center">
+                            <ArrowTrendingDownIcon className="w-6 h-6 text-red-600 dark:text-red-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">A Pagar</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">A Pagar</p>
                             <p className="text-2xl font-bold text-red-600">
                                 R$ {(resumo?.contasPagar || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
@@ -159,13 +159,13 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                 </div>
 
                 {/* Saldo Previsto */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
-                            <BanknotesIcon className="w-6 h-6 text-blue-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/40 dark:to-blue-800/30 flex items-center justify-center">
+                            <BanknotesIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Saldo Previsto</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Saldo Previsto</p>
                             <p className={`text-2xl font-bold ${
                                 (resumo?.saldoAtual || 0) >= 0 ? 'text-blue-600' : 'text-red-600'
                             }`}>
@@ -176,13 +176,13 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                 </div>
 
                 {/* Lucro Líquido */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 flex items-center justify-center">
-                            <ChartBarIcon className="w-6 h-6 text-purple-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/40 dark:to-purple-800/30 flex items-center justify-center">
+                            <ChartBarIcon className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Lucro Líquido</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Lucro Líquido</p>
                             <p className={`text-2xl font-bold ${
                                 (resumo?.lucroLiquido || 0) >= 0 ? 'text-purple-600' : 'text-red-600'
                             }`}>
@@ -195,12 +195,12 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
 
             {/* Alertas */}
             {(resumo && (resumo.receitaMes < resumo.despesaMes)) && (
-                <div className="bg-orange-50 border-2 border-orange-300 rounded-2xl p-6">
+                <div className="bg-orange-50 dark:bg-orange-950/40 border-2 border-orange-300 dark:border-orange-800/60 rounded-2xl p-6">
                     <div className="flex items-start gap-4">
-                        <ExclamationTriangleIcon className="w-8 h-8 text-orange-600 flex-shrink-0" />
+                        <ExclamationTriangleIcon className="w-8 h-8 text-orange-600 dark:text-orange-400 flex-shrink-0" />
                         <div>
-                            <h3 className="text-lg font-semibold text-orange-900 mb-2">⚠️ Atenção ao Fluxo de Caixa</h3>
-                            <p className="text-orange-800">
+                            <h3 className="text-lg font-semibold text-orange-900 dark:text-orange-300 mb-2">⚠️ Atenção ao Fluxo de Caixa</h3>
+                            <p className="text-orange-800 dark:text-orange-200/90">
                                 As despesas do mês (R$ {(resumo.despesaMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) 
                                 estão maiores que as receitas (R$ {(resumo.receitaMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). 
                                 Revise os pagamentos e considere ações para melhorar o fluxo de caixa.
@@ -213,8 +213,8 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
             {/* Gráficos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Gráfico de Fluxo de Caixa */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-6 flex items-center gap-2">
                         <ChartBarIcon className="w-6 h-6 text-emerald-600" />
                         Fluxo de Caixa Mensal
                     </h3>
@@ -275,8 +275,8 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                 </div>
 
                 {/* Gráfico de Comparativo */}
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-6 flex items-center gap-2">
                         <BanknotesIcon className="w-6 h-6 text-emerald-600" />
                         Receitas vs Despesas
                     </h3>

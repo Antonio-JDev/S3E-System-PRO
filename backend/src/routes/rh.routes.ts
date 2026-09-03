@@ -61,6 +61,7 @@ router.put(
 router.delete('/justificativa-parcial/:id', RhController.excluirJustificativaParcial);
 router.put('/conferencia-ponto/comentario', RhController.salvarComentarioConferencia);
 router.put('/conferencia-ponto/avaliacao', RhController.salvarAvaliacaoConferencia);
+router.put('/conferencia-ponto/avaliacao-lote', RhController.salvarAvaliacaoConferenciaLote);
 router.put(
   '/feriado-override',
   authorize('admin', 'desenvolvedor'),

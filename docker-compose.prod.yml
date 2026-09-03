@@ -19,7 +19,7 @@
 # 2. Em cada PC: hosts → 192.168.100.228  app.s3eengenharia.com.br
 # 3. Fora da LAN: Tailscale (IP 100.74.201.62) — NÃO use Funnel público
 # 4. docker compose -f docker-compose.prod.yml --env-file .env up -d
-# 5. Frontend: rebuild se mudar URL (--build-arg VITE_API_URL=http://app.s3eengenharia.com.br)
+# 5. Frontend: build SEM VITE_API_URL fixo (mesma origem / Traefik /api) — ver frontend/Dockerfile
 # 6. Postgres EvoGo dedicado (`postgres-evogo`): evogo_auth + evogo_users
 #    Cutover a partir do Postgres do ERP: ./docker/postgres/migrate-evogo-to-dedicated.sh
 #    Sessão WhatsApp: volume evolution_go_dbdata (NÃO apagar)
@@ -118,7 +118,7 @@ services:
 
   # Evolution Go — serviço `whatsapp-provider` (backend: WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080)
   whatsapp-provider:
-    image: evoapicloud/evolution-go:0.7.1
+    image: evoapicloud/evolution-go:0.7.2
     container_name: s3e-whatsapp-provider-prod
     restart: unless-stopped
     shm_size: "2gb"
@@ -139,7 +139,7 @@ services:
       DATABASE_SAVE_MESSAGES: "false"
       WADEBUG: ${EVOLUTION_GO_WADEBUG:-INFO}
       LOGTYPE: console
-      CONNECT_ON_STARTUP: "false"
+      CONNECT_ON_STARTUP: "true"
       WEBHOOK_FILES: "true"
       WEBHOOK_URL: http://backend:3001/api/webhooks/whatsapp
       OS_NAME: Linux
@@ -175,17 +175,13 @@ services:
       start_period: 90s
 
   backend:
-    image: odev10antonio/s3e-backend:2.1.7
+    image: odev10antonio/s3e-backend:2.2.3
     container_name: s3e-backend-prod
     restart: unless-stopped
     dns:
       - 8.8.8.8
       - 8.8.4.4
     dns_search: []
-    extra_hosts:
-      - "sefaz.sc.gov.br:200.146.71.70"
-      - "nfe.sefaz.sc.gov.br:200.146.71.70"
-      - "www.sefazvirtual.fazenda.gov.br:200.198.239.34"
     env_file:
       - .env
     environment:
@@ -220,7 +216,7 @@ services:
       WHATSAPP_PROVIDER_INTEGRATION: ${WHATSAPP_PROVIDER_INTEGRATION:-WHATSAPP-BAILEYS}
       WHATSAPP_PROVIDER_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
       WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN: ${WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN:-}
-      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-http://192.168.100.228:3333/manager}
+      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-}
       WHATSAPP_PROVIDER_PUBLIC_URL: ${WHATSAPP_PROVIDER_PUBLIC_URL:-http://192.168.100.228:3333}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:-}
       WHATSAPP_MEDIA_ALLOWED_HOSTS: ${WHATSAPP_MEDIA_ALLOWED_HOSTS:-mmg.whatsapp.net,pps.whatsapp.net}
@@ -247,7 +243,7 @@ services:
         condition: service_started
     networks:
       - traefik
-    command: sh -c "npx prisma migrate deploy && node dist/app.js"
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/app.js"
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
       interval: 30s
@@ -281,7 +277,7 @@ services:
       - "traefik.http.services.s3e-api.loadbalancer.server.port=3001"
 
   frontend:
-    image: odev10antonio/s3e-frontend:2.1.7
+    image: odev10antonio/s3e-frontend:2.2.3
     container_name: s3e-frontend-prod
     restart: unless-stopped
     dns:
@@ -308,6 +304,8 @@ services:
     image: dpage/pgadmin4:8.11
     container_name: s3e-pgadmin-prod
     restart: unless-stopped
+    ports:
+      - "5050:80"
     env_file:
       - .env
     environment:

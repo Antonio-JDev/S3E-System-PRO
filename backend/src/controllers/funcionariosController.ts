@@ -5,7 +5,8 @@ export const FuncionariosController = {
     // GET /api/funcionarios
     async listar(req: Request, res: Response) {
         try {
-            const funcionarios = await FuncionariosService.listarFuncionarios();
+            const mesRef = typeof req.query.mes === 'string' ? req.query.mes : undefined;
+            const funcionarios = await FuncionariosService.listarFuncionarios(mesRef);
 
             // Se o role do usuário estiver na lista que não deve ver salários, removemos esse campo
             const userRole = (req as any).user?.role?.toLowerCase();

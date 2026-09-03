@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { ContaStatus } from '../types/index';
 import { RhService } from './rh.service';
 import { LancamentoFolhaCategoria } from '@prisma/client';
-import { calcValorBaseFromEfetivo, parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import { calcValorBaseFromEfetivo, parseMoney, parcelaQuitadaPorPagamento, validarValoresFinanceiros } from '../utils/financeiroValor.util';
 import { randomUUID } from 'crypto';
 import {
     calcularValoresParcelas,
@@ -636,9 +636,20 @@ export class ContasPagarService {
         }
 
         if (conta.tipo !== 'RH') {
-            if (Math.abs(valorEfetivoPago - conta.valorParcela) > 0.01) {
+            const baseQuitacao =
+                valorJuros != null || valorDesconto != null
+                    ? (valorPago != null ? parseMoney(valorPago) : baseExistente)
+                    : valorPago != null
+                      ? parseMoney(valorPago)
+                      : baseExistente;
+            const descontoQuitacao =
+                valorDesconto != null ? parseMoney(valorDesconto) : descontoExistente;
+            if (!parcelaQuitadaPorPagamento(conta.valorParcela, baseQuitacao, descontoQuitacao, {
+                valorDescontoExistente: descontoExistente,
+                valorJurosExistente: jurosExistentes,
+            })) {
                 throw new Error(
-                    `Valor a registrar (R$ ${valorEfetivoPago.toFixed(2)}) deve quitar o saldo da parcela (R$ ${conta.valorParcela.toFixed(2)}). Verifique juros e descontos.`
+                    `Valor base (R$ ${baseQuitacao.toFixed(2)}) deve quitar o saldo da parcela (R$ ${conta.valorParcela.toFixed(2)}). Verifique juros e descontos.`
                 );
             }
         } else if (valorEfetivoPago > conta.valorParcela + 0.01) {

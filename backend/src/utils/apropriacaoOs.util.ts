@@ -47,9 +47,13 @@ export interface ResultadoOsCalculado extends TotaisApropriacao {
   custoCalendario: number;
   /** Custo de eventos PREVISAO (ocupação futura / projetado) */
   custoCalendarioPrevisto: number;
+  /** Apontamento F1 salvo antes da OS entrar em execução (aguardando contabilização) */
+  custoApontamentoPrevisto: number;
+  horasEngenhariaApontamentoPrevisto: number;
+  diariasEquipeApontamentoPrevisto: number;
   /** custoApontamento + custoCalendario (somente confirmado) */
   custoRealizado: number;
-  /** custoRealizado + custoCalendarioPrevisto */
+  /** custoRealizado + custoCalendarioPrevisto + custoApontamentoPrevisto */
   custoProjetado: number;
   valorFechado: number;
   resultado: number;
@@ -96,31 +100,57 @@ export interface TotaisCalendarioOs {
   linhas?: LinhaCustoCalendarioResumo[];
 }
 
+export interface OpcoesResultadoOs {
+  /** Quando false, apontamentos F1 ficam em "previsto" até a OS entrar em execução */
+  apontamentoContabilizado?: boolean;
+  /** Custo F1 já calculado por colaborador (RH). Se omitido, usa taxas genéricas da OS. */
+  custoApontamentoItens?: number;
+}
+
 export function calcularResultadoOs(
   projeto: DadosPlanejamentoOs,
   totais: TotaisApropriacao,
   calendario?: TotaisCalendarioOs,
+  opts?: OpcoesResultadoOs,
 ): ResultadoOsCalculado {
   const horasEngenhariaOrcadas = Number(projeto.horasEngenhariaOrcadas) || 0;
   const diariasEquipeOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
   const valorHora = Number(projeto.valorHoraEngenharia) || 0;
   const valorDiaria = Number(projeto.valorDiariaEquipe) || 0;
+  const apontamentoContabilizado = opts?.apontamentoContabilizado !== false;
 
   const custoOrcado =
     horasEngenhariaOrcadas * valorHora + diariasEquipeOrcadas * valorDiaria;
-  const custoApontamento =
-    totais.horasEngenhariaRealizadas * valorHora +
-    totais.diariasEquipeRealizadas * valorDiaria;
+  const custoApontamentoBruto =
+    opts?.custoApontamentoItens != null
+      ? opts.custoApontamentoItens
+      : totais.horasEngenhariaRealizadas * valorHora +
+        totais.diariasEquipeRealizadas * valorDiaria;
+  const custoApontamento = apontamentoContabilizado ? custoApontamentoBruto : 0;
+  const custoApontamentoPrevisto = apontamentoContabilizado ? 0 : custoApontamentoBruto;
+  const horasApontamentoConfirmado = apontamentoContabilizado
+    ? totais.horasEngenhariaRealizadas
+    : 0;
+  const diariasApontamentoConfirmado = apontamentoContabilizado
+    ? totais.diariasEquipeRealizadas
+    : 0;
+  const horasEngenhariaApontamentoPrevisto = apontamentoContabilizado
+    ? 0
+    : totais.horasEngenhariaRealizadas;
+  const diariasEquipeApontamentoPrevisto = apontamentoContabilizado
+    ? 0
+    : totais.diariasEquipeRealizadas;
   const custoCalendario = Number(calendario?.custoCalendario) || 0;
   const custoCalendarioPrevisto = Number(calendario?.custoCalendarioPrevisto) || 0;
   const custoRealizado = custoApontamento + custoCalendario;
-  const custoProjetado = custoRealizado + custoCalendarioPrevisto;
+  const custoProjetado =
+    custoRealizado + custoCalendarioPrevisto + custoApontamentoPrevisto;
 
   const horasEngenhariaRealizadas = round2(
-    totais.horasEngenhariaRealizadas + (Number(calendario?.horasEngenharia) || 0),
+    horasApontamentoConfirmado + (Number(calendario?.horasEngenharia) || 0),
   );
   const diariasEquipeRealizadas = round2(
-    totais.diariasEquipeRealizadas + (Number(calendario?.diariasEquipe) || 0),
+    diariasApontamentoConfirmado + (Number(calendario?.diariasEquipe) || 0),
   );
 
   const valorFechado =
@@ -141,6 +171,9 @@ export function calcularResultadoOs(
     ),
     custoOrcado: round2(custoOrcado),
     custoApontamento: round2(custoApontamento),
+    custoApontamentoPrevisto: round2(custoApontamentoPrevisto),
+    horasEngenhariaApontamentoPrevisto: round2(horasEngenhariaApontamentoPrevisto),
+    diariasEquipeApontamentoPrevisto: round2(diariasEquipeApontamentoPrevisto),
     custoCalendario: round2(custoCalendario),
     custoCalendarioPrevisto: round2(custoCalendarioPrevisto),
     custoRealizado: round2(custoRealizado),

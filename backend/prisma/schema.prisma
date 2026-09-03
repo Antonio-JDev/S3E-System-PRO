@@ -1028,6 +1028,8 @@ model Task {
   responsavel     String? // Primeiro responsável (compatibilidade)
   responsaveisIds Json? // Array de IDs de usuários atribuídos ["id1","id2",...]
   ordem           Int       @default(0)
+  /// Dados extras por tipo de workflow (ex.: entrega de quadro)
+  metadados       Json?
   criadoPorId     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

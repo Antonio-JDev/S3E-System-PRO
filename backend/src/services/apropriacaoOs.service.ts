@@ -6,6 +6,15 @@ import {
   calcularTotaisApropriacao,
   type ResultadoOsCalculado,
 } from '../utils/apropriacaoOs.util';
+import {
+  calcularCustoItemApontamento,
+  resolverTaxaFuncionario,
+} from '../utils/taxaFuncionario.util';
+import {
+  parseDataDiaCivilInput,
+  ymdCivilBrasilia,
+  ymdDeDataDiaCivil,
+} from '../utils/datetime-sp.util';
 
 export interface ApontamentoItemInput {
   tipoRecurso: TipoRecursoApontamento;
@@ -20,7 +29,15 @@ export interface CriarApontamentoInput {
   itens: ApontamentoItemInput[];
 }
 
-const STATUS_APONTAMENTO_PERMITIDOS: ProjetoStatus[] = ['EXECUCAO', 'CONCLUIDO'];
+const STATUS_BLOQUEADOS_APONTAMENTO: ProjetoStatus[] = ['CANCELADO'];
+
+function apontamentoPermitido(status: ProjetoStatus): boolean {
+  return !STATUS_BLOQUEADOS_APONTAMENTO.includes(status);
+}
+
+function apontamentoContabilizadoNoResultado(status: ProjetoStatus): boolean {
+  return status === 'EXECUCAO' || status === 'CONCLUIDO';
+}
 
 const includeApontamento = {
   criadoPor: { select: { id: true, name: true } },
@@ -33,11 +50,35 @@ const includeApontamento = {
 } as const;
 
 function parseDataApontamento(value: string): Date {
-  const d = new Date(`${value}T12:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) {
+  const d = parseDataDiaCivilInput(value);
+  if (!d) {
     throw new Error('Data de apontamento inválida');
   }
   return d;
+}
+
+function validarDataApontamentoNaoFutura(dataApontamento: Date): void {
+  const ymd = ymdDeDataDiaCivil(dataApontamento);
+  if (!ymd) {
+    throw new Error('Data de apontamento inválida');
+  }
+  const hoje = ymdCivilBrasilia();
+  const hojeYmd = `${hoje.ano}-${String(hoje.mes).padStart(2, '0')}-${String(hoje.dia).padStart(2, '0')}`;
+  if (ymd > hojeYmd) {
+    throw new Error('Data de apontamento não pode ser futura');
+  }
+}
+
+type ApontamentoComData = {
+  dataApontamento: Date;
+  [key: string]: unknown;
+};
+
+function serializarApontamento<T extends ApontamentoComData>(row: T): Omit<T, 'dataApontamento'> & { dataApontamento: string } {
+  return {
+    ...row,
+    dataApontamento: ymdDeDataDiaCivil(row.dataApontamento) ?? String(row.dataApontamento),
+  };
 }
 
 function validarItens(itens: ApontamentoItemInput[]): void {
@@ -79,6 +120,76 @@ async function buscarItensApropriacao(projetoId: string) {
   return rows;
 }
 
+const selectTaxaFuncionario = {
+  id: true,
+  email: true,
+  salario: true,
+  salarioBase: true,
+  cargaHorariaMensal: true,
+  valorHora: true,
+  valorDiaria: true,
+  tipoContrato: true,
+  valorHoraNormalAutonomo: true,
+} as const;
+
+async function calcularCustoApontamentoPorColaborador(
+  projetoId: string,
+  fallback: { valorHoraEngenharia?: number | null; valorDiariaEquipe?: number | null },
+): Promise<number> {
+  const itens = await prisma.apontamentoOsItem.findMany({
+    where: { apontamento: { projetoId } },
+    include: {
+      funcionario: { select: selectTaxaFuncionario },
+      user: { select: { id: true, email: true } },
+    },
+  });
+
+  if (itens.length === 0) return 0;
+
+  const emailsEngenharia = [
+    ...new Set(
+      itens
+        .map((i) => i.user?.email?.trim().toLowerCase())
+        .filter((e): e is string => Boolean(e)),
+    ),
+  ];
+
+  const funcionariosPorEmail =
+    emailsEngenharia.length > 0
+      ? await prisma.funcionario.findMany({
+          where: { email: { in: emailsEngenharia, mode: 'insensitive' } },
+          select: selectTaxaFuncionario,
+        })
+      : [];
+
+  const funcPorEmail = new Map(
+    funcionariosPorEmail
+      .filter((f) => f.email)
+      .map((f) => [f.email!.trim().toLowerCase(), f]),
+  );
+
+  let total = 0;
+  for (const item of itens) {
+    let func = item.funcionario;
+    if (!func && item.user?.email) {
+      func = funcPorEmail.get(item.user.email.trim().toLowerCase()) ?? null;
+    }
+
+    const taxa = resolverTaxaFuncionario(func, {
+      valorHora:
+        item.tipoRecurso === 'HORA_ENGENHARIA'
+          ? fallback.valorHoraEngenharia
+          : undefined,
+      valorDiaria:
+        item.tipoRecurso === 'DIARIA_EQUIPE' ? fallback.valorDiariaEquipe : undefined,
+    });
+
+    total += calcularCustoItemApontamento(item.tipoRecurso, item.quantidade, taxa);
+  }
+
+  return Math.round(total * 100) / 100;
+}
+
 function calcularDiasCorridos(dataInicio: Date | null | undefined, ref: Date = new Date()): number {
   if (!dataInicio) return 0;
   const start = new Date(dataInicio);
@@ -107,6 +218,10 @@ async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
 
   const itens = await buscarItensApropriacao(projetoId);
   const totais = calcularTotaisApropriacao(itens);
+  const custoApontamentoItens = await calcularCustoApontamentoPorColaborador(projetoId, {
+    valorHoraEngenharia: projeto.valorHoraEngenharia,
+    valorDiariaEquipe: projeto.valorDiariaEquipe,
+  });
   const calendarioValido = await calcularMaoDeObraCalendarioOs(projetoId, {
     apenasStatus: 'VALIDO',
   });
@@ -131,6 +246,10 @@ async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
       diariasEquipe: calendarioValido.diariasEquipe,
       linhas: [...calendarioPrevisto.linhas, ...calendarioValido.linhas],
     },
+    {
+      apontamentoContabilizado: apontamentoContabilizadoNoResultado(projeto.status),
+      custoApontamentoItens,
+    },
   );
 }
 
@@ -143,20 +262,15 @@ export const apropriacaoOsService = {
     const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
     if (!projeto) throw new Error('Ordem de serviço não encontrada');
 
-    if (!STATUS_APONTAMENTO_PERMITIDOS.includes(projeto.status)) {
+    if (!apontamentoPermitido(projeto.status)) {
       throw new Error(
-        'Apontamento permitido apenas para OS em execução ou concluída'
+        'Apontamento não permitido para OS cancelada'
       );
     }
 
     validarItens(input.itens);
     const dataApontamento = parseDataApontamento(input.dataApontamento);
-
-    const hoje = new Date();
-    hoje.setHours(23, 59, 59, 999);
-    if (dataApontamento > hoje) {
-      throw new Error('Data de apontamento não pode ser futura');
-    }
+    validarDataApontamentoNaoFutura(dataApontamento);
 
     const apontamento = await prisma.$transaction(async (tx) => {
       const created = await tx.apontamentoOs.create({
@@ -182,7 +296,7 @@ export const apropriacaoOsService = {
     });
 
     const resumoAtualizado = await montarResumo(projetoId);
-    return { apontamento, resumoAtualizado };
+    return { apontamento: serializarApontamento(apontamento), resumoAtualizado };
   },
 
   async atualizarApontamento(
@@ -193,9 +307,9 @@ export const apropriacaoOsService = {
     const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
     if (!projeto) throw new Error('Ordem de serviço não encontrada');
 
-    if (!STATUS_APONTAMENTO_PERMITIDOS.includes(projeto.status)) {
+    if (!apontamentoPermitido(projeto.status)) {
       throw new Error(
-        'Apontamento permitido apenas para OS em execução ou concluída'
+        'Apontamento não permitido para OS cancelada'
       );
     }
 
@@ -206,12 +320,7 @@ export const apropriacaoOsService = {
 
     validarItens(input.itens);
     const dataApontamento = parseDataApontamento(input.dataApontamento);
-
-    const hoje = new Date();
-    hoje.setHours(23, 59, 59, 999);
-    if (dataApontamento > hoje) {
-      throw new Error('Data de apontamento não pode ser futura');
-    }
+    validarDataApontamentoNaoFutura(dataApontamento);
 
     const apontamento = await prisma.$transaction(async (tx) => {
       await tx.apontamentoOsItem.deleteMany({ where: { apontamentoId } });
@@ -236,19 +345,39 @@ export const apropriacaoOsService = {
     });
 
     const resumoAtualizado = await montarResumo(projetoId);
-    return { apontamento, resumoAtualizado };
+    return { apontamento: serializarApontamento(apontamento), resumoAtualizado };
+  },
+
+  async excluirApontamento(projetoId: string, apontamentoId: string) {
+    const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
+    if (!projeto) throw new Error('Ordem de serviço não encontrada');
+
+    if (!apontamentoPermitido(projeto.status)) {
+      throw new Error('Apontamento não permitido para OS cancelada');
+    }
+
+    const existente = await prisma.apontamentoOs.findFirst({
+      where: { id: apontamentoId, projetoId },
+    });
+    if (!existente) throw new Error('Apontamento não encontrado');
+
+    await prisma.apontamentoOs.delete({ where: { id: apontamentoId } });
+
+    const resumoAtualizado = await montarResumo(projetoId);
+    return { resumoAtualizado };
   },
 
   async listarApontamentos(projetoId: string, limit = 50) {
     const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
     if (!projeto) throw new Error('Ordem de serviço não encontrada');
 
-    return prisma.apontamentoOs.findMany({
+    const rows = await prisma.apontamentoOs.findMany({
       where: { projetoId },
       include: includeApontamento,
       orderBy: [{ dataApontamento: 'desc' }, { createdAt: 'desc' }],
       take: Math.min(Math.max(limit, 1), 200),
     });
+    return rows.map(serializarApontamento);
   },
 
   async obterResumo(projetoId: string): Promise<ResultadoOsCalculado> {

@@ -1,7 +1,7 @@
 // Configuração da API
 export const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL || '',
-  TIMEOUT: 10000, // 10 segundos
+  TIMEOUT: 30000, // 30 segundos (rotas pesadas usam timeout próprio)
   RETRY_ATTEMPTS: 3,
 };
 
@@ -33,6 +33,27 @@ export const getBackendUrl = (): string => {
   }
   
   return baseUrl || '';
+};
+
+/**
+ * URL do Manager Evolution Go (QR / painel EvoGo).
+ * - VITE_WHATSAPP_PROVIDER_DASHBOARD_URL no build (opcional).
+ * - Produção sem env: mesma origem + /manager (Traefik stripPrefix).
+ * - Dev local: localhost:3333/manager.
+ */
+export const getWhatsAppProviderDashboardUrl = (): string => {
+  const fromEnv = import.meta.env.VITE_WHATSAPP_PROVIDER_DASHBOARD_URL;
+  if (fromEnv && String(fromEnv).trim()) {
+    return String(fromEnv).trim().replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin;
+    const isDev = origin.includes(':5173') || origin.includes(':8080');
+    if (!isDev) {
+      return `${origin}/manager`;
+    }
+  }
+  return 'http://localhost:3333/manager';
 };
 
 /**

@@ -2,8 +2,11 @@ import { axiosApiService } from './axiosApi';
 
 // ========== FUNCIONÁRIOS ==========
 export const funcionariosService = {
-    async listar() {
-        return await axiosApiService.get('/api/funcionarios');
+    async listar(mesRef?: string) {
+        const url = mesRef
+            ? `/api/funcionarios?mes=${encodeURIComponent(mesRef)}`
+            : '/api/funcionarios';
+        return await axiosApiService.get(url);
     },
     
     async buscar(id: string) {
@@ -348,6 +351,16 @@ export const rhService = {
         return await axiosApiService.put('/api/rh/conferencia-ponto/avaliacao', data);
     },
 
+    async salvarAvaliacaoDiaLote(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dias: number[];
+        botao: 'A' | 'B' | 'P' | 'D';
+    }) {
+        return await axiosApiService.put('/api/rh/conferencia-ponto/avaliacao-lote', data);
+    },
+
     async salvarFeriadoOverride(data: {
         referenciaAno: number;
         referenciaMes: number;
@@ -405,12 +418,12 @@ export const rhService = {
             totalColaboradores: number;
             colaboradoresComDados: number;
             avisos: string[];
-        }>(`/api/rh/folha/${mes}/exportar-contabilidade`, { preview: '1' });
+        }>(`/api/rh/folha/${mes}/exportar-contabilidade`, { preview: '1' }, { timeout: 120_000 });
     },
 
     /** Download XLS layout LANÇAMENTOS FOLHA para contabilidade */
     async exportarFolhaContabilidade(mes: string) {
-        return await axiosApiService.getBlob(`/api/rh/folha/${mes}/exportar-contabilidade`);
+        return await axiosApiService.getBlob(`/api/rh/folha/${mes}/exportar-contabilidade`, { timeout: 120_000 });
     },
 };
 

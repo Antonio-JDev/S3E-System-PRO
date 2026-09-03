@@ -57,6 +57,7 @@ import {
   criarApontamentoOs,
   listarApontamentosOs,
   atualizarApontamentoOs,
+  excluirApontamentoOs,
   obterResumoApropriacaoOs,
 } from '../controllers/apropriacaoOsController';
 import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
@@ -134,12 +135,13 @@ router.get('/:id/alocacao-ponto', getAlocacaoPontoOs);
 router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
 
 /**
- * @route GET/POST /api/projetos/:projetoId/apontamentos
- * @desc Listar e criar apontamentos rápidos (F1)
+ * @route GET/POST/PATCH/DELETE /api/projetos/:projetoId/apontamentos
+ * @desc Listar, criar, atualizar e excluir apontamentos rápidos (F1)
  */
 router.get('/:projetoId/apontamentos', listarApontamentosOs);
 router.post('/:projetoId/apontamentos', criarApontamentoOs);
 router.patch('/:projetoId/apontamentos/:apontamentoId', atualizarApontamentoOs);
+router.delete('/:projetoId/apontamentos/:apontamentoId', excluirApontamentoOs);
 
 /**
  * @route GET /api/projetos/:id

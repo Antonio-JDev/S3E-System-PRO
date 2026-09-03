@@ -9,6 +9,7 @@ import { financeiroService } from '../../services/financeiroService';
 vi.mock('../../services/financeiroService', () => ({
   financeiroService: {
     listarContasPagar: vi.fn(),
+    listarCartoes: vi.fn(),
   },
 }));
 
@@ -24,6 +25,7 @@ vi.mock('../../services/axiosApi', () => ({
 describe('ContasAPagar - filtro de período', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (financeiroService.listarCartoes as any).mockResolvedValue({ success: true, data: [] });
   });
 
   it('default é Mês Atual e filtra estatísticas/lista', async () => {

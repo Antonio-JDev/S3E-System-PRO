@@ -89,6 +89,31 @@ describe('apropriacaoOs.util', () => {
     expect(resultado.calendarioLinhas).toHaveLength(1);
   });
 
+  it('mantém apontamento F1 em previsto enquanto OS não está em execução', () => {
+    const totais = calcularTotaisApropriacao([
+      { tipoRecurso: 'HORA_ENGENHARIA', quantidade: 8 },
+      { tipoRecurso: 'DIARIA_EQUIPE', quantidade: 2 },
+    ]);
+    const resultado = calcularResultadoOs(
+      {
+        horasEngenhariaOrcadas: 10,
+        diariasEquipeOrcadas: 5,
+        valorHoraEngenharia: 100,
+        valorDiariaEquipe: 400,
+        valorTotal: 10000,
+      },
+      totais,
+      undefined,
+      { apontamentoContabilizado: false },
+    );
+    expect(resultado.custoApontamento).toBe(0);
+    expect(resultado.custoApontamentoPrevisto).toBe(1600);
+    expect(resultado.horasEngenhariaApontamentoPrevisto).toBe(8);
+    expect(resultado.diariasEquipeApontamentoPrevisto).toBe(2);
+    expect(resultado.horasEngenhariaRealizadas).toBe(0);
+    expect(resultado.custoProjetado).toBe(1600);
+  });
+
   it('separa custo previsto do realizado no calendário', () => {
     const totais = calcularTotaisApropriacao([]);
     const resultado = calcularResultadoOs(

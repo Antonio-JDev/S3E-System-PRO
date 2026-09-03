@@ -43,6 +43,11 @@ export function competenciaParaSerialExcel(ano: number, mes: number): number {
   return Math.floor(utc / 86400000) + 25569;
 }
 
+/** Competência legível para exportação (ex.: 05/2024). */
+export function formatarCompetenciaMesAno(ano: number, mes: number): string {
+  return `${String(mes).padStart(2, '0')}/${ano}`;
+}
+
 export function labelHeConfiguravel(percentual: number): string {
   const p = PERCENTUAIS_HE_FOLHA_CONTABIL.includes(percentual as PercentualHeFolhaContabil)
     ? percentual
@@ -255,7 +260,7 @@ export type CabecalhoPlanilhaContabil = {
   codigoEmpresa: string | number;
   razaoSocial: string;
   cnpj: string;
-  competenciaSerial: number;
+  competenciaLabel: string;
   percentualHe: number;
   rubricas: RubricasFolhaContabil;
 };
@@ -297,7 +302,7 @@ export function montarMatrizPlanilhaContabil(
   rows.push(['Codigo Empresa:', '', codigoEmpresaNum, '', '', '', '', '', '', '', '', '', '']);
   rows.push(['Razão Social:', '', cabecalho.razaoSocial, '', '', '', '', '', '', '', '', '', '']);
   rows.push(['Inscrição Cnpj:', '', cabecalho.cnpj, '', '', '', '', '', '', '', '', '', '']);
-  rows.push(['Competencia:', '', cabecalho.competenciaSerial, '', '', '', '', '', '', '', '', '', '']);
+  rows.push(['Competencia:', '', cabecalho.competenciaLabel, '', '', '', '', '', '', '', '', '', '']);
   rows.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
   rows.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
 

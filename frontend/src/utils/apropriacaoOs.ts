@@ -24,6 +24,9 @@ export interface ResultadoOsCalculado {
   homemHoraRealizado: number;
   custoOrcado: number;
   custoApontamento?: number;
+  custoApontamentoPrevisto?: number;
+  horasEngenhariaApontamentoPrevisto?: number;
+  diariasEquipeApontamentoPrevisto?: number;
   custoCalendario?: number;
   custoCalendarioPrevisto?: number;
   custoProjetado?: number;

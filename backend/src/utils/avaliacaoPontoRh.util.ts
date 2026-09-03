@@ -49,7 +49,7 @@ function n(v: number | undefined): number {
 
 /**
  * Aplica avaliação rápida A/B/P/D sobre métricas brutas do dia.
- * Padrão: sem tratamento explícito → B (tudo vai ao banco), dia a dia.
+ * Sem tratamento explícito do RH → pendente (sem impacto em banco/folha).
  * - A: zera impacto financeiro/banco de débitos (atraso, saída antecipada, falta).
  * - B (débito): lança déficit como horas NEGATIVAS no banco (separado do crédito).
  * - B (crédito): lança HE como horas POSITIVAS no banco (separado do débito).
@@ -75,11 +75,8 @@ export function aplicarAvaliacaoRhDia(input: AvaliacaoRhDiaInput): AvaliacaoRhDi
   let minutosPagarFolha = 0;
   let minutosDescontarFolha = 0;
 
-  // Padrão B: sem apontamento na Situação, atraso/HE vão ao banco.
-  const td: TratamentoDebitoRh | null =
-    input.tratamentoDebito ?? (temDebito ? 'B' : null);
-  const tc: TratamentoCreditoRh | null =
-    input.tratamentoCredito ?? (temCredito ? 'B' : null);
+  const td: TratamentoDebitoRh | null = input.tratamentoDebito ?? null;
+  const tc: TratamentoCreditoRh | null = input.tratamentoCredito ?? null;
 
   // D com atraso/saída/falta E HE no mesmo dia: compensa e manda o resto ao banco.
   const dComCompensacao = td === 'D' && temDebito && temCredito;

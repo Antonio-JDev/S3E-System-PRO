@@ -156,14 +156,20 @@ class AxiosApiService {
   }
 
   /** GET que retorna o corpo como Blob (PDF, XML, etc.) - usa token do interceptor */
-  async getBlob(endpoint: string): Promise<Blob> {
-    const response = await this.axiosInstance.get(endpoint, { responseType: 'blob' });
+  async getBlob(endpoint: string, requestConfig?: { timeout?: number }): Promise<Blob> {
+    const response = await this.axiosInstance.get(endpoint, {
+      responseType: 'blob',
+      ...(requestConfig?.timeout != null ? { timeout: requestConfig.timeout } : {}),
+    });
     return response.data as Blob;
   }
 
   /** POST que retorna o corpo como Blob (ex.: geração de PDF) - usa token do interceptor */
-  async postBlob(endpoint: string, data?: any): Promise<Blob> {
-    const response = await this.axiosInstance.post(endpoint, data, { responseType: 'blob' });
+  async postBlob(endpoint: string, data?: any, requestConfig?: { timeout?: number }): Promise<Blob> {
+    const response = await this.axiosInstance.post(endpoint, data, {
+      responseType: 'blob',
+      ...(requestConfig?.timeout != null ? { timeout: requestConfig.timeout } : {}),
+    });
     return response.data as Blob;
   }
 
@@ -247,10 +253,15 @@ class AxiosApiService {
       };
     } catch (error: unknown) {
       const { message, status } = axiosErrorPayload(error);
+      const extra =
+        axios.isAxiosError(error) && error.response?.data && typeof error.response.data === 'object'
+          ? (error.response.data as Record<string, unknown>)
+          : {};
       return {
         success: false,
         error: message,
         status,
+        ...extra,
       };
     }
   }

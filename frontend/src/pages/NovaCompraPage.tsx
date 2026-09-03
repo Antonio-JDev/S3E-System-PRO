@@ -14,7 +14,9 @@ import { financeiroService } from '../services/financeiroService';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
 import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
-import { itemParaDraft, aplicarDraftNoItem, atualizarCampoNumericoItem } from '../utils/compraItemList.util';
+import { itemParaDraft, aplicarDraftNoItem, atualizarCampoNumericoItem, calcItemTotalCost } from '../utils/compraItemList.util';
+import { roundMoney } from '../utils/financeiroValor';
+import AlertDialog from '../components/ui/AlertDialog';
 import {
     classificacaoVaiParaEstoque,
     itemPrecisaVinculoEstoque,
@@ -141,6 +143,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     // Parcelas
     const [parcelas, setParcelas] = useState<Array<{ numero: string; dataVencimento: string; valor: number }>>([]);
     const [observacoes, setObservacoes] = useState('');
+    const [nfDuplicadaDialog, setNfDuplicadaDialog] = useState<{ open: boolean; message: string }>({
+        open: false,
+        message: '',
+    });
 
     // XML Import
     const [selectedXMLFile, setSelectedXMLFile] = useState<File | null>(null);
@@ -340,17 +346,17 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
     // Calculated values
     const totalProdutosCalculado = useMemo(() => {
-        return purchaseItems.reduce((total, item) => total + item.totalCost, 0);
+        return roundMoney(purchaseItems.reduce((total, item) => total + item.totalCost, 0));
     }, [purchaseItems]);
 
     const valorTotalNotaCalculado = useMemo(() => {
         const sub = totalProdutosCalculado;
-        const desc = Math.min(parseFloat(descontos || '0') || 0, sub);
-        const baseProdutos = Math.max(0, sub - desc);
-        const freteNum = parseFloat(frete || '0') || 0;
-        const outrasNum = parseFloat(outrasDespesas || '0') || 0;
-        const ipiNum = parseFloat(valorIPI || '0') || 0;
-        return baseProdutos + ipiNum + freteNum + outrasNum;
+        const desc = roundMoney(Math.min(parseFloat(descontos || '0') || 0, sub));
+        const baseProdutos = Math.max(0, roundMoney(sub - desc));
+        const freteNum = roundMoney(parseFloat(frete || '0') || 0);
+        const outrasNum = roundMoney(parseFloat(outrasDespesas || '0') || 0);
+        const ipiNum = roundMoney(parseFloat(valorIPI || '0') || 0);
+        return roundMoney(baseProdutos + ipiNum + freteNum + outrasNum);
     }, [valorIPI, frete, outrasDespesas, descontos, totalProdutosCalculado]);
 
     // Filtrar materiais pela busca
@@ -561,8 +567,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         }
 
         const quantity = parseFloat(productToAdd.quantity);
-        const unitCost = parseFloat(productToAdd.cost);
-        const totalCost = quantity * unitCost;
+        const unitCost = roundMoney(parseFloat(productToAdd.cost));
+        const totalCost = calcItemTotalCost(quantity, unitCost);
         
         // Calcular quantidade total de unidades se fracionado
         const quantidadeTotalUnidades = fracionamentoAtivo && quantidadeFracionada
@@ -689,12 +695,15 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
             // Preencher Itens
             if (data.items && Array.isArray(data.items)) {
-                const xmlItems: ExtendedItem[] = data.items.map((item: any) => ({
-                    productId: item.materialId || '',
-                    productName: item.nomeProduto || '',
-                    quantity: item.quantidade || 0,
-                    unitCost: item.valorUnit || 0,
-                    totalCost: item.valorTotal || 0,
+                const xmlItems: ExtendedItem[] = data.items.map((item: any) => {
+                    const quantity = item.quantidade || 0;
+                    const unitCost = roundMoney(item.valorUnit || 0);
+                    return {
+                        productId: item.materialId || '',
+                        productName: item.nomeProduto || '',
+                        quantity,
+                        unitCost,
+                        totalCost: item.valorTotal != null ? roundMoney(item.valorTotal) : calcItemTotalCost(quantity, unitCost),
                     ncm: item.ncm || '',
                     sku: item.sku || '',
                     unidadeMedida: item.unidadeMedida || item.unidade || 'un',
@@ -705,7 +714,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     codigoFornecedor: item.codigoFornecedor || item.sku || '',
                     ean: item.ean || '',
                     criarNovoMaterial: false,
-                }));
+                    };
+                });
                 setPurchaseItems(xmlItems);
                 console.log(`✅ ${xmlItems.length} itens adicionados ao formulário`);
                 const matchesAutomaticos = xmlItems.filter(it => it.matchAutomatico).length;
@@ -800,7 +810,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
-                    valorUnit: it.unitCost,
+                    valorUnit: roundMoney(it.unitCost),
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: it.unidadeMedida || 'un',
@@ -829,7 +839,19 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
             console.log('📤 Criando nova compra:', payload);
             const response = await comprasService.createCompra(payload);
-            const estatisticas = (response as any)?.estatisticas || (response as any)?.data?.estatisticas;
+            if (!response.success) {
+                if (response.error === 'COMPRA_NF_DUPLICADA') {
+                    setNfDuplicadaDialog({
+                        open: true,
+                        message: response.message || 'Essa nota fiscal já foi registrada.',
+                    });
+                    return;
+                }
+                toast.error(response.message || response.error || 'Erro ao registrar compra');
+                return;
+            }
+            const estatisticas = (response as { estatisticas?: Record<string, number> }).estatisticas
+                || (response.data as { estatisticas?: Record<string, number> } | undefined)?.estatisticas;
 
             if (classificacao === 'DESPESAS_VARIADAS') {
                 toast.success('Despesa registrada', {
@@ -857,6 +879,16 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
+            <AlertDialog
+                isOpen={nfDuplicadaDialog.open}
+                onClose={() => setNfDuplicadaDialog({ open: false, message: '' })}
+                onConfirm={() => setNfDuplicadaDialog({ open: false, message: '' })}
+                title="Nota fiscal já cadastrada"
+                message={nfDuplicadaDialog.message}
+                confirmText="Entendi"
+                cancelText="Fechar"
+                variant="warning"
+            />
             {/* Header */}
             <div className="bg-white dark:bg-dark-card border-b border-gray-200 dark:border-dark-border sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1542,7 +1574,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                     onChange={(e) => setProductToAdd({ ...productToAdd, cost: e.target.value })}
                                     placeholder="Valor unitário"
                                     min="0"
-                                    step="0.01"
+                                    step="any"
                                     className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
                                 />
                             </div>
@@ -1757,7 +1789,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 <input
                                                                     type="number"
                                                                     min="0"
-                                                                    step="0.01"
+                                                                    step="any"
                                                                     value={item.unitCost}
                                                                     onChange={(e) => handleUpdateItemNumericField(index, 'unitCost', e.target.value)}
                                                                     className="w-24 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm dark:bg-dark-bg dark:text-white"

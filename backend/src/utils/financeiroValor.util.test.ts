@@ -11,6 +11,7 @@ import {
   calcAbateParcelaFromBase,
   validarValoresFinanceiros,
   validarRecebimentoComDiferenca,
+  parcelaQuitadaPorPagamento,
 } from './financeiroValor.util';
 
 describe('financeiroValor.util', () => {
@@ -89,6 +90,23 @@ describe('financeiroValor.util', () => {
 
     it('calcAbateParcelaFromBase subtrai desconto do principal', () => {
       expect(calcAbateParcelaFromBase(1000, 50)).toBe(950);
+    });
+  });
+
+  describe('parcelaQuitadaPorPagamento', () => {
+    it('aceita base igual ao saldo com desconto negociado na hora do pagamento', () => {
+      expect(parcelaQuitadaPorPagamento(1698.85, 1698.85, 8)).toBe(true);
+    });
+
+    it('aceita base − desconto igual ao saldo (título criado com desconto)', () => {
+      expect(parcelaQuitadaPorPagamento(900, 1000, 100)).toBe(true);
+    });
+
+    it('rejeita quando base e abate não fecham o saldo', () => {
+      expect(parcelaQuitadaPorPagamento(1698.85, 1690.85, 8)).toBe(false);
+      expect(
+        parcelaQuitadaPorPagamento(900, 900, 100, { valorDescontoExistente: 100 })
+      ).toBe(false);
     });
   });
 

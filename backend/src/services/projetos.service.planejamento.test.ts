@@ -19,15 +19,18 @@ describe('validarCamposPlanejamentoOs', () => {
     ).toThrow(/Gerente do projeto/);
   });
 
-  it('exige datas e horas/diárias', () => {
+  it('exige datas de planejamento', () => {
     expect(() =>
       validarCamposPlanejamentoOs({ ...valido, dataInicio: null }),
     ).toThrow(/início/);
     expect(() =>
       validarCamposPlanejamentoOs({ ...valido, dataPrevisao: null }),
     ).toThrow(/previsão/);
+  });
+
+  it('aceita horas e diárias zeradas (apontamento automático)', () => {
     expect(() =>
       validarCamposPlanejamentoOs({ ...valido, horasEngenhariaOrcadas: 0, diariasEquipeOrcadas: 0 }),
-    ).toThrow(/horas de engenharia ou diárias/);
+    ).not.toThrow();
   });
 });

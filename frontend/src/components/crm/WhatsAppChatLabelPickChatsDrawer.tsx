@@ -5,6 +5,11 @@ import {
   formatPhoneForDisplay,
   isWhatsappGroupChatId
 } from '../../utils/whatsappChat';
+import { whatsappProfilePictureImageUrl } from '../../services/whatsappChatService';
+import {
+  isWhatsappProfilePictureMissing,
+  markWhatsappProfilePictureMissing,
+} from '../../utils/whatsappProfilePictureSessionCache';
 
 export interface SelectableChat {
   chatId: string;
@@ -110,6 +115,11 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
               const canon = canonicalWhatsappChatId(c.chatId);
               const isOn = selected.has(canon);
               const grp = isWhatsappGroupChatId(canon);
+              const avatarSrc = whatsappProfilePictureImageUrl(
+                canon,
+                Boolean((c.profilePictureUrl || '').trim())
+              );
+              const showAvatar = Boolean(avatarSrc) && !isWhatsappProfilePictureMissing(canon);
               return (
                 <li key={canon}>
                   <button
@@ -126,11 +136,12 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
                     >
                       <Check className="h-4 w-4" />
                     </span>
-                    {c.profilePictureUrl ? (
+                    {showAvatar ? (
                       <img
-                        src={c.profilePictureUrl}
+                        src={avatarSrc!}
                         alt=""
                         className="h-9 w-9 shrink-0 rounded-full object-cover"
+                        onError={() => markWhatsappProfilePictureMissing(canon)}
                       />
                     ) : (
                       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#6b7280] text-[11px] font-semibold text-white">

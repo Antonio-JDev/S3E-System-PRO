@@ -1,18 +1,82 @@
+import { LancamentoFolhaCategoria, TipoContratoFuncionario } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { RhService } from './rh.service';
 import { inicioFimMesCivilUtc } from '../utils/datetime-sp.util';
 import { recalcularMetricasFuncionario } from './ponto.service';
 
+const CATEGORIAS_DESCONTO_FOLHA = new Set<LancamentoFolhaCategoria>([
+    LancamentoFolhaCategoria.ADIANTAMENTO,
+    LancamentoFolhaCategoria.FALTA,
+    LancamentoFolhaCategoria.FALTA_JUSTIFICADA,
+    LancamentoFolhaCategoria.DESCONTO_OUTRO,
+]);
+
+function parseMesRef(mesRef?: string): { ano: number; mes: number } {
+    if (mesRef && /^\d{4}-\d{2}$/.test(mesRef)) {
+        const [a, m] = mesRef.split('-').map((v) => parseInt(v, 10));
+        return { ano: a, mes: m };
+    }
+    const hoje = new Date();
+    return { ano: hoje.getUTCFullYear(), mes: hoje.getUTCMonth() + 1 };
+}
+
+/** Estimativa leve do total da folha na competência (sem recalcular ponto/HE). */
+function estimarTotalFolhaCompetencia(f: {
+    tipoContrato: TipoContratoFuncionario;
+    salarioBase: { toString(): string } | null;
+    salario: { toString(): string };
+    valorDiaria: { toString(): string } | null;
+    beneficios: Array<{ valorPadrao: { toString(): string } }>;
+    lancamentosFolha: Array<{ categoria: LancamentoFolhaCategoria; valor: { toString(): string } }>;
+    diasComPonto?: number;
+}): number {
+    const salarioBaseNum =
+        f.salarioBase != null ? Number(f.salarioBase) : Number(f.salario ?? 0);
+    const totalBeneficios = f.beneficios.reduce(
+        (sum, b) => sum + Number(b.valorPadrao ?? 0),
+        0,
+    );
+
+    let acrescimos = 0;
+    let subtracoes = 0;
+    for (const l of f.lancamentosFolha) {
+        const valor = Number(l.valor ?? 0);
+        if (
+            l.categoria === LancamentoFolhaCategoria.ACRESCIMO ||
+            l.categoria === LancamentoFolhaCategoria.PAGAMENTO_BANCO_HORAS
+        ) {
+            acrescimos += valor;
+        } else if (CATEGORIAS_DESCONTO_FOLHA.has(l.categoria)) {
+            subtracoes += valor;
+        }
+    }
+
+    if (f.tipoContrato === TipoContratoFuncionario.REGISTRADO) {
+        return salarioBaseNum + totalBeneficios + acrescimos - subtracoes;
+    }
+
+    const dias = f.diasComPonto ?? 0;
+    const valorDiaria = Number(f.valorDiaria ?? 0);
+    return dias * valorDiaria + totalBeneficios + acrescimos - subtracoes;
+}
+
 export const FuncionariosService = {
-    // Listar todos os funcionários
-    async listarFuncionarios() {
+    // Listar todos os funcionários (vales opcionalmente filtrados por competência YYYY-MM)
+    async listarFuncionarios(mesRef?: string) {
+        const valesInclude: { orderBy: { data: 'desc' }; where?: { data: { gte: Date; lte: Date } } } = {
+            orderBy: { data: 'desc' },
+        };
+
+        if (mesRef && /^\d{4}-\d{2}$/.test(mesRef)) {
+            const { ano, mes } = parseMesRef(mesRef);
+            const { inicio, fim } = inicioFimMesCivilUtc(ano, mes);
+            valesInclude.where = { data: { gte: inicio, lte: fim } };
+        }
+
         return await prisma.funcionario.findMany({
             include: {
-                vales: {
-                    orderBy: { data: 'desc' }
-                }
+                vales: valesInclude,
             },
-            orderBy: { nome: 'asc' }
+            orderBy: { nome: 'asc' },
         });
     },
 
@@ -158,72 +222,67 @@ export const FuncionariosService = {
      * @param mesRef Opcional: YYYY-MM para filtrar por competência; se omitido, usa mês atual.
      */
     async obterMetricasRH(mesRef?: string) {
-        let ano: number;
-        let mes: number;
-        if (mesRef && /^\d{4}-\d{2}$/.test(mesRef)) {
-            const [a, m] = mesRef.split('-').map((v) => parseInt(v, 10));
-            ano = a;
-            mes = m;
-        } else {
-            const hoje = new Date();
-            ano = hoje.getUTCFullYear();
-            mes = hoje.getUTCMonth() + 1;
-        }
-
+        const { ano, mes } = parseMesRef(mesRef);
         const { inicio, fim } = inicioFimMesCivilUtc(ano, mes);
-        const dataReferencia = new Date(Date.UTC(ano, mes - 1, 1, 12, 0, 0, 0));
 
-        const funcionarios = await prisma.funcionario.findMany({
-            where: { status: 'Ativo' },
-            include: {
-                vales: {
+        const [totalFuncionarios, valesAgg, funcionarios, diasPontoPorFuncionario] =
+            await Promise.all([
+                prisma.funcionario.count({ where: { status: 'Ativo' } }),
+                prisma.vale.aggregate({
                     where: {
-                        data: {
-                            gte: inicio,
-                            lte: fim,
-                        }
-                    }
-                }
-            }
-        });
+                        data: { gte: inicio, lte: fim },
+                        funcionario: { status: 'Ativo' },
+                    },
+                    _sum: { valor: true },
+                }),
+                prisma.funcionario.findMany({
+                    where: { status: 'Ativo' },
+                    select: {
+                        id: true,
+                        tipoContrato: true,
+                        salarioBase: true,
+                        salario: true,
+                        valorDiaria: true,
+                        beneficios: {
+                            where: { ativo: true },
+                            select: { valorPadrao: true },
+                        },
+                        lancamentosFolha: {
+                            where: { referenciaAno: ano, referenciaMes: mes },
+                            select: { categoria: true, valor: true },
+                        },
+                    },
+                    orderBy: { nome: 'asc' },
+                }),
+                prisma.registroPonto.groupBy({
+                    by: ['funcionarioId'],
+                    where: { dataReferencia: { gte: inicio, lte: fim } },
+                    _count: { id: true },
+                }),
+            ]);
 
-        const totalFuncionarios = funcionarios.length;
-
-        const folhas = await Promise.all(
-            funcionarios.map((f) =>
-                RhService.calcularFolhaMes({
-                    funcionarioId: f.id,
-                    dataReferencia,
-                }).catch(() => null)
-            )
+        const diasPontoMap = new Map(
+            diasPontoPorFuncionario.map((row) => [row.funcionarioId, row._count.id]),
         );
 
-        const folhaPagamento = folhas.reduce((sum, folha) => {
-            if (!folha) return sum;
-            return sum + Number(folha.valores.totalAPagar || 0);
-        }, 0);
-
-        /** Resumo por colaborador para tela de RH (base/diária + total da folha na competência). */
-        const porFuncionario = funcionarios.map((f, i) => {
-            const folha = folhas[i];
+        const porFuncionario = funcionarios.map((f) => {
             const salarioBaseNum =
                 f.salarioBase != null ? Number(f.salarioBase) : Number(f.salario ?? 0);
+            const totalAPagar = estimarTotalFolhaCompetencia({
+                ...f,
+                diasComPonto: diasPontoMap.get(f.id) ?? 0,
+            });
             return {
                 funcionarioId: f.id,
                 tipoContrato: f.tipoContrato,
                 salarioBase: salarioBaseNum,
                 valorDiaria: f.valorDiaria != null ? Number(f.valorDiaria) : null,
-                totalAPagar: folha ? Number(folha.valores.totalAPagar ?? 0) : 0,
+                totalAPagar,
             };
         });
 
-        const valesMes = funcionarios.reduce(
-            (sum, f) =>
-                sum +
-                f.vales.reduce((valeSum, v) => valeSum + Number(v.valor), 0),
-            0
-        );
-
+        const folhaPagamento = porFuncionario.reduce((sum, row) => sum + row.totalAPagar, 0);
+        const valesMes = Number(valesAgg._sum.valor ?? 0);
         const custoTotal = folhaPagamento + valesMes;
 
         return {

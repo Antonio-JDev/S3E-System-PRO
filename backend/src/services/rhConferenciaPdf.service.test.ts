@@ -7,6 +7,21 @@ import { TipoContratoFuncionario } from '@prisma/client';
 import { gerarBufferPdfConferenciaPonto } from './rhConferenciaPdf.service';
 import type { FolhaMesResumo } from './rh.service';
 
+const demonstrativoVazio = {
+  horasNormais: { horas: 160, valor: 3000 },
+  horasExtrasSegSex50: { horas: 0, valor: 0 },
+  horasExtrasSabado50: { horas: 0, valor: 0 },
+  horasExtras100: { horas: 0, valor: 0 },
+  horasNoturnas20: { horas: 0, valor: 0 },
+  totalHorasMes: { horas: 160 },
+  descontoAtraso: { horas: 0, valor: 0 },
+  descontoSaidaAntecipada: { horas: 0, valor: 0 },
+  descontoFalta: { dias: 0, horas: 0, valor: 0 },
+  totalDescontosRef: { horas: 0, valor: 0 },
+  lancamentosManuais: [],
+  totalAPagar: 3000,
+};
+
 const folhaMinima: FolhaMesResumo = {
   funcionarioId: 'func-1',
   nome: 'Colaborador Teste',
@@ -36,6 +51,18 @@ const folhaMinima: FolhaMesResumo = {
   },
   lancamentos: [],
   totaisLancamentos: { subtracoes: 0, acrescimos: 0 },
+  demonstrativo: demonstrativoVazio,
+  horasNormais: demonstrativoVazio.horasNormais,
+  horasExtrasSegSex50: demonstrativoVazio.horasExtrasSegSex50,
+  horasExtrasSabado50: demonstrativoVazio.horasExtrasSabado50,
+  horasExtras100: demonstrativoVazio.horasExtras100,
+  horasNoturnas20: demonstrativoVazio.horasNoturnas20,
+  descontoAtraso: demonstrativoVazio.descontoAtraso,
+  descontoSaidaAntecipada: demonstrativoVazio.descontoSaidaAntecipada,
+  descontoFalta: demonstrativoVazio.descontoFalta,
+  totalDescontosRef: demonstrativoVazio.totalDescontosRef,
+  lancamentosManuais: demonstrativoVazio.lancamentosManuais,
+  totalAPagar: demonstrativoVazio.totalAPagar,
   conferenciaPonto: [
     {
       dia: 2,

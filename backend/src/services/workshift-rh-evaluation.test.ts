@@ -141,15 +141,17 @@ describe('workshift-rh-evaluation — A/B/P/D', () => {
     expect(r.minutosBancoDelta).toBe(0);
   });
 
-  it('padrão sem tratamento: atraso e HE vão ao banco (B)', () => {
+  it('sem tratamento explícito: pendente RH (sem banco/folha)', () => {
     const r = aplicarAvaliacaoRhDia({
       minutosAtraso: 30,
       minutosExtra: 45,
     });
-    expect(r.minutosBancoDebito).toBe(30);
-    expect(r.minutosBancoCredito).toBe(45);
+    expect(r.minutosBancoDebito).toBe(0);
+    expect(r.minutosBancoCredito).toBe(0);
     expect(r.minutosPagarFolha).toBe(0);
     expect(r.minutosDescontarFolha).toBe(0);
+    expect(r.temDebito).toBe(true);
+    expect(r.temCredito).toBe(true);
   });
 
   /** [Teste 5] Botão D (Descontar): falta/atraso → folha de descontos. */

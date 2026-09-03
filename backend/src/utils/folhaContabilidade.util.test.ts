@@ -1,6 +1,7 @@
 import {
   calcularDsrFaltasSemana,
   competenciaParaSerialExcel,
+  formatarCompetenciaMesAno,
   formatarHorasDecimal,
   minutosNoturnosBatidas,
   montarLinhaContabil,
@@ -10,6 +11,10 @@ import {
 describe('folhaContabilidade.util', () => {
   it('competenciaParaSerialExcel: ago/2026 ≈ 46235', () => {
     expect(competenciaParaSerialExcel(2026, 8)).toBe(46235);
+  });
+
+  it('formatarCompetenciaMesAno: mai/2024', () => {
+    expect(formatarCompetenciaMesAno(2024, 5)).toBe('05/2024');
   });
 
   it('formatarHorasDecimal: 90 min → 1,50', () => {

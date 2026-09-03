@@ -18,6 +18,12 @@ import { jornadaMinutosPorDia } from '../utils/workshift.util';
 import { minutosFaltaParaBanco } from '../utils/rhBancoFalta.util';
 import { aplicarDeltasAvaliacaoBancoHoras } from './bancoHorasRh.service';
 import { listarOverridesFeriadoMes } from './feriadoOverride.service';
+import {
+  botaoHabilitadoConferencia,
+  temCreditoAvaliacaoConferencia,
+  temDebitoAvaliacaoConferencia,
+  type ConferenciaDiaElegibilidadeInput,
+} from '../utils/conferenciaPontoRh.util';
 
 const DECISOES = new Set<string>(['PENDENTE', 'APROVADO_RH', 'REPROVADO']);
 
@@ -32,6 +38,13 @@ export function parseDecisaoRh(raw: string | null | undefined): StatusAprovacaoR
   const v = String(raw ?? 'PENDENTE').trim().toUpperCase();
   if (DECISOES.has(v)) return v as StatusAprovacaoRh;
   return StatusAprovacaoRh.PENDENTE;
+}
+
+function temTratamentoExplicitoRh(
+  tratamentoDebito: TratamentoDebitoRh | null,
+  tratamentoCredito: TratamentoCreditoRh | null,
+): boolean {
+  return tratamentoDebito !== null || tratamentoCredito !== null;
 }
 
 export async function salvarComentarioConferenciaDia(params: {
@@ -214,47 +227,11 @@ async function comentarioAvaliacaoDoDia(funcionarioId: string, dataReferencia: D
   });
 }
 
-/** True se ainda não há tracking de minutos aplicados neste funcionário (legado pré-migração). */
-async function funcionarioSemTrackingBancoAplicado(funcionarioId: string): Promise<boolean> {
-  const any = await prisma.comentarioConferenciaPontoRh.findFirst({
-    where: {
-      funcionarioId,
-      OR: [
-        { minutosBancoCreditoAplicados: { gt: 0 } },
-        { minutosBancoDebitoAplicados: { gt: 0 } },
-      ],
-    },
-    select: { id: true },
-  });
-  return !any;
-}
-
-async function funcionarioTemSaldoBanco(funcionarioId: string): Promise<boolean> {
-  const f = await prisma.funcionario.findUnique({
-    where: { id: funcionarioId },
-    select: {
-      saldoBancoHoras: true,
-      saldoBancoHorasNormaisExcedente: true,
-      saldoBancoHorasExtras100: true,
-      saldoHorasNegativas: true,
-    },
-  });
-  if (!f) return false;
-  const pos =
-    Math.max(0, Number(f.saldoBancoHorasNormaisExcedente ?? 0)) +
-    Math.max(0, Number(f.saldoBancoHorasExtras100 ?? 0));
-  const leg = Math.max(0, Number(f.saldoBancoHoras ?? 0));
-  const neg = Math.max(0, Number(f.saldoHorasNegativas ?? 0));
-  return pos > 1e-6 || leg > 1e-6 || neg > 1e-6;
-}
-
 /**
  * Reaplica o impacto no banco quando as métricas do dia mudam (edit/import/recalc),
  * usando minutos já aplicados no comentário como fonte da verdade (evita duplicar).
- * Padrão B vale para batidas (atraso/HE) mesmo com Situação pendente.
+ * Sem clique A/B/P/D do RH → pendente (estorna lançamentos legados do sync silencioso).
  * Falta sem registro só entra no banco com A/B/D explícito, dia já ocorrido e após admissão.
- * Legado (saldo no cadastro + tracking zerado): assume crédito já no banco; aplica só débito faltante.
- * Em sync de competência, passe `legacyBootstrap` calculado uma vez antes do loop.
  */
 export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
   funcionarioId: string;
@@ -263,8 +240,6 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
   dia: number;
   metricasAntes: MetricasAvaliacaoDia;
   metricasDepois: MetricasAvaliacaoDia;
-  /** Se definido, não recalcula a cada dia (evita virar “normal” no meio do mês). */
-  legacyBootstrap?: boolean;
   dataAdmissao?: Date | null;
 }): Promise<void> {
   const dataReferencia = dataReferenciaDiaCivilUtc(
@@ -275,6 +250,32 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
   const existente = await comentarioAvaliacaoDoDia(params.funcionarioId, dataReferencia);
   const tratamentoDebito = parseTratamentoDebito(existente?.tratamentoDebito ?? null);
   const tratamentoCredito = parseTratamentoCredito(existente?.tratamentoCredito ?? null);
+  const explicito = temTratamentoExplicitoRh(tratamentoDebito, tratamentoCredito);
+
+  const appliedCredito = Math.max(0, Number(existente?.minutosBancoCreditoAplicados ?? 0));
+  const appliedDebito = Math.max(0, Number(existente?.minutosBancoDebitoAplicados ?? 0));
+
+  if (!explicito) {
+    if (appliedCredito <= 0 && appliedDebito <= 0) return;
+
+    const creditoDiffHoras = -appliedCredito / 60;
+    const debitoDiffHoras = -appliedDebito / 60;
+    await aplicarDeltasAvaliacaoBancoHoras(params.funcionarioId, {
+      creditoDeltaHoras: creditoDiffHoras,
+      debitoDeltaHoras: debitoDiffHoras,
+    });
+
+    if (existente) {
+      await prisma.comentarioConferenciaPontoRh.update({
+        where: { id: existente.id },
+        data: {
+          minutosBancoCreditoAplicados: 0,
+          minutosBancoDebitoAplicados: 0,
+        },
+      });
+    }
+    return;
+  }
 
   const minutosFaltaIntegral = minutosFaltaParaBanco({
     minutosFaltaIntegral: params.metricasDepois.minutosFaltaIntegral,
@@ -285,44 +286,15 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
     dataAdmissao: params.dataAdmissao,
   });
 
-  const newAval = aplicarAvaliacaoRhDia({
+  const avalFinal = aplicarAvaliacaoRhDia({
     ...params.metricasDepois,
     minutosFaltaIntegral,
     tratamentoDebito,
     tratamentoCredito,
   });
 
-  const temMovimento =
-    newAval.temDebito ||
-    newAval.temCredito ||
-    (existente?.minutosBancoCreditoAplicados ?? 0) > 0 ||
-    (existente?.minutosBancoDebitoAplicados ?? 0) > 0;
-
-  // Engine usa padrão B quando tratamento é null; NÃO grava B no banco de dados —
-  // a UI só destaca A/B/P/D após clique explícito do RH.
-  const avalFinal = newAval;
-
-  const appliedCredito = Math.max(0, Number(existente?.minutosBancoCreditoAplicados ?? 0));
-  const appliedDebito = Math.max(0, Number(existente?.minutosBancoDebitoAplicados ?? 0));
-
-  const legacyBootstrap =
-    params.legacyBootstrap !== undefined
-      ? params.legacyBootstrap && appliedCredito === 0 && appliedDebito === 0
-      : appliedCredito === 0 &&
-        appliedDebito === 0 &&
-        (await funcionarioSemTrackingBancoAplicado(params.funcionarioId)) &&
-        (await funcionarioTemSaldoBanco(params.funcionarioId));
-
-  let creditoDiffHoras: number;
-  let debitoDiffHoras: number;
-  if (legacyBootstrap) {
-    // Crédito provavelmente já está no cadastro (HE antiga → banco); só completa o débito.
-    creditoDiffHoras = 0;
-    debitoDiffHoras = avalFinal.minutosBancoDebito / 60;
-  } else {
-    creditoDiffHoras = (avalFinal.minutosBancoCredito - appliedCredito) / 60;
-    debitoDiffHoras = (avalFinal.minutosBancoDebito - appliedDebito) / 60;
-  }
+  const creditoDiffHoras = (avalFinal.minutosBancoCredito - appliedCredito) / 60;
+  const debitoDiffHoras = (avalFinal.minutosBancoDebito - appliedDebito) / 60;
 
   if (Math.abs(creditoDiffHoras) >= 1e-9 || Math.abs(debitoDiffHoras) >= 1e-9) {
     await aplicarDeltasAvaliacaoBancoHoras(params.funcionarioId, {
@@ -331,52 +303,43 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
     });
   }
 
-  // Só cria/atualiza tracking de minutos aplicados; não força tratamento B na Situação.
-  if (temMovimento || existente) {
-    await prisma.comentarioConferenciaPontoRh.upsert({
-      where: {
-        funcionarioId_dataReferencia: {
-          funcionarioId: params.funcionarioId,
-          dataReferencia,
-        },
-      },
-      create: {
+  await prisma.comentarioConferenciaPontoRh.upsert({
+    where: {
+      funcionarioId_dataReferencia: {
         funcionarioId: params.funcionarioId,
         dataReferencia,
-        comentario: null,
-        decisaoRh: StatusAprovacaoRh.PENDENTE,
-        tratamentoDebito: null,
-        tratamentoCredito: null,
-        minutosBancoCreditoAplicados: avalFinal.minutosBancoCredito,
-        minutosBancoDebitoAplicados: avalFinal.minutosBancoDebito,
       },
-      update: {
-        minutosBancoCreditoAplicados: avalFinal.minutosBancoCredito,
-        minutosBancoDebitoAplicados: avalFinal.minutosBancoDebito,
-      },
-    });
-  }
+    },
+    create: {
+      funcionarioId: params.funcionarioId,
+      dataReferencia,
+      comentario: null,
+      decisaoRh: StatusAprovacaoRh.PENDENTE,
+      tratamentoDebito,
+      tratamentoCredito,
+      minutosBancoCreditoAplicados: avalFinal.minutosBancoCredito,
+      minutosBancoDebitoAplicados: avalFinal.minutosBancoDebito,
+    },
+    update: {
+      minutosBancoCreditoAplicados: avalFinal.minutosBancoCredito,
+      minutosBancoDebitoAplicados: avalFinal.minutosBancoDebito,
+    },
+  });
 }
 
 /**
- * Sincroniza banco A/B/P/D de todos os dias da competência.
- * Idempotente via minutosBanco*Aplicados.
- * Falta sem batida e sem clique RH é estornada se tinha sido lançada no dump antigo.
+ * Reaplica banco nos dias com decisão RH explícita após import/recalc de ponto.
+ * Dias pendentes têm estornados lançamentos legados (sync silencioso antigo).
  */
 export async function sincronizarBancoAvaliacoesCompetencia(
   funcionarioId: string,
   ano: number,
   mes: number,
 ): Promise<void> {
-  const [legacyBootstrap, funcionario] = await Promise.all([
-    (async () =>
-      (await funcionarioSemTrackingBancoAplicado(funcionarioId)) &&
-      (await funcionarioTemSaldoBanco(funcionarioId)))(),
-    prisma.funcionario.findUnique({
-      where: { id: funcionarioId },
-      select: { dataAdmissao: true },
-    }),
-  ]);
+  const funcionario = await prisma.funcionario.findUnique({
+    where: { id: funcionarioId },
+    select: { dataAdmissao: true },
+  });
   const dataAdmissao = funcionario?.dataAdmissao ?? null;
   const totalDias = diasNoMes(ano, mes);
   for (let dia = 1; dia <= totalDias; dia++) {
@@ -393,7 +356,6 @@ export async function sincronizarBancoAvaliacoesCompetencia(
       dia,
       metricasAntes: metricas,
       metricasDepois: metricas,
-      legacyBootstrap,
       dataAdmissao,
     });
   }
@@ -489,7 +451,6 @@ export async function salvarAvaliacaoRhDia(params: {
     tratamentoCredito: newCredito,
   });
 
-  // Fonte da verdade do que já está no banco = minutos aplicados (não o default B de null).
   const appliedCredito = Math.max(0, Number(existente?.minutosBancoCreditoAplicados ?? 0));
   const appliedDebito = Math.max(0, Number(existente?.minutosBancoDebitoAplicados ?? 0));
   const creditoDiffHoras = (newAval.minutosBancoCredito - appliedCredito) / 60;
@@ -525,4 +486,137 @@ export async function salvarAvaliacaoRhDia(params: {
       minutosBancoDebitoAplicados: newAval.minutosBancoDebito,
     },
   });
+}
+
+async function carregarDiaConferenciaElegibilidade(params: {
+  funcionarioId: string;
+  referenciaAno: number;
+  referenciaMes: number;
+  dia: number;
+}): Promise<ConferenciaDiaElegibilidadeInput> {
+  const { funcionarioId, referenciaAno, referenciaMes, dia } = params;
+  const dataReferencia = dataReferenciaDiaCivilUtc(referenciaAno, referenciaMes, dia);
+  const dow = diaSemanaCivil(referenciaAno, referenciaMes, dia);
+  const ehFimDeSemana = dow === 0 || dow === 6;
+  const overrides = await listarOverridesFeriadoMes(referenciaAno, referenciaMes);
+  const ehFeriado = ehFeriadoEfetivo(referenciaAno, referenciaMes, dia, overrides);
+
+  const [reg, funcionario, faltaJustificada, comentario] = await Promise.all([
+    prisma.registroPonto.findFirst({
+      where: { funcionarioId, dataReferencia },
+    }),
+    prisma.funcionario.findUnique({
+      where: { id: funcionarioId },
+      include: { configuracaoPonto: { include: { workShift: true } } },
+    }),
+    prisma.ocorrenciaPontoRh.findFirst({
+      where: {
+        funcionarioId,
+        dataReferencia,
+        tipo: 'FALTA_JUSTIFICADA' as any,
+      },
+    }),
+    prisma.comentarioConferenciaPontoRh.findUnique({
+      where: {
+        funcionarioId_dataReferencia: {
+          funcionarioId,
+          dataReferencia,
+        },
+      },
+      select: { tratamentoDebito: true, tratamentoCredito: true },
+    }),
+  ]);
+
+  const ws = funcionario?.configuracaoPonto?.workShift ?? null;
+  const minutosPrevistosDia = ws
+    ? jornadaMinutosPorDia(ws)
+    : Math.round(((Number(funcionario?.cargaHorariaMensal ?? 220) || 220) * 60) / 22);
+
+  const metricas = metricasAvaliacaoDeRegistro({
+    reg,
+    ehFds: ehFimDeSemana,
+    ehFer: ehFeriado,
+    faltaJustificada: !!faltaJustificada,
+    minutosPrevistosDia,
+  });
+
+  const minutosExtra20 = reg ? Math.max(0, Math.round(Number(reg.minutosExtra20 ?? 0))) : 0;
+
+  return {
+    temRegistro: !!reg,
+    ehFimDeSemana,
+    ehFeriado,
+    faltaJustificada: !!faltaJustificada,
+    minutosAtraso: metricas.minutosAtraso,
+    minutosHorasDevidas: metricas.minutosHorasDevidas,
+    minutosExtraTotal: metricas.minutosExtra,
+    minutosExtra20,
+    horasLiquidas: reg
+      ? Number(reg.horasNormais ?? 0) +
+        Number(reg.horasExtras50 ?? 0) +
+        Number(reg.horasExtras100 ?? 0)
+      : 0,
+    tratamentoDebito: parseTratamentoDebito(comentario?.tratamentoDebito ?? null),
+    tratamentoCredito: parseTratamentoCredito(comentario?.tratamentoCredito ?? null),
+  };
+}
+
+export type AvaliacaoRhLoteResumo = {
+  aplicados: number[];
+  ignorados: Array<{ dia: number; motivo: string }>;
+  falhas: Array<{ dia: number; message: string }>;
+  total: number;
+};
+
+/** Aplica A/B/P/D em vários dias da conferência (ignora dias sem débito/crédito elegível). */
+export async function salvarAvaliacaoRhDiaLote(params: {
+  funcionarioId: string;
+  referenciaAno: number;
+  referenciaMes: number;
+  dias: number[];
+  botao: 'A' | 'B' | 'P' | 'D';
+}): Promise<AvaliacaoRhLoteResumo> {
+  const maxDia = diasNoMes(params.referenciaAno, params.referenciaMes);
+  const diasUnicos = [...new Set(params.dias.map((d) => Math.floor(Number(d))))]
+    .filter((d) => Number.isFinite(d) && d >= 1 && d <= maxDia)
+    .sort((a, b) => a - b);
+
+  const aplicados: number[] = [];
+  const ignorados: Array<{ dia: number; motivo: string }> = [];
+  const falhas: Array<{ dia: number; message: string }> = [];
+
+  for (const dia of diasUnicos) {
+    try {
+      const ctx = await carregarDiaConferenciaElegibilidade({
+        funcionarioId: params.funcionarioId,
+        referenciaAno: params.referenciaAno,
+        referenciaMes: params.referenciaMes,
+        dia,
+      });
+
+      if (!botaoHabilitadoConferencia(params.botao, ctx)) {
+        ignorados.push({
+          dia,
+          motivo: 'Sem débito/crédito elegível para este botão',
+        });
+        continue;
+      }
+
+      await salvarAvaliacaoRhDia({
+        funcionarioId: params.funcionarioId,
+        referenciaAno: params.referenciaAno,
+        referenciaMes: params.referenciaMes,
+        dia,
+        botao: params.botao,
+        temDebito: temDebitoAvaliacaoConferencia(ctx),
+        temCredito: temCreditoAvaliacaoConferencia(ctx),
+      });
+      aplicados.push(dia);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao salvar';
+      falhas.push({ dia, message });
+    }
+  }
+
+  return { aplicados, ignorados, falhas, total: diasUnicos.length };
 }

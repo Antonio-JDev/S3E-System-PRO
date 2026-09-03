@@ -35,7 +35,12 @@ import {
   unarchiveWhatsappConversation,
   type WhatsappOrcamentoStatusMode
 } from '../services/whatsappChat.service';
-import { resolveOpenWhatsappChatFromPhone, resolvePreferredChatIdForOutbound } from '../services/whatsappIdentity.service';
+import {
+  autoResolveLidIdentityIfNeeded,
+  resolveOpenWhatsappChatFromPhone,
+  resolvePreferredChatIdForOutbound,
+  WhatsappOutboundDestinationError
+} from '../services/whatsappIdentity.service';
 import { findContatoS3eNomeAgendaForChat } from '../services/contatosS3e.service';
 import { chatIdToEvolutionNumber } from '../services/whatsappProvider.evolution';
 import {
@@ -538,9 +543,7 @@ export async function getWhatsappConnectionStatus(req: AuthRequest, res: Respons
       return;
     }
     const s = await fetchWhatsappProviderSessionStatus();
-    const dashboardUrl =
-      process.env.WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL?.trim() ||
-      'http://localhost:3333/manager';
+    const dashboardUrl = process.env.WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL?.trim() || '';
     res.json({
       success: true,
       data: {
@@ -769,6 +772,11 @@ export async function getWhatsappProviderContactMeta(req: AuthRequest, res: Resp
     let contact: WhatsappProviderContactRow | null = findWhatsappProviderContactInList(rows, chatId) ?? null;
     if (!contact) {
       contact = await resolveWhatsappProviderContactForChat(chatId);
+    }
+    try {
+      await autoResolveLidIdentityIfNeeded(chatId);
+    } catch (autoResolveErr) {
+      console.warn('[WA-CONTACT-META] autoResolveLidIdentityIfNeeded falhou:', autoResolveErr);
     }
     const profilePictureUrl = await fetchWhatsappProviderProfilePictureUrlForChat(chatId);
     const s3eHit = await findContatoS3eNomeAgendaForChat(chatId);
@@ -1361,6 +1369,10 @@ export async function postWhatsappSendFile(req: AuthRequest, res: Response): Pro
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
     console.error('postWhatsappSendFile', e);
+    if (e instanceof WhatsappOutboundDestinationError) {
+      res.status(422).json({ success: false, error: e.message });
+      return;
+    }
     const msg = e instanceof Error ? e.message : 'Erro ao enviar arquivo';
     const isProviderDocLimit = msg.includes('Limitação de plano do provedor') || msg.includes('HTTP 422');
     res.status(isProviderDocLimit ? 422 : 500).json({ success: false, error: msg });
@@ -1521,6 +1533,10 @@ export async function postWhatsappSendMedia(req: AuthRequest, res: Response): Pr
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
     console.error('postWhatsappSendMedia', e);
+    if (e instanceof WhatsappOutboundDestinationError) {
+      res.status(422).json({ success: false, error: e.message });
+      return;
+    }
     const msg = e instanceof Error ? e.message : 'Erro ao enviar mídia';
     const isProviderDocLimit = msg.includes('Limitação de plano do provedor') || msg.includes('HTTP 422');
     res.status(isProviderDocLimit ? 422 : 500).json({ success: false, error: msg });
@@ -1558,6 +1574,10 @@ export async function postWhatsappSend(req: AuthRequest, res: Response): Promise
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
     console.error('postWhatsappSend', e);
+    if (e instanceof WhatsappOutboundDestinationError) {
+      res.status(422).json({ success: false, error: e.message });
+      return;
+    }
     const msg = e instanceof Error ? e.message : 'Erro ao enviar';
     res.status(500).json({ success: false, error: msg });
   }

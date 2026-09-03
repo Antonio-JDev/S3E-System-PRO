@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { WhatsappChatPreview } from '../../services/whatsappChatService';
+import { whatsappProfilePictureImageUrl } from '../../services/whatsappChatService';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 
 export interface WhatsAppForwardModalProps {
@@ -94,7 +95,10 @@ export const WhatsAppForwardModal: React.FC<WhatsAppForwardModalProps> = ({
                 const checked = selectedChatId === c.chatId;
                 const name = displayChatName(c);
                 const sub = displayChatSubtext(c);
-                const avatar = (c.cachedProfilePictureUrl || '').trim();
+                const avatar = whatsappProfilePictureImageUrl(
+                  c.chatId,
+                  Boolean((c.cachedProfilePictureUrl || '').trim())
+                );
                 return (
                   <li key={c.chatId}>
                     <button

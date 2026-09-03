@@ -50,7 +50,7 @@ describe('ProjetosService.reverterStatus', () => {
     await expect(service.reverterStatus('p1', 'APROVADO')).rejects.toThrow(/anterior/);
   });
 
-  it('rejeita destino VALIDADO (removido do fluxo)', async () => {
-    await expect(service.reverterStatus('p1', 'VALIDADO' as any)).rejects.toThrow(/inválido/);
+  it('rejeita destino EXECUCAO (não permitido no rollback)', async () => {
+    await expect(service.reverterStatus('p1', 'EXECUCAO' as any)).rejects.toThrow(/inválido/);
   });
 });

@@ -5,6 +5,7 @@ import { ContasPagarService } from './contasPagar.service';
 import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
+import { roundMoney } from '../utils/currency';
 import {
     matchMaterial,
     upsertAlias,
@@ -193,6 +194,15 @@ export interface CompraPayload {
     empresaCompradoraCNPJ?: string;
 }
 
+export class CompraNfDuplicadaError extends Error {
+    readonly code = 'COMPRA_NF_DUPLICADA';
+
+    constructor(public readonly numeroSequencial: number) {
+        super(`Nota fiscal já cadastrada (compra #${numeroSequencial})`);
+        this.name = 'CompraNfDuplicadaError';
+    }
+}
+
 export class ComprasService {
     /**
      * Retorna o destino do processamento da compra baseado na classificação.
@@ -211,6 +221,29 @@ export class ComprasService {
         if (cls === 'DESPESAS_VARIADAS') return 'despesas_variadas';
         // LIMPEZA_INSUMOS e ESCRITORIO_INSUMOS seguem fluxo de estoque
         return 'estoque';
+    }
+
+    /** Verifica se já existe compra ativa com a mesma NF e fornecedor (CNPJ). */
+    static async buscarCompraDuplicadaPorNotaFiscal(params: {
+        numeroNF: string;
+        fornecedorCNPJ: string;
+    }): Promise<{ numeroSequencial: number } | null> {
+        const nf = String(params.numeroNF).trim();
+        const cnpj = String(params.fornecedorCNPJ).replace(/\D/g, '');
+        if (!nf || !cnpj) return null;
+
+        const candidatas = await prisma.compra.findMany({
+            where: {
+                numeroNF: nf,
+                status: { not: 'Cancelado' },
+            },
+            select: { numeroSequencial: true, fornecedorCNPJ: true },
+        });
+
+        const match = candidatas.find(
+            (c) => String(c.fornecedorCNPJ).replace(/\D/g, '') === cnpj
+        );
+        return match ? { numeroSequencial: match.numeroSequencial } : null;
     }
 
     /**
@@ -330,7 +363,7 @@ export class ComprasService {
             valorDesconto: valorDescontoRaw = 0,
             status,
             classificacao = 'COMPOSICAO_ESTOQUE', // ✅ NOVO: Classificação da compra (padrão: Composição Estoque)
-            items,
+            items: itemsBrutos,
             observacoes,
             valorIPI = 0,
             valorTotalProdutos,
@@ -352,9 +385,14 @@ export class ComprasService {
         }
 
         // Validações
-        if (!items || items.length === 0) {
+        if (!itemsBrutos || itemsBrutos.length === 0) {
             throw new Error('Compra deve ter pelo menos um item');
         }
+
+        const items = itemsBrutos.map((item) => ({
+            ...item,
+            valorUnit: roundMoney(item.valorUnit),
+        }));
 
         if (destinoTipo === 'OBRA' && !obraId) {
             throw new Error('Compra avulsa para obra exige obraId');
@@ -383,8 +421,16 @@ export class ComprasService {
             throw new Error('Número da NF é obrigatório');
         }
 
-        // Buscar ou criar fornecedor (garantir que CNPJ seja string)
         const cnpjString = String(fornecedorCNPJ);
+        const duplicada = await ComprasService.buscarCompraDuplicadaPorNotaFiscal({
+            numeroNF: String(numeroNF),
+            fornecedorCNPJ: cnpjString,
+        });
+        if (duplicada) {
+            throw new CompraNfDuplicadaError(duplicada.numeroSequencial);
+        }
+
+        // Buscar ou criar fornecedor (garantir que CNPJ seja string)
         let fornecedorTemp = await prisma.fornecedor.findUnique({
             where: { cnpj: cnpjString }
         });
@@ -408,22 +454,24 @@ export class ComprasService {
         const fornecedor = fornecedorTemp;
 
         // Calcular valores básicos
-        const valorSubtotal = items.reduce(
-            (sum, item) => sum + (item.quantidade * item.valorUnit),
-            0
+        const valorSubtotal = roundMoney(
+            items.reduce(
+                (sum, item) => sum + roundMoney(item.quantidade * item.valorUnit),
+                0
+            )
         );
 
-        const valorDesconto = Math.min(
+        const valorDesconto = roundMoney(Math.min(
             Math.max(0, Number(valorDescontoRaw) || 0),
             valorSubtotal
-        );
+        ));
 
         // Preferência de cálculo:
         // 1) Se vier valorTotalNota do XML, confiar nele
         // 2) Caso contrário: (subtotal - desconto) + frete + outras + IPI
         let valorTotal = valorTotalNota && valorTotalNota > 0
-            ? valorTotalNota
-            : valorSubtotal - valorDesconto + valorFrete + outrasDespesas + (valorIPI || 0);
+            ? roundMoney(valorTotalNota)
+            : roundMoney(valorSubtotal - valorDesconto + valorFrete + outrasDespesas + (valorIPI || 0));
 
         // Buscar o próximo número sequencial disponível
         // Isso garante que não haverá conflito mesmo após importações com números específicos
@@ -510,7 +558,7 @@ export class ComprasService {
                         ncm: item.ncm ? String(item.ncm) : null,
                         quantidade: item.quantidade,
                         valorUnit: item.valorUnit,
-                        valorTotal: item.quantidade * item.valorUnit,
+                        valorTotal: roundMoney(item.quantidade * item.valorUnit),
                         quantidadeFracionada: (item as any).quantidadeFracionada,
                         tipoEmbalagem: (item as any).tipoEmbalagem,
                         unidadeEmbalagem: item.unidadeEmbalagem
@@ -644,7 +692,7 @@ export class ComprasService {
                                 nomeProduto: item.nomeProduto,
                                 quantidade: item.quantidade,
                                 valorUnit: item.valorUnit,
-                                valorTotal: item.quantidade * item.valorUnit,
+                                valorTotal: roundMoney(item.quantidade * item.valorUnit),
                                 ncm: item.ncm ? String(item.ncm) : null,
                                 quantidadeFracionada: item.quantidadeFracionada || null,
                                 tipoEmbalagem: item.tipoEmbalagem || null,
@@ -739,7 +787,7 @@ export class ComprasService {
                                 nomeProduto: item.nomeProduto,
                                 quantidade: item.quantidade,
                                 valorUnit: item.valorUnit,
-                                valorTotal: item.quantidade * item.valorUnit,
+                                valorTotal: roundMoney(item.quantidade * item.valorUnit),
                                 ncm: item.ncm ? String(item.ncm) : null,
                                 quantidadeFracionada: item.quantidadeFracionada || null,
                                 tipoEmbalagem: item.tipoEmbalagem || null,
@@ -880,7 +928,7 @@ export class ComprasService {
                     ncm: item.ncm ? String(item.ncm) : null,
                     quantidade: item.quantidade,
                     valorUnit: item.valorUnit,
-                    valorTotal: item.quantidade * item.valorUnit,
+                    valorTotal: roundMoney(item.quantidade * item.valorUnit),
                     codigoFornecedor: idsNf.codigoFornecedor,
                     ean: idsNf.ean,
                     quantidadeFracionada: (item as any).quantidadeFracionada,

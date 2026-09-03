@@ -1,8 +1,167 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { canonicalWhatsappChatId, digitsOnly, waJidToDigits } from '../utils/whatsappChat.util';
-import { evolutionCheckPhoneExists } from './whatsappEvolutionChat.service';
-import { isEvolutionProviderKind } from './whatsappProvider.evolution';
+import { evolutionCheckPhoneExists, evolutionFetchProfile } from './whatsappEvolutionChat.service';
+import { chatIdToEvolutionNumber, isEvolutionProviderKind } from './whatsappProvider.evolution';
+
+/** Destino @lid sem telefone real vinculado — envio deve ser bloqueado. */
+export class WhatsappOutboundDestinationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WhatsappOutboundDestinationError';
+  }
+}
+
+export function isLidJid(jid: string): boolean {
+  return (jid || '').trim().toLowerCase().endsWith('@lid');
+}
+
+export function lidLocalDigitsFromJid(jid: string): string {
+  return digitsOnly((jid || '').split('@')[0] || '');
+}
+
+/** True quando `phoneKey` é só o ID interno do LID (com ou sem prefixo 55), não um celular BR. */
+export function isPhoneKeyDerivedFromLidLocal(phoneKey: string, lidCanon: string): boolean {
+  if (!isLidJid(lidCanon)) return false;
+  const lidLocal = lidLocalDigitsFromJid(lidCanon);
+  if (!lidLocal) return false;
+  const d = digitsOnly(phoneKey);
+  return d === lidLocal || d === `55${lidLocal}`;
+}
+
+function pickLidFromEvolutionProfile(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const top = raw as Record<string, unknown>;
+  const nested =
+    top.data && typeof top.data === 'object' && !Array.isArray(top.data)
+      ? (top.data as Record<string, unknown>)
+      : null;
+  const obj = nested ? { ...top, ...nested } : top;
+  for (const k of ['lid', 'LID']) {
+    const v = obj[k];
+    if (typeof v === 'string' && v.trim().toLowerCase().endsWith('@lid')) {
+      return v.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Telefone real (chave BR) para um chat `@lid`, via identities ou `contatos_s3e.jid`.
+ * Nunca devolve dígitos extraídos do próprio LID.
+ */
+export async function resolveRealPhoneKeyForLidChat(
+  lidCanon: string,
+  identities?: IdentityRow[]
+): Promise<string | null> {
+  if (!isLidJid(lidCanon)) return null;
+  const rows = identities ?? (await loadWhatsappChatIdentities());
+  for (const m of collectMatchingIdentities(lidCanon, rows)) {
+    const k = (m.phoneDigits || '').trim();
+    if (k && !isPhoneKeyDerivedFromLidLocal(k, lidCanon)) {
+      return normalizePhoneDigitsKey(k);
+    }
+  }
+  const byJid = await prisma.contatoS3e.findFirst({
+    where: { jid: lidCanon },
+    select: { numero: true }
+  });
+  if (byJid?.numero) {
+    const k = normalizePhoneDigitsKey(byJid.numero);
+    if (k && !isPhoneKeyDerivedFromLidLocal(k, lidCanon)) return k;
+  }
+  return null;
+}
+
+/**
+ * Consulta Evolution com telefone real, registra LID↔PN e devolve o JID preferido para envio.
+ */
+export async function tryResolveAndRegisterIdentityFromPhone(
+  phoneKey: string,
+  lidCanon?: string
+): Promise<string | null> {
+  if (!isEvolutionProviderKind()) return null;
+  const key = normalizePhoneDigitsKey(phoneKey);
+  if (!key || !isPlausibleBrPhoneDigits(key)) return null;
+  if (lidCanon && isPhoneKeyDerivedFromLidLocal(key, lidCanon)) return null;
+
+  try {
+    const { numberExists, chatId: jid } = await evolutionCheckPhoneExists(key);
+    if (!numberExists || !jid) return null;
+
+    const pnCanon = canonicalWhatsappChatId(jid);
+    let primary = pnCanon;
+
+    try {
+      const raw = await evolutionFetchProfile(chatIdToEvolutionNumber(pnCanon));
+      const lidRaw = pickLidFromEvolutionProfile(raw);
+      if (lidRaw && isLidJid(lidRaw)) {
+        primary = canonicalWhatsappChatId(lidRaw);
+      }
+    } catch {
+      // mantém PN se /user/info falhar
+    }
+
+    if (lidCanon && isLidJid(lidCanon)) {
+      primary = canonicalWhatsappChatId(lidCanon);
+    }
+
+    await recordWhatsappChatIdentity({
+      phoneDigitsKey: key,
+      primaryChatId: primary,
+      source: 'resolve_outbound_lid',
+      extraJids: [pnCanon, ...(lidCanon ? [lidCanon] : [])]
+    });
+    return primary;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort ao abrir chat / contact-meta: tenta criar mapping LID↔PN quando
+ * já temos telefone em `contatos_s3e` mas ainda não há identity.
+ */
+export async function autoResolveLidIdentityIfNeeded(chatIdRaw: string): Promise<void> {
+  const canon = canonicalWhatsappChatId((chatIdRaw || '').trim());
+  if (!isLidJid(canon)) return;
+
+  const keys = await resolvePhoneDigitKeysForChat(canon);
+  if (keys.length > 0) return;
+
+  const identities = await loadWhatsappChatIdentities();
+  const phoneKey = await resolveRealPhoneKeyForLidChat(canon, identities);
+  if (!phoneKey) return;
+
+  await tryResolveAndRegisterIdentityFromPhone(phoneKey, canon);
+}
+
+/**
+ * Garante que conversas `@lid` tenham telefone real mapeado antes do envio.
+ * Chats PN (@c.us) e grupos não são afetados.
+ */
+export async function assertOutboundDestinationReady(chatIdRaw: string): Promise<void> {
+  const canon = canonicalWhatsappChatId((chatIdRaw || '').trim());
+  if (!canon || !isLidJid(canon)) return;
+
+  let keys = await resolvePhoneDigitKeysForChat(canon);
+  if (keys.length > 0) return;
+
+  const identities = await loadWhatsappChatIdentities();
+  const phoneKey = await resolveRealPhoneKeyForLidChat(canon, identities);
+  if (phoneKey) {
+    const resolved = await tryResolveAndRegisterIdentityFromPhone(phoneKey, canon);
+    if (resolved) {
+      keys = await resolvePhoneDigitKeysForChat(canon);
+      if (keys.length > 0) return;
+    }
+  }
+
+  throw new WhatsappOutboundDestinationError(
+    'Não foi possível confirmar o telefone deste contato (conversa @lid). ' +
+      'Informe o número em Contatos S3E ou use "Buscar perfil" no chat antes de enviar.'
+  );
+}
 
 function parseAliasesJson(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -152,6 +311,16 @@ export async function resolvePreferredChatIdForOutbound(chatIdRaw: string): Prom
   const directMatches = collectMatchingIdentities(canon, identities);
   const preferred = pickBestPrimaryFromMatches(directMatches);
   if (preferred) return preferred;
+
+  // `@lid` sem identity: nunca tratar dígitos do LID como telefone BR.
+  if (isLidJid(canon)) {
+    const phoneKey = await resolveRealPhoneKeyForLidChat(canon, identities);
+    if (phoneKey && isEvolutionProviderKind()) {
+      const resolved = await tryResolveAndRegisterIdentityFromPhone(phoneKey, canon);
+      if (resolved) return resolved;
+    }
+    return canon;
+  }
 
   const digits = waJidToDigits(canon);
   const phoneKey = normalizePhoneDigitsKey(digits);

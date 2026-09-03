@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/auth';
+import {
+  isOsTipoQuadrosPainels,
+  isTaskEntregaWorkflow,
+  validarEntregaQuadro,
+} from '../utils/osEntregaQuadro.util';
 
 /** Converte YYYY-MM-DD em Date UTC ao meio-dia (evita exibir “um dia antes” em fusos como America/Sao_Paulo). */
 function parseDateOnlyToNoonUtc(value: unknown): Date | null {
@@ -73,7 +78,7 @@ function parseResponsaveisIds(body: { responsavel?: string; responsaveis?: strin
 export const createTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { projetoId } = req.params;
-    const { titulo, descricao, status, prioridade, prazo, dataInicio, responsavel, responsaveis } = req.body;
+    const { titulo, descricao, status, prioridade, prazo, dataInicio, responsavel, responsaveis, metadados } = req.body;
     const authUser = (req as AuthRequest).user;
     const responsaveisIds = parseResponsaveisIds({ responsavel, responsaveis });
     const primeiro = responsaveisIds[0] || null;
@@ -151,7 +156,7 @@ export const createTask = async (req: Request, res: Response): Promise<void> => 
 export const updateTask = async (req: Request, res: Response): Promise<void> => {
   try {
     const { projetoId, taskId } = req.params;
-    const { titulo, descricao, status, prioridade, prazo, dataInicio, responsavel, responsaveis } = req.body;
+    const { titulo, descricao, status, prioridade, prazo, dataInicio, responsavel, responsaveis, metadados } = req.body;
     const responsaveisIds = responsaveis !== undefined
       ? parseResponsaveisIds({ responsavel, responsaveis })
       : undefined;
@@ -167,6 +172,11 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ success: false, message: 'Task não encontrada' });
       return;
     }
+
+    const projeto = await prisma.projeto.findUnique({
+      where: { id: projetoId },
+      select: { tipo: true },
+    });
 
     const updateData: Record<string, unknown> = {};
     if (titulo) updateData.titulo = titulo;
@@ -191,8 +201,40 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
         ? ([responsavel] as unknown as Prisma.InputJsonValue)
         : Prisma.JsonNull;
     }
+    if (metadados !== undefined) {
+      updateData.metadados =
+        metadados == null
+          ? Prisma.JsonNull
+          : (metadados as Prisma.InputJsonValue);
+    }
 
     const statusAnterior = String(taskExistente.status || '').toLowerCase();
+    const statusEfetivo = String(status ?? taskExistente.status ?? '').toLowerCase();
+    const virouConcluidaPretendida =
+      statusEfetivo === 'done' ||
+      statusEfetivo === 'concluído' ||
+      statusEfetivo === 'concluido';
+
+    if (
+      virouConcluidaPretendida &&
+      isTaskEntregaWorkflow(taskExistente.titulo) &&
+      isOsTipoQuadrosPainels(projeto?.tipo)
+    ) {
+      const metadadosEfetivos =
+        metadados !== undefined ? metadados : taskExistente.metadados;
+      try {
+        validarEntregaQuadro(metadadosEfetivos);
+      } catch (validationError) {
+        res.status(400).json({
+          success: false,
+          message:
+            validationError instanceof Error
+              ? validationError.message
+              : 'Dados de entrega inválidos',
+        });
+        return;
+      }
+    }
 
     const task = await prisma.task.update({
       where: { id: taskId },

@@ -20,7 +20,8 @@ import {
   formatarExecucaoLegivel,
   splitDiariasEquivalentes,
 } from '../utils/apontamentoExecucao.util';
-import { localYmdFromDate } from '../utils/date';
+import { nowYmdInSaoPaulo, serverDateToInput, formatDateDisplay } from '../utils/date';
+import { usuarioApontamentoEngenharia } from '../utils/apontamentoEngenharia.util';
 
 interface LinhaApontamento {
   id: string;
@@ -86,7 +87,11 @@ function formatarItemApontamento(item: {
 }): string {
   const nome = item.user?.name || item.funcionario?.nome || 'Colaborador';
   if (item.tipoRecurso === 'HORA_ENGENHARIA') {
-    return `${nome}: ${item.quantidade}h`;
+    return `${nome}: ${formatQuantidade(item.quantidade, 'h')}`;
+  }
+  const { dias, horas } = splitDiariasEquivalentes(item.quantidade);
+  if (dias === 0 && horas > 0) {
+    return `${nome}: ${formatQuantidade(horas, 'h')}`;
   }
   return `${nome}: ${formatarExecucaoDeQuantidade(item.quantidade)}`;
 }
@@ -98,7 +103,7 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
   onClose,
   onSaved,
 }) => {
-  const [dataApontamento, setDataApontamento] = useState(() => localYmdFromDate(new Date()));
+  const [dataApontamento, setDataApontamento] = useState(() => nowYmdInSaoPaulo());
   const [observacoes, setObservacoes] = useState('');
   const [linhas, setLinhas] = useState<LinhaApontamento[]>([novaLinha()]);
   const [usuarios, setUsuarios] = useState<Array<{ id: string; nome: string }>>([]);
@@ -107,12 +112,13 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
   const [historico, setHistorico] = useState<ApontamentoOs[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
 
   useEscapeKey(isOpen, onClose);
 
   const resetFormulario = useCallback(() => {
-    setDataApontamento(localYmdFromDate(new Date()));
+    setDataApontamento(nowYmdInSaoPaulo());
     setObservacoes('');
     setLinhas([novaLinha()]);
     setEditandoId(null);
@@ -131,8 +137,9 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
 
       if (usuariosRes.success && usuariosRes.data) {
         const lista = Array.isArray(usuariosRes.data) ? usuariosRes.data : [];
+        const engenheiros = lista.filter((u: any) => usuarioApontamentoEngenharia(u));
         setUsuarios(
-          lista.map((u: any) => ({
+          engenheiros.map((u: any) => ({
             id: u.id,
             nome: u.name || u.nome || u.email,
           }))
@@ -306,12 +313,8 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
   };
 
   const iniciarEdicao = (apontamento: ApontamentoOs) => {
-    const dataStr =
-      typeof apontamento.dataApontamento === 'string'
-        ? apontamento.dataApontamento.slice(0, 10)
-        : localYmdFromDate(new Date(apontamento.dataApontamento));
     setEditandoId(apontamento.id);
-    setDataApontamento(dataStr);
+    setDataApontamento(serverDateToInput(apontamento.dataApontamento) || nowYmdInSaoPaulo());
     setObservacoes(apontamento.observacoes || '');
     setLinhas(
       apontamento.itens.length > 0
@@ -329,6 +332,34 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
 
   const cancelarEdicao = () => {
     resetFormulario();
+  };
+
+  const handleExcluir = async (apontamento: ApontamentoOs) => {
+    if (
+      !window.confirm(
+        `Excluir o apontamento de ${formatDateDisplay(apontamento.dataApontamento)}? Você poderá lançar novamente em seguida.`
+      )
+    ) {
+      return;
+    }
+
+    setExcluindoId(apontamento.id);
+    try {
+      const res = await apropriacaoOsService.excluir(projetoId, apontamento.id);
+      if (res.success) {
+        toast.success('Apontamento excluído');
+        if (editandoId === apontamento.id) {
+          cancelarEdicao();
+        }
+        await aplicarResumoSalvo(res as { success?: boolean; resumoAtualizado?: ResultadoOsCalculado });
+      } else {
+        toast.error(res.error || 'Erro ao excluir apontamento');
+      }
+    } catch {
+      toast.error('Erro ao excluir apontamento');
+    } finally {
+      setExcluindoId(null);
+    }
   };
 
   const payloadPreview = useMemo(
@@ -560,7 +591,7 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
                         className="p-2 rounded-lg bg-gray-50 dark:bg-dark-bg border border-gray-100 dark:border-dark-border flex items-start justify-between gap-2"
                       >
                         <div className="min-w-0 flex-1">
-                          <strong>{new Date(h.dataApontamento).toLocaleDateString('pt-BR')}</strong>
+                          <strong>{formatDateDisplay(h.dataApontamento)}</strong>
                           {h.observacoes ? (
                             <span className="text-gray-500"> — {h.observacoes}</span>
                           ) : null}
@@ -570,13 +601,24 @@ const ModalApontamentoOs: React.FC<ModalApontamentoOsProps> = ({
                             ))}
                           </ul>
                         </div>
-                        <button
-                          type="button"
-                          className="shrink-0 text-xs font-semibold text-blue-600 hover:underline"
-                          onClick={() => iniciarEdicao(h)}
-                        >
-                          Editar
-                        </button>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-blue-600 hover:underline disabled:opacity-50"
+                            onClick={() => iniciarEdicao(h)}
+                            disabled={Boolean(excluindoId)}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                            onClick={() => void handleExcluir(h)}
+                            disabled={excluindoId === h.id || saving}
+                          >
+                            {excluindoId === h.id ? 'Excluindo...' : 'Excluir'}
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

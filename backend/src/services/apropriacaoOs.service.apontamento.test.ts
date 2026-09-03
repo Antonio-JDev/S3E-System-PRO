@@ -1,6 +1,6 @@
 const prismaMock = {
   projeto: { findUnique: jest.fn() },
-  apontamentoOs: { findFirst: jest.fn(), update: jest.fn() },
+  apontamentoOs: { findFirst: jest.fn(), update: jest.fn(), delete: jest.fn() },
   apontamentoOsItem: { deleteMany: jest.fn(), findMany: jest.fn() },
   $transaction: jest.fn(),
 };
@@ -91,5 +91,32 @@ describe('apropriacaoOsService.atualizarApontamento', () => {
         ],
       })
     ).rejects.toThrow(/não encontrado/);
+  });
+});
+
+describe('apropriacaoOsService.excluirApontamento', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('exclui apontamento e retorna resumo atualizado', async () => {
+    prismaMock.projeto.findUnique.mockResolvedValue({
+      id: 'p1',
+      status: 'EXECUCAO',
+      horasEngenhariaOrcadas: 0,
+      diariasEquipeOrcadas: 0,
+      valorHoraEngenharia: 0,
+      valorDiariaEquipe: 0,
+      valorTotal: 0,
+      orcamento: null,
+    });
+    prismaMock.apontamentoOsItem.findMany.mockResolvedValue([]);
+    prismaMock.apontamentoOs.findFirst.mockResolvedValue({ id: 'a1', projetoId: 'p1' });
+    prismaMock.apontamentoOs.delete.mockResolvedValue({ id: 'a1' });
+
+    const result = await apropriacaoOsService.excluirApontamento('p1', 'a1');
+
+    expect(prismaMock.apontamentoOs.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
+    expect(result.resumoAtualizado).toBeDefined();
   });
 });

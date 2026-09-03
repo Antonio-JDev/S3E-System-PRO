@@ -7,6 +7,8 @@ import {
   projetosService,
   EstoqueInsuficienteError,
   validarCamposPlanejamentoOs,
+  sincronizarWorkflowTasks,
+  isOsWorkflowTipo,
   type CamposPlanejamentoOsInput,
 } from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
@@ -613,6 +615,23 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
       },
     });
 
+    let tasksWorkflowCriadas = 0;
+    const tipoAlterado =
+      tipo !== undefined && String(tipo) !== String(projetoExistente.tipo);
+    if (
+      tipoAlterado &&
+      isOsWorkflowTipo(String(tipo)) &&
+      projetoExistente.status !== 'CONCLUIDO'
+    ) {
+      const authUser = (req as AuthRequest).user;
+      const sync = await sincronizarWorkflowTasks(
+        id,
+        String(tipo),
+        authUser?.userId ?? null,
+      );
+      tasksWorkflowCriadas = sync.criadas;
+    }
+
     res.json({
       success: true,
       data: {
@@ -621,7 +640,11 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
           ? { id: (projetoFinal ?? projeto).responsavel!.id, nome: (projetoFinal ?? projeto).responsavel!.name }
           : null
       },
-      message: 'Projeto atualizado com sucesso'
+      tasksWorkflowCriadas,
+      message:
+        tasksWorkflowCriadas > 0
+          ? `Projeto atualizado. ${tasksWorkflowCriadas} tarefa(s) do checklist foram adicionadas ao Kanban.`
+          : 'Projeto atualizado com sucesso'
     });
   } catch (error) {
     console.error('Erro ao atualizar projeto:', error);

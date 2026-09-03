@@ -89,6 +89,12 @@ describe('compraItemList.util', () => {
       });
     });
 
+    it('arredonda valor unitário e subtotal para 2 casas decimais', () => {
+      const result = commitInlineNumericDraft(item, { quantity: '3', unitCost: '25,356' });
+      expect(result?.unitCost).toBe(25.36);
+      expect(result?.totalCost).toBe(76.08);
+    });
+
     it('rejeita rascunho incompleto', () => {
       expect(commitInlineNumericDraft(item, { quantity: '', unitCost: '10' })).toBeNull();
       expect(commitInlineNumericDraft(item, { quantity: '2', unitCost: '' })).toBeNull();

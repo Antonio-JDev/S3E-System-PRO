@@ -29,6 +29,17 @@ const mocks = (PrismaClient as any).__mocks as {
   delete: jest.Mock;
 };
 
+const leadListIncludeExpect = {
+  cliente: { select: { id: true, nome: true, cpfCnpj: true } },
+  responsavel: { select: { id: true, name: true, setor: true, role: true } },
+  _count: { select: { orcamentos: true } },
+  orcamentos: {
+    select: { numeroSequencial: true },
+    orderBy: { numeroSequencial: 'desc' },
+    take: 1,
+  },
+};
+
 describe('atendimentoCrmController (Funil de Atendimento)', () => {
   let mockReq: Partial<Request>;
   let mockRes: Partial<Response>;
@@ -56,7 +67,7 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
           cliente: null,
         },
       ];
-      mocks.findMany.mockResolvedValue(leads);
+      mocks.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce(leads);
       mockReq = { query: {} };
 
       await atendimentoCrmController.list(
@@ -64,26 +75,21 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         mockRes as Response
       );
 
-      expect(mocks.findMany).toHaveBeenCalledWith(
+      expect(mocks.findMany).toHaveBeenLastCalledWith(
         expect.objectContaining({
           where: {},
-          include: {
-            cliente: { select: { id: true, nome: true, cpfCnpj: true } },
-            _count: { select: { orcamentos: true } },
-            orcamentos: {
-              select: { numeroSequencial: true },
-              orderBy: { numeroSequencial: 'desc' },
-              take: 1,
-            },
-          },
+          include: leadListIncludeExpect,
           orderBy: { updatedAt: 'desc' },
         })
       );
-      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: leads });
+      expect(jsonMock).toHaveBeenCalledWith({
+        success: true,
+        data: leads.map((lead) => ({ ...lead, responsavel: null })),
+      });
     });
 
     it('deve filtrar por status quando query.status é informado', async () => {
-      mocks.findMany.mockResolvedValue([]);
+      mocks.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       mockReq = { query: { status: 'EM_ANALISE_TECNICA' } };
 
       await atendimentoCrmController.list(
@@ -91,7 +97,7 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         mockRes as Response
       );
 
-      expect(mocks.findMany).toHaveBeenCalledWith(
+      expect(mocks.findMany).toHaveBeenLastCalledWith(
         expect.objectContaining({
           where: { status: 'EM_ANALISE_TECNICA' },
         })
@@ -149,7 +155,7 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         mockRes as Response
       );
 
-      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: lead });
+      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: { ...lead, responsavel: null } });
     });
   });
 
@@ -203,7 +209,7 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         })
       );
       expect(statusMock).toHaveBeenCalledWith(201);
-      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: created });
+      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: { ...created, responsavel: null } });
     });
   });
 
@@ -249,7 +255,7 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
       );
 
       expect(mocks.update).toHaveBeenCalled();
-      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: updated });
+      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: { ...updated, responsavel: null } });
     });
 
     it('mantém CONVERTIDO quando lead já tem orçamento e body tenta PRONTO_PARA_ORCAR', async () => {
@@ -365,8 +371,12 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
           anexosUrls: ['/uploads/contato-lead/conta-123.pdf'],
           contaEnergiaUrl: '/uploads/contato-lead/conta-123.pdf',
         },
+        include: leadListIncludeExpect,
       });
-      expect(jsonMock).toHaveBeenCalledWith({ success: true, data: leadUpdated });
+      expect(jsonMock).toHaveBeenCalledWith({
+        success: true,
+        data: { ...leadUpdated, responsavel: null },
+      });
     });
   });
 });

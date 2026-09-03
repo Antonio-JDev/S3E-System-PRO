@@ -7,17 +7,21 @@ import {
   extrairFinalNumericoPlaca,
   nomeMesIpva,
 } from '../utils/ipvaPlaca.util';
-import { enriquecerVencimentosVeiculo, calcularDiasAteVencimento } from '../utils/vencimentoVeiculo.util';
+import { enriquecerVencimentosVeiculo, calcularDiasAteVencimento, parseDataDiaCivilInput } from '../utils/vencimentoVeiculo.util';
+import { inicioFimMesCivilUtc, ymdCivilBrasilia } from '../utils/datetime-sp.util';
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function mesReferenciaBrasilia(ref: Date = new Date()): string {
+  const { ano, mes } = ymdCivilBrasilia(ref);
+  return `${ano}-${pad2(mes)}`;
+}
 
 function mapVeiculoResponse(veiculo: any, extras: Record<string, unknown> = {}) {
   const venc = enriquecerVencimentosVeiculo(veiculo);
   return { ...veiculo, ...extras, ...venc };
-}
-
-function parseDataOpcional(value?: string | null): Date | undefined {
-  if (value == null || value === '') return undefined;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function mapGastoCombustivel(g: { tipo: string; data: Date; km: number | null; litros: unknown }) {
@@ -40,7 +44,7 @@ export const VeiculosService = {
             orderBy: { modelo: 'asc' }
         });
 
-        const mesRef = new Date().toISOString().slice(0, 7);
+        const mesRef = mesReferenciaBrasilia();
 
         return veiculos.map(veiculo => {
             const gastosCombustivel = veiculo.gastos.map(mapGastoCombustivel);
@@ -66,7 +70,7 @@ export const VeiculosService = {
 
         if (!veiculo) return null;
 
-        const mesRef = new Date().toISOString().slice(0, 7);
+        const mesRef = mesReferenciaBrasilia();
         const consumo = calcularResumoConsumo(veiculo.gastos.map(mapGastoCombustivel), mesRef);
 
         return mapVeiculoResponse(veiculo, {
@@ -95,8 +99,8 @@ export const VeiculosService = {
                 ano: data.ano,
                 status: data.status,
                 kmAtual: data.kmAtual,
-                dataVencimentoIpva: parseDataOpcional(data.dataVencimentoIpva),
-                dataVencimentoLicenciamento: parseDataOpcional(data.dataVencimentoLicenciamento),
+                dataVencimentoIpva: parseDataDiaCivilInput(data.dataVencimentoIpva),
+                dataVencimentoLicenciamento: parseDataDiaCivilInput(data.dataVencimentoLicenciamento),
             },
         });
     },
@@ -114,12 +118,12 @@ export const VeiculosService = {
         const updateData: Record<string, unknown> = { ...data };
         if (data.dataVencimentoIpva !== undefined) {
             updateData.dataVencimentoIpva =
-                data.dataVencimentoIpva ? parseDataOpcional(data.dataVencimentoIpva) : null;
+                data.dataVencimentoIpva ? parseDataDiaCivilInput(data.dataVencimentoIpva) : null;
         }
         if (data.dataVencimentoLicenciamento !== undefined) {
             updateData.dataVencimentoLicenciamento =
                 data.dataVencimentoLicenciamento
-                    ? parseDataOpcional(data.dataVencimentoLicenciamento)
+                    ? parseDataDiaCivilInput(data.dataVencimentoLicenciamento)
                     : null;
         }
         return await prisma.veiculo.update({
@@ -140,14 +144,15 @@ export const VeiculosService = {
             include: { gastos: { orderBy: { data: 'asc' } } },
         });
         if (!veiculo) return null;
-        const mesRef = new Date().toISOString().slice(0, 7);
+        const mesRef = mesReferenciaBrasilia();
         return calcularResumoConsumo(veiculo.gastos.map(mapGastoCombustivel), mesRef);
     },
 
     async obterAlertasIpva(mes?: number, ano?: number) {
         const agora = new Date();
-        const mesRef = mes ?? agora.getMonth() + 1;
-        const anoRef = ano ?? agora.getFullYear();
+        const civil = ymdCivilBrasilia(agora);
+        const mesRef = mes ?? civil.mes;
+        const anoRef = ano ?? civil.ano;
 
         const veiculos = await prisma.veiculo.findMany({
             where: { status: 'Ativo' },
@@ -178,17 +183,21 @@ export const VeiculosService = {
     },
 
     async obterMetricasFrota() {
+        const civil = ymdCivilBrasilia();
+        const { inicio, fim } = inicioFimMesCivilUtc(civil.ano, civil.mes);
+
         const veiculos = await prisma.veiculo.findMany({
             where: { status: 'Ativo' },
             include: {
                 gastos: {
                     where: {
                         data: {
-                            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-                        }
-                    }
-                }
-            }
+                            gte: inicio,
+                            lte: fim,
+                        },
+                    },
+                },
+            },
         });
 
         const totalVeiculos = veiculos.length;

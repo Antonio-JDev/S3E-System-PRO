@@ -81,7 +81,7 @@ describe('ContasPagarService — juros e desconto', () => {
       await ContasPagarService.pagarConta(
         'cp-1',
         '2026-05-28',
-        72.05,
+        75.05,
         'ok',
         'PIX',
         5,
@@ -120,7 +120,7 @@ describe('ContasPagarService — juros e desconto', () => {
       await ContasPagarService.pagarConta(
         'cp-2',
         undefined,
-        140,
+        100,
         undefined,
         undefined,
         10,
@@ -132,6 +132,44 @@ describe('ContasPagarService — juros e desconto', () => {
           data: expect.objectContaining({
             valorJuros: 10,
             valorDesconto: 50,
+          }),
+        })
+      );
+    });
+
+    it('quita parcela com desconto negociado na hora do pagamento', async () => {
+      (prisma.contaPagar.findUnique as jest.Mock).mockResolvedValue({
+        id: 'cp-desc-pag',
+        valorParcela: 1698.85,
+        valorJuros: 0,
+        valorDesconto: 0,
+        status: ContaStatus.Pendente,
+        observacoes: null,
+        descricao: 'NF fornecedor',
+        tipo: 'FORNECEDOR',
+      });
+      (prisma.contaPagar.update as jest.Mock).mockResolvedValue({
+        id: 'cp-desc-pag',
+        status: ContaStatus.Pago,
+        valorParcela: 1698.85,
+        descricao: 'NF fornecedor',
+      });
+
+      await ContasPagarService.pagarConta(
+        'cp-desc-pag',
+        '2026-09-02',
+        1698.85,
+        'ok',
+        'PIX',
+        0,
+        8
+      );
+
+      expect(prisma.contaPagar.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ContaStatus.Pago,
+            valorDesconto: 8,
           }),
         })
       );

@@ -16,9 +16,20 @@ import {
   evolutionGoInstanceStatus,
   evolutionGoProxyRequest
 } from './whatsappEvolutionGoBridge';
-import { recordWhatsappChatIdentity, resolvePreferredChatIdForOutbound } from './whatsappIdentity.service';
+import {
+  recordWhatsappChatIdentity,
+  resolvePreferredChatIdForOutbound,
+  assertOutboundDestinationReady,
+  expandedStorageChatIdVariants,
+  loadWhatsappChatIdentities
+} from './whatsappIdentity.service';
 import { persistContatoS3eJidAndInteraction, refreshContatoS3eFromWhatsappNumbers } from './contatosS3e.service';
 import { withWhatsappSendLock } from './whatsappSendQueue.service';
+import {
+  profilePictureNegativeDiskAny,
+  profilePictureNegativeDiskSet,
+  profilePictureNegativeDiskSetMany
+} from '../utils/whatsappProfilePictureNegativeCache.util';
 
 const baseUrl = (): string =>
   (process.env.WHATSAPP_PROVIDER_BASE_URL || 'http://whatsapp-provider:8080').replace(/\/$/, '');
@@ -875,6 +886,18 @@ function profilePictureNullCacheGet(chatId: string): boolean {
 function profilePictureNullCacheSet(chatId: string): void {
   const k = chatId.trim().toLowerCase();
   profilePictureNullCache.set(k, Date.now() + PROFILE_PICTURE_NULL_TTL_MS);
+  profilePictureNegativeDiskSet(chatId);
+}
+
+async function profilePictureNullCacheSetForChat(chatId: string): Promise<void> {
+  profilePictureNullCacheSet(chatId);
+  try {
+    const identities = await loadWhatsappChatIdentities();
+    const variants = expandedStorageChatIdVariants(chatId, identities);
+    profilePictureNegativeDiskSetMany(variants);
+  } catch {
+    profilePictureNegativeDiskSet(chatId);
+  }
 }
 
 /**
@@ -932,7 +955,7 @@ export async function fetchWhatsappProviderProfilePictureUrlForChat(
   // Cache negativo em memória: se já tentamos buscar nos últimos 10 minutos
   // e falhou (foto privada / contato sem foto / EvoGo timeout), economiza
   // ~3s por hover e mantém a UI fluida.
-  if (profilePictureNullCacheGet(canon)) {
+  if (profilePictureNullCacheGet(canon) || profilePictureNegativeDiskAny([canon])) {
     return null;
   }
 
@@ -953,7 +976,7 @@ export async function fetchWhatsappProviderProfilePictureUrlForChat(
     : null;
 
   if (!found) {
-    profilePictureNullCacheSet(canon);
+    await profilePictureNullCacheSetForChat(canon);
   }
   return found;
 }
@@ -1096,6 +1119,7 @@ async function sendWhatsappProviderTextRaw(
     const path = `/message/sendText/${encodeURIComponent(inst)}`;
     await refreshContatoS3eFromWhatsappNumbers(chatId);
     const resolved = await resolvePreferredChatIdForOutbound(chatId);
+    await assertOutboundDestinationReady(resolved);
     let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
     const quoted = buildProviderQuotedPayload(canonicalWhatsappChatId(resolved), options);
     const buildBody = (n: string): Record<string, unknown> => {
@@ -1192,6 +1216,7 @@ async function sendWhatsappProviderMediaRaw(
     const path = `/message/sendMedia/${encodeURIComponent(inst)}`;
     await refreshContatoS3eFromWhatsappNumbers(payload.chatId);
     const resolved = await resolvePreferredChatIdForOutbound(payload.chatId);
+    await assertOutboundDestinationReady(resolved);
     let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
     const base = evolutionMediaType(payload.type);
     const isVoice = payload.type === 'voice';
@@ -1510,7 +1535,7 @@ export async function fetchWhatsappProviderMessageDownloadMedia(
           lastError = new Error('Evolution não retornou base64 de mídia para a mensagem informada');
           continue;
         }
-        return new Response(parsed.buffer, {
+        return new Response(Buffer.from(parsed.buffer), {
           status: 200,
           headers: {
             'content-type': parsed.contentType || 'application/octet-stream',

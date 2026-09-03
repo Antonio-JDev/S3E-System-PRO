@@ -28,7 +28,15 @@ export const OS_WORKFLOW_TEMPLATES: Record<OsWorkflowTipo, readonly string[]> = 
   ],
   LAUDO_TECNICO: ['Levantamento', 'Ensaio In Loco', 'Relatório Final', 'Cobrança', 'Entrega'],
   MANUTENCAO_EMERGENCIA: ['Levantamento', 'Cobrança'],
-  QUADROS_PAINEIS: ['Levantamento', 'Montagem', 'Entrega', 'Cobrança'],
+  QUADROS_PAINEIS: [
+    'Reserva de material',
+    'Levantamento de materiais',
+    'Compra de materiais',
+    'Montagem',
+    'Diagrama',
+    'Entrega',
+    'Cobrança',
+  ],
   DESLIGAMENTO: [
     'Levantamento',
     'Aprovação do Desligamento',
@@ -130,9 +138,6 @@ export function validarCamposPlanejamentoOs(data: CamposPlanejamentoOsInput): vo
   if (!Number.isFinite(diarias) || diarias < 0) {
     throw new Error('Diárias de equipe orçadas inválidas');
   }
-  if (horas === 0 && diarias === 0) {
-    throw new Error('Informe ao menos horas de engenharia ou diárias de equipe orçadas');
-  }
 }
 
 type PrismaTx = Prisma.TransactionClient;
@@ -154,6 +159,42 @@ function scaffoldWorkflowTasks(
       criadoPorId: criadoPorId ?? null,
     })),
   });
+}
+
+/** Cria no Kanban apenas as tasks do template que ainda não existem (preserva progresso). */
+export async function sincronizarWorkflowTasks(
+  projetoId: string,
+  tipo: string,
+  criadoPorId?: string | null,
+): Promise<{ criadas: number }> {
+  if (!isOsWorkflowTipo(tipo)) return { criadas: 0 };
+
+  const template = OS_WORKFLOW_TEMPLATES[tipo];
+  const existentes = await prisma.task.findMany({
+    where: { projetoId },
+    select: { titulo: true },
+  });
+  const titulosExistentes = new Set(
+    existentes.map((t) => t.titulo.trim().toLowerCase()),
+  );
+
+  const faltantes = template.filter(
+    (titulo) => !titulosExistentes.has(titulo.trim().toLowerCase()),
+  );
+  if (faltantes.length === 0) return { criadas: 0 };
+
+  await prisma.task.createMany({
+    data: faltantes.map((titulo) => ({
+      projetoId,
+      titulo,
+      status: 'ToDo',
+      prioridade: 'Media',
+      ordem: template.indexOf(titulo),
+      criadoPorId: criadoPorId ?? null,
+    })),
+  });
+
+  return { criadas: faltantes.length };
 }
 
 /**

@@ -3,8 +3,16 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { canonicalWhatsappChatId } from '../utils/whatsappChat.util';
+import {
+  profilePictureNegativeDiskAny,
+  profilePictureNegativeDiskSetMany
+} from '../utils/whatsappProfilePictureNegativeCache.util';
 import { fetchWhatsappProviderProfilePictureUrlForChat } from './whatsappProvider.service';
 import { persistWhatsappContactCache } from './whatsappChat.service';
+import {
+  expandedStorageChatIdVariants,
+  loadWhatsappChatIdentities
+} from './whatsappIdentity.service';
 
 const PROFILE_PIC_DIR = path.join(process.cwd(), 'uploads', 'whatsapp-profile-pics');
 
@@ -76,9 +84,35 @@ function readCachedFile(paths: { img: string; meta: string }): {
   }
 }
 
+function readCachedFileForVariants(chatIds: string[]): {
+  buffer: Buffer;
+  contentType: string;
+  etag: string;
+} | null {
+  for (const id of chatIds) {
+    const hit = readCachedFile(profilePicPaths(id));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function writeCachedFileForVariants(
+  chatIds: string[],
+  buffer: Buffer,
+  meta: ProfilePicMeta
+): void {
+  ensureProfilePicDir();
+  for (const id of chatIds) {
+    const paths = profilePicPaths(id);
+    fs.writeFileSync(paths.img, buffer);
+    fs.writeFileSync(paths.meta, JSON.stringify(meta));
+  }
+}
+
 /**
  * Foto de perfil servida pelo backend (sem hotlink no browser → sem 403).
  * Persiste em disco; só baixa de novo quando a URL de origem mudar.
+ * Replica cache entre variantes LID↔PN do mesmo contato.
  */
 export async function getWhatsappProfilePictureImage(
   chatId: string
@@ -87,9 +121,32 @@ export async function getWhatsappProfilePictureImage(
   if (!canon) return null;
 
   ensureProfilePicDir();
-  const paths = profilePicPaths(canon);
+  const identities = await loadWhatsappChatIdentities();
+  const variants = expandedStorageChatIdVariants(canon, identities);
+  const variantKeys = variants.map((v) => canonicalWhatsappChatId(v)).filter(Boolean);
+
+  const diskHit = readCachedFileForVariants(variantKeys);
+  if (diskHit) return diskHit;
+
+  if (profilePictureNegativeDiskAny(variantKeys)) {
+    return null;
+  }
 
   let sourceUrl = await fetchWhatsappProviderProfilePictureUrlForChat(canon);
+  if (!sourceUrl) {
+    for (const v of variantKeys) {
+      if (v === canon) continue;
+      const row = await prisma.whatsappContactCache.findUnique({
+        where: { chatId: v },
+        select: { profilePictureUrl: true }
+      });
+      const u = row?.profilePictureUrl?.trim();
+      if (u) {
+        sourceUrl = u;
+        break;
+      }
+    }
+  }
   if (!sourceUrl) {
     const row = await prisma.whatsappContactCache.findUnique({
       where: { chatId: canon },
@@ -99,18 +156,22 @@ export async function getWhatsappProfilePictureImage(
   }
 
   if (!sourceUrl) {
-    return readCachedFile(paths);
+    profilePictureNegativeDiskSetMany(variantKeys);
+    return null;
   }
 
+  const paths = profilePicPaths(canon);
   if (fs.existsSync(paths.img) && fs.existsSync(paths.meta)) {
     try {
       const meta = JSON.parse(fs.readFileSync(paths.meta, 'utf8')) as ProfilePicMeta;
       if (meta.sourceUrl === sourceUrl) {
-        return {
+        const result = {
           buffer: fs.readFileSync(paths.img),
           contentType: meta.contentType || 'image/jpeg',
           etag: sourceUrl
         };
+        writeCachedFileForVariants(variantKeys, result.buffer, meta);
+        return result;
       }
     } catch {
       // rebaixa abaixo
@@ -119,12 +180,12 @@ export async function getWhatsappProfilePictureImage(
 
   const remote = await fetchRemoteImageBytes(sourceUrl);
   if (!remote) {
-    return readCachedFile(paths);
+    profilePictureNegativeDiskSetMany(variantKeys);
+    return readCachedFileForVariants(variantKeys);
   }
 
   const meta: ProfilePicMeta = { sourceUrl, contentType: remote.contentType };
-  fs.writeFileSync(paths.img, remote.buffer);
-  fs.writeFileSync(paths.meta, JSON.stringify(meta));
+  writeCachedFileForVariants(variantKeys, remote.buffer, meta);
 
   try {
     const row = await prisma.whatsappContactCache.findUnique({

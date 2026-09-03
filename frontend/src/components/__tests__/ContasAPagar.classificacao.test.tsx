@@ -10,6 +10,7 @@ import { axiosApiService } from '../../services/axiosApi';
 vi.mock('../../services/financeiroService', () => ({
   financeiroService: {
     listarContasPagar: vi.fn(),
+    listarCartoes: vi.fn(),
   },
 }));
 
@@ -26,6 +27,7 @@ describe('ContasAPagar - classificação (Nova Conta)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (financeiroService.listarContasPagar as any).mockResolvedValue({ success: true, data: [] });
+    (financeiroService.listarCartoes as any).mockResolvedValue({ success: true, data: [] });
     (axiosApiService.get as any).mockResolvedValue({ success: true, data: [] });
   });
 

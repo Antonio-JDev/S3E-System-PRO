@@ -26,8 +26,10 @@ import {
     itemParaDraft,
     aplicarDraftNoItem,
     atualizarCampoNumericoItem,
+    calcItemTotalCost,
     type CompraItemEditDraft
 } from '../utils/compraItemList.util';
+import { roundMoney } from '../utils/financeiroValor';
 import {
     classificacaoVaiParaEstoque,
     itemPrecisaVinculoEstoque,
@@ -247,6 +249,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [purchaseToCancel, setPurchaseToCancel] = useState<PurchaseOrder | null>(null);
     const [showCancelDialog, setShowCancelDialog] = useState(false);
+    const [nfDuplicadaDialog, setNfDuplicadaDialog] = useState<{ open: boolean; message: string }>({
+        open: false,
+        message: '',
+    });
     
     // Estados para recebimento de remessa
     const [isReceivingModalOpen, setIsReceivingModalOpen] = useState(false);
@@ -466,17 +472,17 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     };
 
     const totalProdutosCalculado = useMemo(() => {
-        return purchaseItems.reduce((total, item) => total + (item.totalCost ?? 0), 0);
+        return roundMoney(purchaseItems.reduce((total, item) => total + (item.totalCost ?? 0), 0));
     }, [purchaseItems]);
 
     const valorTotalNotaCalculado = useMemo(() => {
         const sub = totalProdutosCalculado;
-        const desc = Math.min(parseFloat(descontos || '0') || 0, sub);
-        const baseProdutos = Math.max(0, sub - desc);
-        const freteNum = parseFloat(frete || '0') || 0;
-        const outrasNum = parseFloat(outrasDespesas || '0') || 0;
-        const ipiNum = parseFloat(valorIPI || '0') || 0;
-        return baseProdutos + ipiNum + freteNum + outrasNum;
+        const desc = roundMoney(Math.min(parseFloat(descontos || '0') || 0, sub));
+        const baseProdutos = Math.max(0, roundMoney(sub - desc));
+        const freteNum = roundMoney(parseFloat(frete || '0') || 0);
+        const outrasNum = roundMoney(parseFloat(outrasDespesas || '0') || 0);
+        const ipiNum = roundMoney(parseFloat(valorIPI || '0') || 0);
+        return roundMoney(baseProdutos + ipiNum + freteNum + outrasNum);
     }, [valorIPI, frete, outrasDespesas, descontos, totalProdutosCalculado]);
 
     // Carregar compras reais
@@ -753,14 +759,17 @@ const filteredPurchases = useMemo(() => {
             if (preset.obraId) setObraId(preset.obraId);
             if (preset.items?.length) {
                 setPurchaseItems(
-                    preset.items.map((it) => ({
-                        productName: it.productName,
-                        quantity: it.quantity,
-                        unitCost: it.unitCost ?? 0,
-                        totalCost: (it.unitCost ?? 0) * it.quantity,
-                        materialId: it.materialId,
-                        destinoEstoque: it.destinoEstoque ?? false,
-                    })),
+                    preset.items.map((it) => {
+                        const unitCost = roundMoney(it.unitCost ?? 0);
+                        return {
+                            productName: it.productName,
+                            quantity: it.quantity,
+                            unitCost,
+                            totalCost: calcItemTotalCost(it.quantity, unitCost),
+                            materialId: it.materialId,
+                            destinoEstoque: it.destinoEstoque ?? false,
+                        };
+                    }),
                 );
             }
             setIsModalOpen(true);
@@ -1026,13 +1035,14 @@ const filteredPurchases = useMemo(() => {
         if (!item) return;
 
         const quantity = parseFloat(draft.quantity.replace(',', '.'));
-        const unitCost = parseFloat(draft.unitCost.replace(',', '.'));
+        const unitCost = roundMoney(parseFloat(draft.unitCost.replace(',', '.')));
 
         if (Number.isFinite(quantity) && quantity > 0 && Number.isFinite(unitCost) && unitCost >= 0) {
+            const totalCost = calcItemTotalCost(quantity, unitCost);
             setPurchaseItems((prev) =>
                 prev.map((it, i) =>
                     i === index
-                        ? { ...it, quantity, unitCost, totalCost: quantity * unitCost }
+                        ? { ...it, quantity, unitCost, totalCost }
                         : it
                 )
             );
@@ -1084,12 +1094,12 @@ const filteredPurchases = useMemo(() => {
         }
 
         const quantity = parseFloat(productToAdd.quantity);
-        const unitCost = parseFloat(productToAdd.cost);
+        const unitCost = roundMoney(parseFloat(productToAdd.cost));
         if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0) {
             toast.error('Quantidade e valor unitário inválidos');
             return;
         }
-        const totalCost = quantity * unitCost;
+        const totalCost = calcItemTotalCost(quantity, unitCost);
 
         const baseItem: ExtendedItem = {
             productId: '',
@@ -1263,7 +1273,7 @@ const filteredPurchases = useMemo(() => {
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
-                    valorUnit: it.unitCost,
+                    valorUnit: roundMoney(it.unitCost),
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: (it as any).unidadeMedida || 'un',
@@ -1300,7 +1310,19 @@ const filteredPurchases = useMemo(() => {
 
             console.log('📤 Criando nova compra:', payload);
             const response = await comprasService.createCompra(payload);
-            const estatisticas = (response as any)?.estatisticas || (response as any)?.data?.estatisticas;
+            if (!response.success) {
+                if (response.error === 'COMPRA_NF_DUPLICADA') {
+                    setNfDuplicadaDialog({
+                        open: true,
+                        message: response.message || 'Essa nota fiscal já foi registrada.',
+                    });
+                    return;
+                }
+                toast.error(response.message || response.error || 'Erro ao registrar compra');
+                return;
+            }
+            const estatisticas = (response as { estatisticas?: Record<string, number> }).estatisticas
+                || (response.data as { estatisticas?: Record<string, number> } | undefined)?.estatisticas;
 
             // reload list
             const data = await comprasService.getCompras();
@@ -1398,23 +1420,27 @@ const filteredPurchases = useMemo(() => {
             
             console.log('📦 Items do XML:', data.items);
             setPurchaseItems(
-                (data.items || []).map((it: any) => ({
-                    productId: it.materialId || '',
-                    productName: it.nomeProduto || '',
-                    quantity: it.quantidade || 0,
-                    unitCost: it.valorUnit || 0,
-                    totalCost: (it.quantidade || 0) * (it.valorUnit || 0),
-                    ncm: it.ncm || '',
-                    sku: it.sku || '',
-                    unidadeMedida: it.unidadeMedida || 'un',
-                    materialId: it.materialId,
-                    materialVinculado: it.materialVinculado,
-                    matchAutomatico: !!it.matchAutomatico,
-                    matchTipo: it.matchTipo || null,
-                    codigoFornecedor: it.codigoFornecedor || it.sku || '',
-                    ean: it.ean || '',
-                    criarNovoMaterial: false,
-                }))
+                (data.items || []).map((it: any) => {
+                    const quantity = it.quantidade || 0;
+                    const unitCost = roundMoney(it.valorUnit || 0);
+                    return {
+                        productId: it.materialId || '',
+                        productName: it.nomeProduto || '',
+                        quantity,
+                        unitCost,
+                        totalCost: calcItemTotalCost(quantity, unitCost),
+                        ncm: it.ncm || '',
+                        sku: it.sku || '',
+                        unidadeMedida: it.unidadeMedida || 'un',
+                        materialId: it.materialId,
+                        materialVinculado: it.materialVinculado,
+                        matchAutomatico: !!it.matchAutomatico,
+                        matchTipo: it.matchTipo || null,
+                        codigoFornecedor: it.codigoFornecedor || it.sku || '',
+                        ean: it.ean || '',
+                        criarNovoMaterial: false,
+                    };
+                })
             );
             
             // Log dos matches automáticos
@@ -2037,6 +2063,17 @@ const filteredPurchases = useMemo(() => {
                 variant="warning"
             />
 
+            <AlertDialog
+                isOpen={nfDuplicadaDialog.open}
+                onClose={() => setNfDuplicadaDialog({ open: false, message: '' })}
+                onConfirm={() => setNfDuplicadaDialog({ open: false, message: '' })}
+                title="Nota fiscal já cadastrada"
+                message={nfDuplicadaDialog.message}
+                confirmText="Entendi"
+                cancelText="Fechar"
+                variant="warning"
+            />
+
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
@@ -2584,7 +2621,7 @@ const filteredPurchases = useMemo(() => {
                                                 onChange={(e) => setProductToAdd({...productToAdd, cost: e.target.value})}
                                                 placeholder="Valor unitário"
                                                 min="0"
-                                                step="0.01"
+                                                step="any"
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                                             />
                                         </div>
@@ -2737,7 +2774,7 @@ const filteredPurchases = useMemo(() => {
                                                                     <input
                                                                         type="number"
                                                                         min="0"
-                                                                        step="0.01"
+                                                                        step="any"
                                                                         value={getInlineNumericDisplay(index, 'unitCost', item)}
                                                                         onChange={(e) =>
                                                                             handleInlineNumericChange(index, 'unitCost', e.target.value)

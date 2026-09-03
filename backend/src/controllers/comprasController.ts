@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { XMLParser } from 'fast-xml-parser';
-import { ComprasService, CompraPayload } from '../services/compras.service';
+import { ComprasService, CompraPayload, CompraNfDuplicadaError } from '../services/compras.service';
 import { matchMaterial, normalizarEan, normalizarCodigoFornecedor } from '../services/materialFornecedorAlias.service';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -188,6 +188,16 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       estatisticas: estatisticas || undefined
     });
   } catch (error) {
+    if (error instanceof CompraNfDuplicadaError) {
+      const nomeUsuario = (req as { user?: { name?: string } }).user?.name?.trim().split(/\s+/)[0] || 'Olá';
+      res.status(409).json({
+        success: false,
+        error: 'COMPRA_NF_DUPLICADA',
+        message: `Opa ${nomeUsuario}, essa nota já foi inserida e gerou a compra de ${error.numeroSequencial}.`,
+        numeroSequencial: error.numeroSequencial,
+      });
+      return;
+    }
     console.error('Erro ao criar compra:', error);
     res.status(500).json({ error: 'Erro ao criar compra' });
   }

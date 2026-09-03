@@ -174,8 +174,7 @@ class ComprasService {
    * Criar nova compra
    */
   async createCompra(data: any) {
-    const resp = await axiosApiService.post<any>('/api/compras', data);
-    return (resp as any)?.data ?? resp;
+    return axiosApiService.post<any>('/api/compras', data);
   }
 
   /**

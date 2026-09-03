@@ -27,21 +27,21 @@ const globalLabel = {
   memberships: [],
 };
 
-describe('whatsappChatLabels.service — permissões admin em listas globais', () => {
+describe('whatsappChatLabels.service — permissões em listas globais', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('admin pode apagar lista global de outro usuário', async () => {
+  it('criador pode apagar lista global', async () => {
     findUnique.mockResolvedValue(globalLabel);
-    const ok = await deleteLabel('label-global', 'admin-user', { isAdmin: true });
+    const ok = await deleteLabel('label-global', 'owner-user');
     expect(ok).toBe(true);
     expect(del).toHaveBeenCalledWith({ where: { id: 'label-global' } });
   });
 
   it('usuário comum não apaga lista global de outro', async () => {
     findUnique.mockResolvedValue(globalLabel);
-    const ok = await deleteLabel('label-global', 'other-user', { isAdmin: false });
+    const ok = await deleteLabel('label-global', 'other-user');
     expect(ok).toBe(false);
     expect(del).not.toHaveBeenCalled();
   });

@@ -1,6 +1,13 @@
 import React from 'react';
-import { formatDateDisplay } from '../../utils/date';
+import { formatDateDisplay, formatDatePtBrInSaoPaulo } from '../../utils/date';
 import { formatMoeda, formatQuantidade, type ResultadoOsCalculado } from '../../utils/apropriacaoOs';
+import {
+  isOsTipoQuadrosPainels,
+  isOsWorkflowTipo,
+  labelTipoOs,
+  OS_TIPOS,
+  OS_WORKFLOW_TEMPLATES,
+} from '../../utils/osWorkflow.util';
 import type { ProjetoDetalhe } from '../ModalVizualizacaoProjeto';
 import OsExecucaoCalendarioPanel from './OsExecucaoCalendarioPanel';
 
@@ -86,6 +93,10 @@ export interface OsVisaoGeralTabProps {
   onNavigate?: (view: string) => void;
   onClose: () => void;
   onAbrirCronograma: () => void;
+  tipoOs?: string;
+  podeAlterarTipoOs?: boolean;
+  alterandoTipoOs?: boolean;
+  onAlterarTipoOs?: (tipo: string) => void | Promise<void>;
 }
 
 const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
@@ -118,6 +129,10 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
   onNavigate,
   onClose,
   onAbrirCronograma,
+  tipoOs,
+  podeAlterarTipoOs,
+  alterandoTipoOs,
+  onAlterarTipoOs,
 }) => {
   const horasOrcadas = Number(projeto.horasEngenhariaOrcadas) || 0;
   const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
@@ -128,7 +143,7 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
 
   const prazoLimite = formatDateDisplay(projeto.dataPrevisao || projeto.dataFim || '') || '—';
   const dataCriacao = projeto.createdAt
-    ? new Date(projeto.createdAt).toLocaleDateString('pt-BR')
+    ? formatDatePtBrInSaoPaulo(projeto.createdAt)
     : '—';
 
   const equipe: Array<{ nome: string; papel: string; status?: string }> = [];
@@ -209,6 +224,51 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
           OS marcada como sem obra de campo
           {projeto.justificativaSemObra ? ` — ${projeto.justificativaSemObra}` : ''}
         </p>
+      )}
+
+      {/* Tipo da OS — define checklist automático no Kanban */}
+      {onAlterarTipoOs && (
+        <section className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/80 dark:bg-blue-900/10 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-semibold text-blue-900 dark:text-blue-200 mb-1">
+                Tipo da ordem de serviço
+              </label>
+              <select
+                value={tipoOs || ''}
+                disabled={!podeAlterarTipoOs || alterandoTipoOs}
+                onChange={(e) => void onAlterarTipoOs(e.target.value)}
+                className="w-full px-3 py-2.5 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-dark-bg text-sm font-medium disabled:opacity-60"
+              >
+                <option value="" disabled>
+                  Selecione o tipo
+                </option>
+                {OS_TIPOS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+                {tipoOs && !isOsWorkflowTipo(tipoOs) && (
+                  <option value={tipoOs}>{tipoOs}</option>
+                )}
+              </select>
+            </div>
+            <div className="text-xs text-blue-800 dark:text-blue-300 sm:max-w-xs">
+              {alterandoTipoOs
+                ? 'Atualizando checklist...'
+                : isOsTipoQuadrosPainels(tipoOs)
+                  ? 'Quadros e Painéis: cria checklist no Kanban (materiais, montagem, diagrama, entrega).'
+                  : isOsWorkflowTipo(tipoOs)
+                    ? `Checklist: ${OS_WORKFLOW_TEMPLATES[tipoOs].slice(0, 4).join(' → ')}…`
+                    : 'Defina o tipo para gerar tarefas automáticas no Kanban.'}
+            </div>
+          </div>
+          {tipoOs && (
+            <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+              Atual: <strong>{labelTipoOs(tipoOs)}</strong>
+            </p>
+          )}
+        </section>
       )}
 
       {/* Barra de progresso */}

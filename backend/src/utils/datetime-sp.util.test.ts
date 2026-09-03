@@ -6,9 +6,23 @@ import {
   ehFeriado,
   ehDomingoOuFeriado,
   formatHoraBrasilia,
+  parseDataDiaCivilInput,
+  ymdDeDataDiaCivil,
 } from './datetime-sp.util';
 
 describe('datetime-sp.util', () => {
+  describe('parseDataDiaCivilInput / ymdDeDataDiaCivil', () => {
+    it('YYYY-MM-DD vira meio-dia UTC no mesmo dia civil', () => {
+      const d = parseDataDiaCivilInput('2026-05-10');
+      expect(d?.toISOString()).toBe('2026-05-10T12:00:00.000Z');
+      expect(ymdDeDataDiaCivil(d)).toBe('2026-05-10');
+    });
+
+    it('ISO meio-dia UTC mantém o dia civil', () => {
+      expect(ymdDeDataDiaCivil('2026-05-10T12:00:00.000Z')).toBe('2026-05-10');
+    });
+  });
+
   describe('dataReferenciaDiaCivilUtc', () => {
     it('usa meio-dia UTC (mesmo dia civil em qualquer host)', () => {
       const d = dataReferenciaDiaCivilUtc(2026, 3, 15);

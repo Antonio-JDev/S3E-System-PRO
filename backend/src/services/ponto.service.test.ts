@@ -100,7 +100,7 @@ describe('ponto.service calcularMetricasRegistro (compensação atraso x extra)'
 
   it('não compensa quando não há extra suficiente', () => {
     const r = calcularMetricasRegistro({
-      // Saída 17:33 ainda está dentro da tolerância (até 17:35) → zero extra; atraso bruto 10 permanece.
+      // Saída 17:33 dentro da tolerância (até 17:35) → zero extra; atraso além da tolerância = 5 min.
       batidas: ['08:10', '17:33'],
       ano: 2026,
       mes: 5,
@@ -109,11 +109,10 @@ describe('ponto.service calcularMetricasRegistro (compensação atraso x extra)'
       toleranciaMinutos: 5,
       workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
     });
-    expect(r.minutosAtraso).toBe(10);
+    expect(r.minutosAtraso).toBe(5);
 
     const r2 = calcularMetricasRegistro({
-      // Extra na saída é medido a partir do horário nominal (17:30), não do fim da tolerância.
-      // 17:38 → 8 min extra; atraso bruto na entrada 10 min → sobram 2 min de atraso líquido.
+      // Extra na saída além da tolerância: 17:38 vs 17:35 → 3 min; atraso 5 min → 2 min líquidos.
       batidas: ['08:10', '17:38'],
       ano: 2026,
       mes: 5,

@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { parseDataDiaCivilInput } from '../utils/vencimentoVeiculo.util';
 
 export const GastosVeiculoService = {
     async listarGastos(veiculoId?: string) {
@@ -42,7 +43,7 @@ export const GastosVeiculoService = {
         const gasto = await prisma.gastoVeiculo.create({
             data: {
                 ...data,
-                data: new Date(data.data),
+                data: parseDataDiaCivilInput(data.data) ?? new Date(),
                 litros: data.litros != null ? data.litros : undefined,
             },
             include: {
@@ -75,7 +76,7 @@ export const GastosVeiculoService = {
     }) {
         const updateData: Record<string, unknown> = { ...data };
         if (data.data) {
-            updateData.data = new Date(data.data);
+            updateData.data = parseDataDiaCivilInput(data.data);
         }
         if (data.litros !== undefined) {
             updateData.litros = data.litros;

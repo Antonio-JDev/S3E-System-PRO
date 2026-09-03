@@ -77,6 +77,43 @@ export function calcAbateParcela(
 const TOLERANCIA_FINANCEIRA = 0.01;
 
 /**
+ * Quitação da parcela no pagamento:
+ * - desconto negociado na hora: valor base = saldo (desconto reduz só o caixa);
+ * - desconto já previsto no título: base − desconto = saldo.
+ */
+export function parcelaQuitadaPorPagamento(
+  saldoParcela: unknown,
+  valorBase: unknown,
+  valorDesconto: unknown = 0,
+  opts?: { valorDescontoExistente?: unknown; valorJurosExistente?: unknown }
+): boolean {
+  const saldo = Math.round(parseMoney(saldoParcela) * 100) / 100;
+  const base = parseMoney(valorBase);
+  const desconto = parseMoney(valorDesconto);
+  const abateFromBase = calcAbateParcelaFromBase(base, desconto);
+
+  if (Math.abs(abateFromBase - saldo) <= TOLERANCIA_FINANCEIRA) {
+    return true;
+  }
+  if (Math.abs(base - saldo) <= TOLERANCIA_FINANCEIRA) {
+    if (desconto <= TOLERANCIA_FINANCEIRA) {
+      return true;
+    }
+    const descontoExistente = parseMoney(opts?.valorDescontoExistente);
+    if (descontoExistente <= TOLERANCIA_FINANCEIRA) {
+      return true;
+    }
+    const baseEsperada = calcValorBaseFromEfetivo(
+      saldo,
+      parseMoney(opts?.valorJurosExistente),
+      descontoExistente
+    );
+    return Math.abs(base - baseEsperada) <= TOLERANCIA_FINANCEIRA;
+  }
+  return false;
+}
+
+/**
  * Recebimento com diferença (retenção/imposto): entrada em caixa + diferença quitam o saldo da parcela.
  * Ex.: título 15.000, diferença 1.000 (imposto), caixa 14.000.
  */

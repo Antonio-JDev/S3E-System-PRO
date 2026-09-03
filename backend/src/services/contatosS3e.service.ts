@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { canonicalWhatsappChatId, waJidToDigits } from '../utils/whatsappChat.util';
-import { normalizePhoneDigitsKey, recordWhatsappChatIdentity } from './whatsappIdentity.service';
+import { normalizePhoneDigitsKey, recordWhatsappChatIdentity, resolveRealPhoneKeyForLidChat, loadWhatsappChatIdentities, isLidJid, isPhoneKeyDerivedFromLidLocal, tryResolveAndRegisterIdentityFromPhone } from './whatsappIdentity.service';
 import * as EvoChat from './whatsappEvolutionChat.service';
 import { isEvolutionProviderKind } from './whatsappProvider.evolution';
 import { sanitizeBrPhone } from '../utils/brPhoneNumber.util';
@@ -49,9 +49,20 @@ export async function refreshContatoS3eFromWhatsappNumbers(chatIdRaw: string): P
     return;
   }
 
-  const digits = waJidToDigits(chatId);
-  const phoneKey = normalizePhoneDigitsKey(digits);
+  const isLid = isLidJid(chatId);
+  let phoneKey: string | null = null;
+
+  if (isLid) {
+    const identities = await loadWhatsappChatIdentities();
+    phoneKey = await resolveRealPhoneKeyForLidChat(chatId, identities);
+    if (!phoneKey) return;
+  } else {
+    const digits = waJidToDigits(chatId);
+    phoneKey = normalizePhoneDigitsKey(digits);
+  }
+
   if (!phoneKey || !isPlausibleBrPhoneDigits(phoneKey)) return;
+  if (isLid && isPhoneKeyDerivedFromLidLocal(phoneKey, chatId)) return;
 
   try {
     const { numberExists, chatId: jid, pushName } = await EvoChat.evolutionCheckPhoneExists(phoneKey);
@@ -348,11 +359,68 @@ export async function upsertContatoS3eFromInboundMessage(params: {
   const lower = chatId.toLowerCase();
   if (lower.endsWith('@g.us') || lower.endsWith('@newsletter') || lower === 'status@broadcast') return;
 
+  const isLid = isLidJid(chatId);
+  const pushNameClean = params.pushName?.trim() || null;
+
+  if (isLid) {
+    const identities = await loadWhatsappChatIdentities();
+    const phoneKey = await resolveRealPhoneKeyForLidChat(chatId, identities);
+    if (!phoneKey) {
+      // Sem telefone real: não cria `contatos_s3e` com número falso (dígitos do LID).
+      const existingByJid = await prisma.contatoS3e.findFirst({
+        where: { jid: chatId },
+        select: { id: true, pushName: true }
+      });
+      if (existingByJid) {
+        await prisma.contatoS3e.update({
+          where: { id: existingByJid.id },
+          data: {
+            ...(pushNameClean && pushNameClean !== existingByJid.pushName ? { pushName: pushNameClean } : {}),
+            ultimaInteracao: new Date()
+          }
+        });
+      }
+      return;
+    }
+    const numero = phoneKey;
+    const existing = await prisma.contatoS3e.findUnique({
+      where: { numero },
+      select: { id: true, nomeAgenda: true, pushName: true }
+    });
+    if (existing) {
+      await prisma.contatoS3e.update({
+        where: { id: existing.id },
+        data: {
+          jid: chatId,
+          ...(pushNameClean && pushNameClean !== existing.pushName ? { pushName: pushNameClean } : {}),
+          ultimaInteracao: new Date()
+        }
+      });
+      return;
+    }
+    try {
+      await prisma.contatoS3e.create({
+        data: {
+          numero,
+          jid: chatId,
+          pushName: pushNameClean,
+          ultimaInteracao: new Date(),
+          revisado: false,
+          origem: 'inbound_message'
+        }
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return;
+      }
+      throw e;
+    }
+    return;
+  }
+
   const digits = waJidToDigits(chatId);
   const numero = normalizePhoneDigitsKey(digits);
   if (!numero || !isPlausibleBrPhoneDigits(numero)) return;
-
-  const pushNameClean = params.pushName?.trim() || null;
 
   const existing = await prisma.contatoS3e.findUnique({
     where: { numero },
@@ -518,6 +586,10 @@ export async function updateContatoS3e(
     data.numero = sanitized.digits;
   }
   const row = await prisma.contatoS3e.update({ where: { id }, data });
+  const jid = row.jid?.trim();
+  if (jid && isLidJid(jid) && row.numero) {
+    void tryResolveAndRegisterIdentityFromPhone(row.numero, jid).catch(() => undefined);
+  }
   return toDto(row);
 }
 

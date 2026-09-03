@@ -26,7 +26,6 @@ import { minutosMeiaNoiteBrasilia, splitMinutosJornadaSegSex } from '../utils/au
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
 import { montarBancoHorasResumo } from './bancoHorasRh.service';
 import { sincronizarExtratoBancoHorasCompetencia } from './bancoHorasExtrato.service';
-import { sincronizarBancoAvaliacoesCompetencia } from './rhComentarioConferencia.service';
 import type { BancoHorasExtratoResumo } from '../utils/bancoHorasExtrato.util';
 import { decomporExcessoBancoHoras } from '../utils/banco-horas-excesso.util';
 import { calculateMonthlyTotal, jornadaMinutosPorDia } from '../utils/workshift.util';
@@ -296,17 +295,8 @@ export const RhService = {
       await sincronizarExcessoCompetencia(funcionarioId, ano, mes);
     }
 
-    // Alinha banco A/B/P/D (padrão B) com as métricas do mês — inclui faltas sem registro.
-    if (!params.override?.skipSyncExcesso) {
-      const tipoPre = await prisma.funcionario.findUnique({
-        where: { id: funcionarioId },
-        select: { tipoContrato: true },
-      });
-      const tipoEfetivo = params.override?.tipoContrato ?? tipoPre?.tipoContrato;
-      if (tipoEfetivo && usaJornadaEBanco(tipoEfetivo)) {
-        await sincronizarBancoAvaliacoesCompetencia(funcionarioId, ano, mes);
-      }
-    }
+    // Banco A/B/P/D: só via clique RH ou reaplicação após import/recalc de ponto
+    // (não reprocessa o mês inteiro a cada leitura da folha).
 
     const feriadoOverrides = await listarOverridesFeriadoMes(ano, mes);
 

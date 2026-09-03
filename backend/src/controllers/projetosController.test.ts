@@ -10,6 +10,10 @@ import { getProjetos, getProjetoById } from './projetosController';
 import { PrismaClient } from '@prisma/client';
 import { Request, Response } from 'express';
 
+jest.mock('../services/vistoriaCelesc.service', () => ({
+  entrarNaFilaSeAplicavel: jest.fn().mockResolvedValue(null),
+}));
+
 // Mock do Prisma
 jest.mock('@prisma/client', () => {
   const mockPrisma = {

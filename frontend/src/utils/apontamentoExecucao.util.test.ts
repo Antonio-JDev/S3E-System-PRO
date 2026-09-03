@@ -28,4 +28,10 @@ describe('apontamentoExecucao.util', () => {
   it('formatarExecucaoDeQuantidade', () => {
     expect(formatarExecucaoDeQuantidade(1.5)).toContain('1d');
   });
+
+  it('1 hora de execução não vira 1,04h após salvar e reabrir', () => {
+    const eq = diariasEquivalentes(0, 1);
+    expect(eq).toBe(0.125);
+    expect(splitDiariasEquivalentes(eq)).toEqual({ dias: 0, horas: 1 });
+  });
 });
