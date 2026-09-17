@@ -22,6 +22,10 @@ jest.mock('./vistoriaCelesc.service', () => ({
   validarConclusaoVistoriaCelesc: jest.fn().mockReturnValue(null),
 }));
 
+jest.mock('./osEntregaQuadro.service', () => ({
+  validarConclusaoOsQuadros: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock('./contasReceber.service', () => ({
   ContasReceberService: {
     criarContaReceberManual: jest.fn().mockResolvedValue({ id: 'conta-1' }),

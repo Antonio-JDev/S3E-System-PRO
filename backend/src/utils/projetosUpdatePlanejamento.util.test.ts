@@ -1,4 +1,7 @@
-import { alterouCamposPlanejamentoOs } from './projetosUpdatePlanejamento.util';
+import {
+  alterouCamposPlanejamentoOs,
+  isUpdateSomenteEstimativaOs,
+} from './projetosUpdatePlanejamento.util';
 
 describe('alterouCamposPlanejamentoOs', () => {
   it('retorna false quando só responsavelId é enviado', () => {
@@ -22,5 +25,38 @@ describe('alterouCamposPlanejamentoOs', () => {
         diariasEquipeOrcadas: 1,
       }),
     ).toBe(true);
+  });
+});
+
+describe('isUpdateSomenteEstimativaOs', () => {
+  it('retorna true para payload do card de prazo/estimativa', () => {
+    expect(
+      isUpdateSomenteEstimativaOs({
+        dataPrevisao: new Date('2026-09-16'),
+        diariasEquipeOrcadas: 10,
+        horasEngenhariaOrcadas: 0,
+        valorDiariaEquipe: null,
+        valorHoraEngenharia: null,
+      }),
+    ).toBe(true);
+  });
+
+  it('retorna false quando há campos fora da estimativa', () => {
+    expect(
+      isUpdateSomenteEstimativaOs({
+        dataPrevisao: new Date('2026-09-16'),
+        titulo: 'Nova OS',
+      }),
+    ).toBe(false);
+    expect(
+      isUpdateSomenteEstimativaOs({
+        dataPrevisao: new Date('2026-09-16'),
+        responsavelId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('retorna false para payload vazio', () => {
+    expect(isUpdateSomenteEstimativaOs({})).toBe(false);
   });
 });

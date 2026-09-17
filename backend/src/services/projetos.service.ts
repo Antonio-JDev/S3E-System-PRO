@@ -7,6 +7,7 @@ import {
   entrarNaFilaSeAplicavel,
   validarConclusaoVistoriaCelesc,
 } from './vistoriaCelesc.service';
+import { validarConclusaoOsQuadros } from './osEntregaQuadro.service';
 
 export type OsWorkflowTipo =
   | 'PROJETOS_ELETRICOS'
@@ -115,8 +116,17 @@ export interface CamposPlanejamentoOsInput {
   diariasEquipeOrcadas?: number | null;
 }
 
-export function validarCamposPlanejamentoOs(data: CamposPlanejamentoOsInput): void {
-  if (!data.responsavelId) {
+export interface ValidarPlanejamentoOsOptions {
+  /** Em create é true; no update de estimativa/prazo pode ser false. */
+  exigirResponsavel?: boolean;
+}
+
+export function validarCamposPlanejamentoOs(
+  data: CamposPlanejamentoOsInput,
+  options: ValidarPlanejamentoOsOptions = {},
+): void {
+  const exigirResponsavel = options.exigirResponsavel !== false;
+  if (exigirResponsavel && !data.responsavelId) {
     throw new Error('Gerente do projeto é obrigatório');
   }
   if (!data.dataInicio) {
@@ -469,6 +479,13 @@ export class ProjetosService {
           (projeto as { statusVistoria?: string | null }).statusVistoria ?? null,
       });
       if (bloqueioVistoria) throw new Error(bloqueioVistoria);
+
+      const bloqueioQuadros = await validarConclusaoOsQuadros(
+        projetoId,
+        projeto.tipo,
+        (projeto as { entregaQuadro?: unknown }).entregaQuadro,
+      );
+      if (bloqueioQuadros) throw new Error(bloqueioQuadros);
 
       if (projeto.tipo === 'PROJETOS_ELETRICOS') {
         const taskOrganizacao = await prisma.task.findFirst({

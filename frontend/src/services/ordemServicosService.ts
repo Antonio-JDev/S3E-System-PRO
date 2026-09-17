@@ -8,12 +8,21 @@ export type StatusVistoriaCelesc =
   | 'REPROVADO'
   | 'VISTORIA_APROVADA';
 
+export interface ItemAvaliacaoReprovaVistoria {
+  codigo: string;
+  label: string;
+  passou: boolean;
+  justificativa: string;
+}
+
 export interface HistoricoReprovacaoVistoria {
   id: string;
   projetoId: string;
   dataReprovacao: string;
   motivos: string;
   itensReprovados: string[] | unknown;
+  itensAvaliacao?: ItemAvaliacaoReprovaVistoria[] | unknown;
+  checklist?: ItemAvaliacaoReprovaVistoria[];
   criadoEm: string;
   criadoPorId?: string | null;
   criadoPor?: { id: string; name: string } | null;
@@ -106,8 +115,15 @@ export interface ProjetoFilters {
 
 export interface ReprovarVistoriaPayload {
   dataReprovacao: string;
-  motivos: string;
-  itensReprovados: string[] | string;
+  motivos?: string;
+  itensReprovados?: string[] | string;
+  itensAvaliacao?: ItemAvaliacaoReprovaVistoria[];
+}
+
+export interface AtualizarReprovaVistoriaPayload {
+  dataReprovacao?: string;
+  motivos?: string;
+  itensAvaliacao: ItemAvaliacaoReprovaVistoria[];
 }
 
 export interface AlocacaoPontoDia {
@@ -233,6 +249,29 @@ class OrdemServicosService {
     return axiosApiService.post<VistoriaCelescItem>(
       `${ENDPOINTS.PROJETOS}/${id}/reprovar-vistoria`,
       payload,
+    );
+  }
+
+  async obterReprovacaoVistoria(projetoId: string, reprovacaoId: string) {
+    return axiosApiService.get<HistoricoReprovacaoVistoria>(
+      `${ENDPOINTS.PROJETOS}/${projetoId}/reprovacoes-vistoria/${reprovacaoId}`,
+    );
+  }
+
+  async atualizarReprovacaoVistoria(
+    projetoId: string,
+    reprovacaoId: string,
+    payload: AtualizarReprovaVistoriaPayload,
+  ) {
+    return axiosApiService.patch<HistoricoReprovacaoVistoria>(
+      `${ENDPOINTS.PROJETOS}/${projetoId}/reprovacoes-vistoria/${reprovacaoId}`,
+      payload,
+    );
+  }
+
+  async listarItensChecklistVistoria() {
+    return axiosApiService.get<Array<{ codigo: string; label: string }>>(
+      `${ENDPOINTS.PROJETOS}/vistorias-celesc/itens-checklist`,
     );
   }
 

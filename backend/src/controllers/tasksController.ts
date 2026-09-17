@@ -175,7 +175,7 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
 
     const projeto = await prisma.projeto.findUnique({
       where: { id: projetoId },
-      select: { tipo: true },
+      select: { tipo: true, entregaQuadro: true },
     });
 
     const updateData: Record<string, unknown> = {};
@@ -220,10 +220,14 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
       isTaskEntregaWorkflow(taskExistente.titulo) &&
       isOsTipoQuadrosPainels(projeto?.tipo)
     ) {
-      const metadadosEfetivos =
-        metadados !== undefined ? metadados : taskExistente.metadados;
+      const fonteValidacao =
+        metadados !== undefined
+          ? metadados
+          : projeto?.entregaQuadro
+            ? { entregaQuadro: projeto.entregaQuadro }
+            : taskExistente.metadados;
       try {
-        validarEntregaQuadro(metadadosEfetivos);
+        validarEntregaQuadro(fonteValidacao);
       } catch (validationError) {
         res.status(400).json({
           success: false,
@@ -234,6 +238,27 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
         });
         return;
       }
+    }
+
+    // Ao salvar metadados de entrega, espelha em Projeto.entregaQuadro
+    if (
+      metadados !== undefined &&
+      metadados != null &&
+      isOsTipoQuadrosPainels(projeto?.tipo) &&
+      isTaskEntregaWorkflow(String(titulo || taskExistente.titulo))
+    ) {
+      const entregaPayload =
+        typeof metadados === 'object' &&
+        metadados !== null &&
+        'entregaQuadro' in (metadados as object)
+          ? (metadados as { entregaQuadro: unknown }).entregaQuadro
+          : metadados;
+      await prisma.projeto.update({
+        where: { id: projetoId },
+        data: {
+          entregaQuadro: entregaPayload as Prisma.InputJsonValue,
+        },
+      });
     }
 
     const task = await prisma.task.update({

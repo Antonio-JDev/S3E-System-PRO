@@ -13,10 +13,19 @@ describe('validarCamposPlanejamentoOs', () => {
     expect(() => validarCamposPlanejamentoOs(valido)).not.toThrow();
   });
 
-  it('exige responsável', () => {
+  it('exige responsável por padrão (create / update misto)', () => {
     expect(() =>
       validarCamposPlanejamentoOs({ ...valido, responsavelId: null }),
     ).toThrow(/Gerente do projeto/);
+  });
+
+  it('permite ausência de gerente no update só de estimativa', () => {
+    expect(() =>
+      validarCamposPlanejamentoOs(
+        { ...valido, responsavelId: null },
+        { exigirResponsavel: false },
+      ),
+    ).not.toThrow();
   });
 
   it('exige datas de planejamento', () => {

@@ -13,7 +13,10 @@ import {
 } from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
 import { entrarNaFilaSeAplicavel } from '../services/vistoriaCelesc.service';
-import { alterouCamposPlanejamentoOs } from '../utils/projetosUpdatePlanejamento.util';
+import {
+  alterouCamposPlanejamentoOs,
+  isUpdateSomenteEstimativaOs,
+} from '../utils/projetosUpdatePlanejamento.util';
 
 /** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
 export const buscarProjetos = async (req: Request, res: Response): Promise<void> => {
@@ -579,7 +582,11 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
           (data.diariasEquipeOrcadas as number | undefined) ??
           projetoExistente.diariasEquipeOrcadas,
       };
-      validarCamposPlanejamentoOs(merged);
+      // Card de prazo/estimativa: ausência de gerente não bloqueia.
+      // Updates mistos (ex.: edição completa da OS) ainda exigem gerente.
+      validarCamposPlanejamentoOs(merged, {
+        exigirResponsavel: !isUpdateSomenteEstimativaOs(data),
+      });
     }
 
     if (Object.keys(data).length === 0) {

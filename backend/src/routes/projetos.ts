@@ -35,8 +35,11 @@ import {
 } from '../controllers/projetoDocumentosController';
 import {
   listarVistoriasCelesc,
+  listarItensChecklistVistoria,
   protocolarVistoria,
   reprovarVistoria,
+  obterReprovacaoVistoria,
+  atualizarReprovacaoVistoria,
   aprovarVistoria,
 } from '../controllers/vistoriaCelescController';
 import {
@@ -61,6 +64,10 @@ import {
   obterResumoApropriacaoOs,
 } from '../controllers/apropriacaoOsController';
 import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
+import {
+  getEntregaQuadro,
+  putEntregaQuadro,
+} from '../controllers/osEntregaQuadroController';
 import { authenticate } from '../middlewares/auth';
 import PDFDocument from 'pdfkit';
 import path from 'path';
@@ -104,6 +111,12 @@ router.get('/busca', buscarProjetos);
 router.get('/vistorias-celesc', listarVistoriasCelesc);
 
 /**
+ * @route GET /api/projetos/vistorias-celesc/itens-checklist
+ * @desc Catálogo padrão de itens de avaliação CELESC
+ */
+router.get('/vistorias-celesc/itens-checklist', listarItensChecklistVistoria);
+
+/**
  * @route GET /api/projetos/engenharia
  * @desc Listagem da aba Projetos de Engenharia
  */
@@ -132,6 +145,18 @@ router.patch('/:id/engenharia/atribuir', atribuirEngenharia);
  * @desc Resumo orçado vs realizado e resultado financeiro da OS
  */
 router.get('/:id/alocacao-ponto', getAlocacaoPontoOs);
+
+/**
+ * @route GET /api/projetos/:id/entrega-quadro
+ * @desc Checklist e dados de entrega/romaneio (OS Quadros e Painéis)
+ */
+router.get('/:id/entrega-quadro', getEntregaQuadro);
+
+/**
+ * @route PUT /api/projetos/:id/entrega-quadro
+ * @desc Salvar checklist de entrega/romaneio
+ */
+router.put('/:id/entrega-quadro', putEntregaQuadro);
 router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
 
 /**
@@ -191,6 +216,18 @@ router.patch('/:id/protocolar-vistoria', protocolarVistoria);
  * @desc Registra reprovação CELESC no histórico
  */
 router.post('/:id/reprovar-vistoria', reprovarVistoria);
+
+/**
+ * @route GET /api/projetos/:id/reprovacoes-vistoria/:reprovacaoId
+ * @desc Detalhe de uma reprova com itens de avaliação
+ */
+router.get('/:id/reprovacoes-vistoria/:reprovacaoId', obterReprovacaoVistoria);
+
+/**
+ * @route PATCH /api/projetos/:id/reprovacoes-vistoria/:reprovacaoId
+ * @desc Atualiza itens (passou/não passou + justificativa) de uma reprova
+ */
+router.patch('/:id/reprovacoes-vistoria/:reprovacaoId', atualizarReprovacaoVistoria);
 
 /**
  * @route PATCH /api/projetos/:id/aprovar-vistoria
