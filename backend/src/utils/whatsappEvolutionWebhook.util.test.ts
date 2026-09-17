@@ -71,6 +71,8 @@ describe('evolutionUpsertMessageToProviderRaw', () => {
     expect(out!.body).toBe('Sim, pode seguir');
     expect(out!.hasMedia).toBe(false);
     expect(out!.fromMe).toBe(false);
+    expect(out!.quotedProviderMessageId).toBe('OUR_OUTBOUND_MSG_ID');
+    expect(out!.quotedContent).toBe('Texto original nosso');
   });
 
   it('documentWithCaptionMessage extrai mídia com caption', () => {

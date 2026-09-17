@@ -79,7 +79,7 @@ function FormatSelectionBubble({ editor }: { editor: Editor }) {
   const btnClass = (active: boolean) =>
     `flex h-8 w-8 items-center justify-center rounded-md text-[13px] font-semibold transition ${
       active
-        ? 'bg-[#00a884]/15 text-[#008069] dark:bg-[#00a884]/25 dark:text-[#25d366]'
+        ? 'bg-[#25d366]/15 text-[#008069] dark:bg-[#25d366]/25 dark:text-[#25d366]'
         : 'text-[#54656f] hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/10'
     }`;
 
@@ -227,13 +227,13 @@ export const WhatsappComposerEditor = forwardRef<WhatsappComposerEditorHandle, W
     );
 
     if (!editor) {
-      return <div className="whatsapp-composer-shell min-h-[40px] min-w-0 flex-1" />;
+      return <div className="whatsapp-composer-shell min-h-[20px] min-w-0 flex-1" />;
     }
 
     return (
-      <div className="whatsapp-composer-shell relative min-h-[40px] min-w-0 flex-1">
+      <div className="whatsapp-composer-shell relative min-h-[20px] min-w-0 flex-1 self-center">
         <FormatSelectionBubble editor={editor} />
-        <EditorContent editor={editor} className="whatsapp-composer-editor h-full min-h-[40px] w-full" />
+        <EditorContent editor={editor} className="whatsapp-composer-editor h-full min-h-[20px] w-full" />
       </div>
     );
   }

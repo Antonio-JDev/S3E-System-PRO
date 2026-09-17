@@ -1321,9 +1321,11 @@ export class ConfiguracaoController {
       });
       const prefs = (user?.preferences as Record<string, unknown>) || {};
       const orcamentoInsercaoModo = (prefs.orcamentoInsercaoModo === 'ocultar' ? 'ocultar' : 'check') as 'check' | 'ocultar';
+      const whatsappOutboundDisplayName =
+        typeof prefs.whatsappOutboundDisplayName === 'string' ? prefs.whatsappOutboundDisplayName : '';
       res.status(200).json({
         success: true,
-        data: { orcamentoInsercaoModo }
+        data: { orcamentoInsercaoModo, whatsappOutboundDisplayName }
       });
     } catch (error: any) {
       console.error('Erro ao buscar preferências:', error);
@@ -1346,11 +1348,21 @@ export class ConfiguracaoController {
         res.status(401).json({ success: false, error: 'Usuário não autenticado' });
         return;
       }
-      const { orcamentoInsercaoModo } = req.body;
+      const { orcamentoInsercaoModo, whatsappOutboundDisplayName } = req.body;
       if (orcamentoInsercaoModo !== undefined && orcamentoInsercaoModo !== 'check' && orcamentoInsercaoModo !== 'ocultar') {
         res.status(400).json({
           success: false,
           error: 'orcamentoInsercaoModo deve ser "check" ou "ocultar"'
+        });
+        return;
+      }
+      if (
+        whatsappOutboundDisplayName !== undefined &&
+        typeof whatsappOutboundDisplayName !== 'string'
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'whatsappOutboundDisplayName deve ser texto'
         });
         return;
       }
@@ -1361,7 +1373,10 @@ export class ConfiguracaoController {
       const current = (user?.preferences as Record<string, unknown>) || {};
       const newPrefs = {
         ...current,
-        ...(orcamentoInsercaoModo !== undefined ? { orcamentoInsercaoModo } : {})
+        ...(orcamentoInsercaoModo !== undefined ? { orcamentoInsercaoModo } : {}),
+        ...(whatsappOutboundDisplayName !== undefined
+          ? { whatsappOutboundDisplayName: String(whatsappOutboundDisplayName).trim().slice(0, 80) }
+          : {})
       };
       await prisma.user.update({
         where: { id: userId },
@@ -1369,7 +1384,13 @@ export class ConfiguracaoController {
       });
       res.status(200).json({
         success: true,
-        data: { orcamentoInsercaoModo: newPrefs.orcamentoInsercaoModo === 'ocultar' ? 'ocultar' : 'check' }
+        data: {
+          orcamentoInsercaoModo: newPrefs.orcamentoInsercaoModo === 'ocultar' ? 'ocultar' : 'check',
+          whatsappOutboundDisplayName:
+            typeof newPrefs.whatsappOutboundDisplayName === 'string'
+              ? newPrefs.whatsappOutboundDisplayName
+              : ''
+        }
       });
     } catch (error: any) {
       console.error('Erro ao salvar preferências:', error);

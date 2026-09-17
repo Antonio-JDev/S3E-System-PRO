@@ -1,0 +1,510 @@
+/* WhatsApp Web — tokens e chrome. Escopo: .wa-web
+   Dark padrão; light quando html NÃO tem .dark (ThemeProvider). */
+
+.wa-web {
+  --wa-app: #0b141a;
+  --wa-panel: #111b21;
+  --wa-panel-header: #202c33;
+  --wa-hover: #202c33;
+  --wa-active: #2a3942;
+  --wa-nav: #1d282f;
+  --wa-conversation: #0b141a;
+  --wa-incoming: #202c33;
+  --wa-outgoing: #005c4b;
+  --wa-compose: #202c33;
+  --wa-input: #2a3942;
+  --wa-search: #202c33;
+  --wa-chip: #202c33;
+  --wa-chip-active: #0a332c;
+  --wa-chip-hover: #2a3942;
+  /* Verde oficial WA Web (amostrado ~#20c060; brand #25d366) */
+  --wa-primary: #25d366;
+  --wa-primary-hover: #1ebe57;
+  --wa-unread: #25d366;
+  --wa-icon: #aebac1;
+  --wa-icon-active: #25d366;
+  --wa-text: #e9edef;
+  --wa-text-sec: #8696a0;
+  --wa-text-muted: #667781;
+  --wa-bubble-text: #e9edef;
+  --wa-tick: #53bdeb;
+  --wa-border: #222d34;
+  --wa-dropdown: #233138;
+  --wa-warning: #ffd279;
+  --wa-overlay: rgba(11, 20, 26, 0.86);
+  --wa-nav-hover: rgba(255, 255, 255, 0.06);
+  --wa-icon-btn-hover: rgba(255, 255, 255, 0.08);
+  --wa-settings-hover: rgba(255, 255, 255, 0.03);
+  --wa-thought-bg: #2a3942;
+  --wa-toggle-off: #3b4a54;
+  --wa-action-circle: #2a3942;
+  --wa-nav-border: rgba(255, 255, 255, 0.04);
+  --wa-wallpaper-image: url("../assets/bg-darkBlack.webp");
+  --wa-nav-w: 59px;
+  --wa-contact-w: 400px;
+  --wa-font: "Segoe UI", "Helvetica Neue", Helvetica, "Lucida Grande", Arial, Ubuntu, Cantarell, sans-serif;
+
+  background: var(--wa-app);
+  color: var(--wa-text);
+  font-family: var(--wa-font);
+  letter-spacing: 0;
+}
+
+/* Paleta clara oficial WA Web */
+html:not(.dark) .wa-web {
+  --wa-app: #f0f2f5;
+  --wa-panel: #ffffff;
+  --wa-panel-header: #f0f2f5;
+  --wa-hover: #f5f6f6;
+  --wa-active: #f0f2f5;
+  --wa-nav: #f0f2f5;
+  --wa-conversation: #efeae2;
+  --wa-incoming: #ffffff;
+  --wa-outgoing: #d9fdd3;
+  --wa-compose: #f0f2f5;
+  --wa-input: #ffffff;
+  --wa-search: #f0f2f5;
+  --wa-chip: #f0f2f5;
+  --wa-chip-active: #e7fce3;
+  --wa-chip-hover: #e9edef;
+  --wa-primary: #25d366;
+  --wa-primary-hover: #1ebe57;
+  --wa-unread: #25d366;
+  --wa-icon: #54656f;
+  --wa-icon-active: #008069;
+  --wa-text: #111b21;
+  --wa-text-sec: #667781;
+  --wa-text-muted: #8696a0;
+  --wa-bubble-text: #111b21;
+  --wa-tick: #53bdeb;
+  --wa-border: #e9edef;
+  --wa-dropdown: #ffffff;
+  --wa-warning: #9a6b00;
+  --wa-overlay: rgba(11, 20, 26, 0.45);
+  --wa-nav-hover: rgba(11, 20, 26, 0.06);
+  --wa-icon-btn-hover: rgba(11, 20, 26, 0.06);
+  --wa-settings-hover: rgba(11, 20, 26, 0.04);
+  --wa-thought-bg: #ffffff;
+  --wa-toggle-off: #d1d7db;
+  --wa-action-circle: #f0f2f5;
+  --wa-nav-border: #e9edef;
+  --wa-wallpaper-image: none;
+}
+
+.wa-web,
+.wa-web * {
+  font-family: inherit;
+}
+
+.wa-web button {
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.wa-web button:active {
+  transform: none;
+}
+
+.wa-web input:focus,
+.wa-web textarea:focus,
+.wa-web select:focus {
+  box-shadow: none;
+  border-color: transparent;
+  outline: none;
+}
+
+.wa-nav-rail {
+  width: var(--wa-nav-w);
+  min-width: var(--wa-nav-w);
+  background: var(--wa-nav);
+  border-right: 1px solid var(--wa-nav-border);
+}
+
+.wa-nav-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  color: var(--wa-icon);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wa-nav-btn:hover {
+  background: var(--wa-nav-hover);
+}
+
+.wa-nav-btn.is-active {
+  background: var(--wa-active);
+  color: var(--wa-icon-active);
+}
+
+.wa-nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--wa-unread);
+  color: #111b21;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wa-list-header {
+  height: 60px;
+  background: var(--wa-panel);
+}
+
+.wa-plus-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--wa-primary);
+  color: #111b21;
+  cursor: pointer;
+}
+
+.wa-plus-btn:hover {
+  filter: brightness(1.06);
+}
+
+.wa-search-pill {
+  height: 36px;
+  border-radius: 8px;
+  background: var(--wa-search);
+  color: var(--wa-text);
+}
+
+.wa-composer-input {
+  background: var(--wa-input);
+  border-radius: 24px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wa-composer-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--wa-icon);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wa-composer-icon-btn:hover {
+  background: var(--wa-icon-btn-hover);
+}
+
+.wa-composer-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wa-header-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--wa-icon);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wa-header-icon-btn:hover {
+  background: var(--wa-icon-btn-hover);
+}
+
+.wa-search-pill::placeholder {
+  color: var(--wa-text-sec);
+}
+
+.wa-chip {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--wa-chip);
+  color: var(--wa-text);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 32px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wa-chip:hover {
+  background: var(--wa-chip-hover);
+}
+
+.wa-chip.is-active {
+  background: var(--wa-primary);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+html:not(.dark) .wa-web .wa-chip.is-active {
+  color: #111b21;
+}
+
+.wa-chip-plus {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--wa-text-sec);
+}
+
+.wa-chat-row {
+  height: 72px;
+  padding: 0 12px 0 13px;
+  margin: 0 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.wa-chat-row:hover {
+  background: var(--wa-hover);
+}
+
+.wa-chat-row.is-active {
+  background: var(--wa-active);
+}
+
+.wa-unread-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--wa-unread);
+  color: #111b21;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+.wa-chat-header {
+  height: 60px;
+  background: var(--wa-panel-header);
+}
+
+.wa-wallpaper {
+  background-color: var(--wa-conversation);
+  background-image: var(--wa-wallpaper-image);
+  background-size: 270px auto;
+  background-repeat: repeat;
+  background-position: center top;
+  opacity: 1;
+}
+
+html:not(.dark) .wa-web .wa-wallpaper {
+  /* Sem doodle escuro no tema claro — fundo oficial #efeae2 */
+  background-image: none;
+}
+
+/* Composer TipTap: nunca herdar folha A4 branca do tiptap-global.css */
+.wa-web .whatsapp-composer-editor .ProseMirror {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 20px !important;
+  height: auto !important;
+  padding: 9px 2px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--wa-text) !important;
+  font-family: inherit !important;
+  font-size: 15px !important;
+  line-height: 20px !important;
+  caret-color: var(--wa-primary) !important;
+}
+
+.wa-composer-bar {
+  /* Barra alinhada ao WA Web: só o pill carrega fundo; evita “faixa” sob o campo */
+  background: transparent;
+  min-height: 62px;
+  padding: 6px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.wa-composer-row {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  width: 100%;
+  min-height: 52px;
+}
+
+.wa-web .whatsapp-composer-editor .ProseMirror {
+  caret-color: var(--wa-primary) !important;
+}
+
+.wa-contact-drawer {
+  width: min(var(--wa-contact-w), 100%);
+  min-width: 280px;
+  max-width: 420px;
+  background: var(--wa-panel);
+  border-left: 1px solid var(--wa-border);
+}
+
+.wa-contact-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--wa-text-sec);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wa-contact-action-circle {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--wa-action-circle);
+  color: var(--wa-icon);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-settings-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 14px 24px;
+  cursor: pointer;
+  color: var(--wa-text);
+}
+
+.wa-settings-item:hover {
+  background: var(--wa-settings-hover);
+}
+
+.wa-settings-item svg {
+  color: var(--wa-icon);
+  margin-top: 2px;
+}
+
+.wa-sync-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 24px 18px;
+}
+
+.wa-thought {
+  position: absolute;
+  left: 50%;
+  top: -14px;
+  transform: translateX(-50%);
+  background: var(--wa-thought-bg);
+  color: var(--wa-text);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.wa-thought::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  background: var(--wa-thought-bg);
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 2px;
+}
+
+.wa-toggle {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--wa-toggle-off);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wa-toggle.is-on {
+  background: var(--wa-primary);
+}
+
+.wa-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.15s ease;
+}
+
+.wa-toggle.is-on::after {
+  transform: translateX(18px);
+}
+
+.wa-photo-overlay {
+  background: var(--wa-overlay);
+}
+
+.wa-empty-chat {
+  background: var(--wa-panel);
+}
+
+/* Bolhas — usam tokens (claro/escuro) */
+.wa-bubble-out {
+  background: var(--wa-outgoing);
+  color: var(--wa-bubble-text);
+  border-radius: 7.5px;
+  border-top-right-radius: 0;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+.wa-bubble-in {
+  background: var(--wa-incoming);
+  color: var(--wa-bubble-text);
+  border-radius: 7.5px;
+  border-top-left-radius: 0;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wa-web button,
+  .wa-toggle::after {
+    transition: none;
+  }
+}

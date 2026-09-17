@@ -15,6 +15,8 @@ jest.mock('./whatsappIdentity.service', () => ({
   normalizePhoneDigitsKey: jest.fn((d: string) => d),
   recordWhatsappChatIdentity: jest.fn(),
   resolvePreferredChatIdForOutbound: jest.fn(async (id: string) => id),
+  tryResolveAndRegisterIdentityFromPhone: jest.fn().mockResolvedValue(null),
+  isLidJid: jest.fn((id: string) => String(id || '').toLowerCase().endsWith('@lid')),
 }));
 
 jest.mock('../lib/prisma', () => ({
@@ -131,7 +133,7 @@ describe('linkWhatsappChatToCliente — WhatsApp direto e funil', () => {
     expect(updateLead).not.toHaveBeenCalled();
   });
 
-  it('preenche telefone do cliente quando cadastro está vazio', async () => {
+  it('não sobrescreve telefone do cliente mesmo quando cadastro está vazio (representante ≠ empresa)', async () => {
     findManyLeads.mockResolvedValue([
       {
         id: 'lead-1',
@@ -146,10 +148,7 @@ describe('linkWhatsappChatToCliente — WhatsApp direto e funil', () => {
 
     await linkWhatsappChatToCliente(CHAT, CLIENTE_ID);
 
-    expect(updateCliente).toHaveBeenCalledWith({
-      where: { id: CLIENTE_ID },
-      data: { telefone: '556399494139' },
-    });
+    expect(updateCliente).not.toHaveBeenCalled();
   });
 });
 

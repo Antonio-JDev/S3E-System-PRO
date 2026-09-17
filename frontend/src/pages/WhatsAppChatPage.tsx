@@ -70,8 +70,8 @@ const WhatsAppChatPage: React.FC<WhatsAppChatPageProps> = ({
 
   return (
     <div
-      className={`flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-dark-bg ${
-        isWaMobile ? 'fixed inset-0 z-[35] bg-white dark:bg-[#161717]' : ''
+      className={`flex min-h-0 flex-1 flex-col bg-[#0b141a] ${
+        isWaMobile ? 'fixed inset-0 z-[35] bg-[#0b141a]' : ''
       }`}
     >
       {/* Header removido para o chat ocupar toda a área útil (estilo WhatsApp Web). */}

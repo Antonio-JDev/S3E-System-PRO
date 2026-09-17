@@ -200,7 +200,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ open, imag
         <button
           type="button"
           onClick={handleDownload}
-          className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg bg-[#00a884] px-4 py-2 text-[12px] font-medium text-white shadow-sm transition hover:bg-[#008f6f]"
+          className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg bg-[#25d366] px-4 py-2 text-[12px] font-medium text-white shadow-sm transition hover:bg-[#1ebe57]"
           aria-label="Baixar imagem"
           title="Baixar imagem"
         >

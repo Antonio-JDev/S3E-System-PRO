@@ -1,46 +1,63 @@
 .whatsapp-composer-shell {
   overflow: hidden;
+  background: transparent;
 }
 
+.whatsapp-composer-editor,
 .whatsapp-composer-editor .ProseMirror {
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  min-height: 40px;
-  height: 100%;
-  background: transparent;
-  box-shadow: none;
-  border: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+/* Sobrescreve tiptap-global.css (folha A4 branca) só no composer do chat WA */
+.wa-web .whatsapp-composer-editor .ProseMirror,
+.whatsapp-composer-editor .ProseMirror {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  min-height: 20px !important;
+  height: auto !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
   max-height: calc(1.35em * 8);
   overflow-x: hidden;
   overflow-y: hidden;
-  padding: 8px 4px;
-  font-size: 15px;
-  line-height: 1.35;
-  color: #111b21;
+  padding: 9px 2px !important;
+  font-family: inherit !important;
+  font-size: 15px !important;
+  line-height: 20px !important;
+  color: var(--wa-text, #e9edef) !important;
   outline: none;
   word-break: break-word;
   white-space: pre-wrap;
+  caret-color: var(--wa-primary, #25d366);
 }
 
-.dark .whatsapp-composer-editor .ProseMirror {
-  color: #e9edef;
-}
-
-.whatsapp-composer-editor .ProseMirror:focus {
-  outline: none;
-}
-
+.wa-web .whatsapp-composer-editor .ProseMirror p,
 .whatsapp-composer-editor .ProseMirror p {
-  margin: 0;
+  margin: 0 !important;
+  color: inherit !important;
+}
+
+.dark .whatsapp-composer-editor .ProseMirror,
+.wa-web .whatsapp-composer-editor .ProseMirror {
+  background: transparent !important;
+  color: #e9edef !important;
 }
 
 .whatsapp-composer-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
-  color: #8696a0;
+  color: #8696a0 !important;
   pointer-events: none;
   height: 0;
+}
+
+.whatsapp-composer-editor .ProseMirror:focus {
+  outline: none;
 }
 
 .whatsapp-composer-editor .ProseMirror ul,
@@ -89,7 +106,7 @@
   min-width: 0;
   margin-left: 8px;
   padding: 2px 0 4px 12px;
-  border-left: 4px solid #06cf9c;
+  border-left: 4px solid var(--wa-primary, #25d366);
 }
 
 .whatsapp-composer-reply--group .whatsapp-composer-reply__body {
@@ -101,7 +118,7 @@
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
-  color: #06cf9c;
+  color: var(--wa-primary, #25d366);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -124,7 +141,8 @@
   word-break: break-word;
 }
 
-.dark .whatsapp-composer-reply__snippet {
+.dark .whatsapp-composer-reply__snippet,
+.wa-web .whatsapp-composer-reply__snippet {
   color: #8696a0;
 }
 
@@ -148,7 +166,8 @@
   background: rgba(11, 20, 26, 0.06);
 }
 
-.dark .whatsapp-composer-reply__dismiss:hover {
+.dark .whatsapp-composer-reply__dismiss:hover,
+.wa-web .whatsapp-composer-reply__dismiss:hover {
   background: rgba(233, 237, 239, 0.08);
 }
 
@@ -159,7 +178,8 @@
   background: #e9edef;
 }
 
-.dark .whatsapp-composer-reply-divider {
+.dark .whatsapp-composer-reply-divider,
+.wa-web .whatsapp-composer-reply-divider {
   background: #3b4a54;
 }
 

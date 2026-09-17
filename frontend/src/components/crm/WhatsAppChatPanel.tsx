@@ -10,13 +10,17 @@ import {
   Contact,
   FileText,
   Images,
+  Lock,
   LogOut,
   MessageCircle,
   Mic,
+  MoreVertical,
+  Pause,
+  Pin,
+  Play,
   Plus,
   QrCode,
   Smile,
-  Sticker,
   Search,
   SquareCheck,
   Star,
@@ -25,12 +29,18 @@ import {
   User,
   UserPlus,
   UserRound,
+  BellOff,
+  ClipboardList,
 } from 'lucide-react';
 import { loadPdfCustomizationFromStorage } from '../../hooks/usePDFCustomization';
 import { useMatchMedia, WA_MOBILE_MEDIA } from '../../hooks/useMatchMedia';
+import { useTheme } from '../../hooks/useTheme';
+import {
+  ensureOggOpusVoiceBlob,
+  extractAudioWaveformPeaks,
+} from '../../utils/whatsappVoiceAudio.util';
+import { configuracoesService } from '../../services/configuracoesService';
 import iconePdfChat from '../../assets/icone-pdf-chat.svg';
-import chatBgWebp from '../../assets/bg-darkBlack.webp';
-import chatBgWhiteWebp from '../../assets/bg-white.webp';
 import {
   fetchWhatsappChats,
   fetchWhatsappArchivedChats,
@@ -124,6 +134,10 @@ import {
   markWhatsappProfilePictureMissing,
 } from '../../utils/whatsappProfilePictureSessionCache';
 import { onlyDigits } from '../../utils/masks';
+import {
+  brWhatsappOpenDigitCandidates,
+  preferBrWhatsappDigitsForOpen,
+} from '../../utils/brPhoneWhatsapp.util';
 import { downloadInNewTab, openInNewTab } from '../../utils/browserLinks';
 import WhatsAppActionsDrawer from './WhatsAppActionsDrawer';
 import AudioMessage from './AudioMessage';
@@ -139,6 +153,17 @@ import { useWhatsAppRealtimeStatus } from '../../hooks/useWhatsAppSocket';
 import { ComposerEmojiGifStickerModal, type ComposerPickerTab } from './ComposerEmojiGifStickerModal';
 import { WhatsappComposerEditor, type WhatsappComposerEditorHandle } from './WhatsappComposerEditor';
 import './WhatsappComposerEditor.css';
+import '../../styles/whatsappWeb.css';
+import WhatsAppNavRail from './WhatsAppNavRail';
+import WhatsAppContactInfoDrawer from './WhatsAppContactInfoDrawer';
+import WhatsAppAccountSettingsPanel from './WhatsAppAccountSettingsPanel';
+import WhatsAppProfilePhotoOverlay from './WhatsAppProfilePhotoOverlay';
+import type { WaNavId, WaSettingsPage } from '../../theme/whatsappWebTokens';
+import {
+  classifyWhatsappListPreview,
+  formatWhatsappListTime,
+  truncateWhatsappPreview,
+} from '../../utils/whatsappListPreview.util';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -558,10 +583,21 @@ function vCardValueAfterColon(line: string): string {
 }
 
 function normalizeVCardPhoneDigits(raw: string): string {
+  const preferred = preferBrWhatsappDigitsForOpen(raw);
+  if (preferred.length >= 12) return preferred;
   let d = onlyDigits(raw);
   if (!d) return '';
   if (d.length >= 10 && d.length <= 11 && !d.startsWith('55')) d = `55${d}`;
   return d;
+}
+
+/** Extrai dígitos de linha TEL do vCard (waid=… ou valor após ':'). */
+function extractVCardTelDigits(line: string): string {
+  const waid = line.match(/waid=(\d{10,15})/i);
+  if (waid?.[1]) return normalizeVCardPhoneDigits(waid[1]);
+  const afterColon = vCardValueAfterColon(line);
+  if (afterColon) return normalizeVCardPhoneDigits(afterColon);
+  return '';
 }
 
 function formatInternationalBrFromDigits(d: string): string {
@@ -673,26 +709,23 @@ function parseVCardFromText(raw: string): ParsedVCard | null {
   const phoneDigits = Array.from(
     new Set(
       lines
-        .filter((l) => /^TEL/i.test(l))
-        .map((l) => normalizeVCardPhoneDigits(vCardValueAfterColon(l)))
-        .filter(Boolean)
+        .filter((l) => /(?:^item\d+\.)?TEL/i.test(l.trim()) || /;TEL/i.test(l))
+        .map((l) => extractVCardTelDigits(l))
+        .filter((d) => d.length >= 12)
     )
   ).slice(0, 3);
+
+  // Fallback: alguns cartões só trazem o número no corpo / waid sem linha TEL clássica
+  if (phoneDigits.length === 0) {
+    for (const m of text.matchAll(/(?:waid=)?(\+?55[\s.-]*)?(?:\(?\d{2}\)?[\s.-]*)?\d{4,5}[\s.-]?\d{4}/gi)) {
+      const d = preferBrWhatsappDigitsForOpen(m[0]);
+      if (d.length >= 12 && !phoneDigits.includes(d)) phoneDigits.push(d);
+      if (phoneDigits.length >= 3) break;
+    }
+  }
+
   return { displayName, phoneDigits };
 }
-
-/** Wallpaper do chat (asset local) — tamanho da “ladrilha” para repeat (menor = padrão mais fino). */
-const CHAT_BG_TILE_DARK = `url(${chatBgWebp})`;
-const CHAT_BG_TILE_LIGHT = `url(${chatBgWhiteWebp})`;
-const CHAT_BG_TILE_PX = 380;
-
-const chatWallpaperLayerStyle = (imageUrl: string, baseColor: string): React.CSSProperties => ({
-  backgroundColor: baseColor,
-  backgroundImage: imageUrl,
-  backgroundSize: `${CHAT_BG_TILE_PX}px`,
-  backgroundPosition: '0 0',
-  backgroundRepeat: 'repeat',
-});
 
 function formatMsgTime(iso: string): string {
   try {
@@ -703,20 +736,7 @@ function formatMsgTime(iso: string): string {
 }
 
 function formatListTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const sameDay =
-      d.getDate() === now.getDate() &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear();
-    if (sameDay) {
-      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  } catch {
-    return '';
-  }
+  return formatWhatsappListTime(iso);
 }
 
 /**
@@ -739,8 +759,9 @@ function formatListTime(iso: string): string {
  */
 const WHATSAPP_URL_REGEX = /((?:https?:\/\/|www\.)[^\s<>"]+?)(?=$|[\s<>"]|[.,;:!?)\]}]+(?:\s|$))/gi;
 
-/** Telefone em texto (10–15 dígitos; opcional +55) — ex.: 47996362471 */
-const WHATSAPP_PHONE_IN_TEXT_REGEX = /(?<!\d)(?:\+?55[\s.-]?)?\d{10,15}(?!\d)/g;
+/** Telefone em texto BR: 47996362471, 479636-2471, 55 47 99636-2471, etc. */
+const WHATSAPP_PHONE_IN_TEXT_REGEX =
+  /(?<!\d)(?:\+?55[\s.-]*)?(?:\(?\d{2}\)?[\s.-]*)?\d{4,5}[\s.-]?\d{4}(?!\d)/g;
 
 function splitTextByPhones(text: string): Array<{ kind: 'text' | 'phone'; value: string }> {
   if (!text) return [];
@@ -749,7 +770,8 @@ function splitTextByPhones(text: string): Array<{ kind: 'text' | 'phone'; value:
   for (const m of text.matchAll(WHATSAPP_PHONE_IN_TEXT_REGEX)) {
     if (m.index === undefined) continue;
     const digits = onlyDigits(m[0]);
-    if (digits.length < 10 || digits.length > 15) continue;
+    // 10–11 locais ou 12–13 com 55
+    if (digits.length < 10 || digits.length > 13) continue;
     if (m.index > lastIndex) out.push({ kind: 'text', value: text.slice(lastIndex, m.index) });
     out.push({ kind: 'phone', value: m[0] });
     lastIndex = m.index + m[0].length;
@@ -792,7 +814,7 @@ function renderTextChunkWithUrlsAndPhones(
               e.stopPropagation();
               onPhoneClick(digits);
             }}
-            className="inline cursor-pointer border-0 bg-transparent p-0 text-[#027eb5] underline decoration-[#027eb5]/70 hover:text-[#00a884] dark:text-[#53bdeb] dark:decoration-[#53bdeb]/70 dark:hover:text-[#00d4aa]"
+            className="inline cursor-pointer border-0 bg-transparent p-0 text-[#027eb5] underline decoration-[#027eb5]/70 hover:text-[#25d366] dark:text-[#53bdeb] dark:decoration-[#53bdeb]/70 dark:hover:text-[#00d4aa]"
             title="Abrir conversa com este número"
           >
             <Twemoji svg className="message-emoji-text" text={phSeg.value} />
@@ -945,7 +967,7 @@ const ContactAvatar = memo(function ContactAvatar({
   children?: React.ReactNode;
 }) {
   const [imgErr, setImgErr] = useState(false);
-  const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-12 w-12 text-[15px]';
+  const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-[49px] w-[49px] text-[15px]';
   const hasPictureHint = Boolean((imageUrl || '').trim()) || eagerLoadProfilePicture;
   const avatarSrc =
     chatId && !isWhatsappProfilePictureMissing(chatId)
@@ -977,7 +999,7 @@ const ContactAvatar = memo(function ContactAvatar({
         />
       ) : (
         <div
-          className={`flex h-full w-full items-center justify-center rounded-full bg-[#dfe5e7] font-medium text-[#54656f] dark:bg-[#54656f] dark:text-[#e9edef] ${size === 'list' ? 'text-[15px]' : 'text-sm'}`}
+          className={`flex h-full w-full items-center justify-center rounded-full bg-[#dfe5e7] font-medium text-[#54656f] dark:bg-[#54656f] dark:text-[var(--wa-text)] ${size === 'list' ? 'text-[15px]' : 'text-sm'}`}
         >
           {avatarLetter(label)}
         </div>
@@ -1014,7 +1036,7 @@ function OutboundAckIcon({
   onOutgoingBubble?: boolean;
 }) {
   const vis = outboundAckVisual(ack);
-  const greyCls = onOutgoingBubble ? 'text-[#667781] dark:text-[#b8e8d8]' : 'text-[#8696a0]';
+  const greyCls = onOutgoingBubble ? 'text-[var(--wa-text-muted)] dark:text-[#b8e8d8]' : 'text-[var(--wa-text-sec)]';
   if (vis === 'single') {
     return <Check size={16} strokeWidth={1.75} className={`ml-0.5 shrink-0 ${greyCls}`} aria-hidden />;
   }
@@ -1037,30 +1059,8 @@ const SendPlaneIcon = (p: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const AttachIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-  </svg>
-);
-
-const EllipsisVerticalIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <circle cx="12" cy="5" r="2" />
-    <circle cx="12" cy="12" r="2" />
-    <circle cx="12" cy="19" r="2" />
-  </svg>
-);
-
 /** Ícones do menu ⋮ da lista (traço fino, cinza — estilo WhatsApp Web). */
-const WA_SIDEBAR_MENU_ICON = 'h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[#8696a0]';
-
-/** Ícone “nova conversa” (quadrado com +), alinhado ao WhatsApp Web. */
-const NewChatSquareIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <rect x="3" y="3" width="18" height="18" rx="3" ry="3" />
-    <path d="M12 8v8M8 12h8" />
-  </svg>
-);
+const WA_SIDEBAR_MENU_ICON = 'h-[18px] w-[18px] shrink-0 text-[var(--wa-icon)]';
 
 function detectMediaType(mime: string): WhatsappProviderMediaType {
   const m = mime.toLowerCase();
@@ -1336,10 +1336,10 @@ function PdfDocumentCard({
       <div className="flex items-center gap-3 px-3 py-2.5">
         <img src={iconePdfChat} alt="" className="h-9 w-9 shrink-0 object-contain" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium leading-tight text-[#111b21] dark:text-[#e9edef]">
+          <p className="truncate text-[14px] font-medium leading-tight text-[#111b21] dark:text-[var(--wa-text)]">
             {filename}
           </p>
-          <p className="mt-0.5 text-[12px] leading-tight text-[#667781] dark:text-[#8696a0]">{meta}</p>
+          <p className="mt-0.5 text-[12px] leading-tight text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{meta}</p>
         </div>
       </div>
     </button>
@@ -1424,9 +1424,15 @@ function MediaRenderer({
   if (!mediaSrc) return null;
 
   const audioMime =
-    (m.mediaMimetype || '').toLowerCase().includes('ogg') || fname.toLowerCase().endsWith('.ogg')
-      ? 'audio/ogg'
-      : m.mediaMimetype || 'audio/ogg';
+    (m.mediaMimetype || '').toLowerCase().includes('webm') || fname.toLowerCase().endsWith('.webm')
+      ? 'audio/webm;codecs=opus'
+      : (m.mediaMimetype || '').toLowerCase().includes('ogg') ||
+          (m.mediaMimetype || '').toLowerCase().includes('opus') ||
+          fname.toLowerCase().endsWith('.ogg') ||
+          fname.toLowerCase().endsWith('.opus') ||
+          fname.toLowerCase().endsWith('.oga')
+        ? 'audio/ogg; codecs=opus'
+        : m.mediaMimetype || 'audio/ogg; codecs=opus';
   const handleDownload = () => {
     const url = mediaSrcDownload ?? mediaSrc;
     downloadInNewTab({ url, filename: fname });
@@ -1502,24 +1508,24 @@ function MediaRenderer({
   return (
     <div className="mb-1 overflow-hidden rounded-lg border border-black/10 bg-white/60 dark:border-white/10 dark:bg-[#161717]/40">
       <div className="flex items-center gap-3 px-2 py-2">
-        <svg className="h-8 w-8 flex-shrink-0 text-[#00a884]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <svg className="h-8 w-8 flex-shrink-0 text-[#25d366]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
         </svg>
         <div className="min-w-0 flex-1 text-left">
-          <p className="truncate text-[13px] font-medium text-[#111b21] dark:text-[#e9edef]">{fname}</p>
-          {sizeLabel ? <p className="text-[11px] text-[#667781] dark:text-[#8696a0]">{sizeLabel}</p> : null}
+          <p className="truncate text-[13px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">{fname}</p>
+          {sizeLabel ? <p className="text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{sizeLabel}</p> : null}
         </div>
         <button
           type="button"
           onClick={() => openInNewTab(mediaSrc)}
-          className="rounded-md border border-[#00a884] px-2 py-1 text-[11px] font-medium text-[#00a884] hover:bg-[#00a884]/10"
+          className="rounded-md border border-[#25d366] px-2 py-1 text-[11px] font-medium text-[#25d366] hover:bg-[#25d366]/10"
         >
           Visualizar
         </button>
         <button
           type="button"
           onClick={handleDownload}
-          className="rounded-md border border-[#d1d7db] px-2 py-1 text-[11px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[#2a3942] dark:text-[#8696a0] dark:hover:bg-white/10"
+          className="rounded-md border border-[#d1d7db] px-2 py-1 text-[11px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[var(--wa-border)] dark:text-[var(--wa-text-sec)] dark:hover:bg-white/10"
         >
           Baixar
         </button>
@@ -1577,7 +1583,7 @@ const WaMenuIconTrash = (p: React.SVGProps<SVGSVGElement>) => (
 );
 
 const WA_MSG_MENU_ITEM =
-  'flex cursor-pointer select-none items-center gap-3 rounded-md px-2.5 py-2 text-[14px] leading-snug text-[#111b21] outline-none transition-colors dark:text-[#e9edef] data-[highlighted]:bg-[#f7f5f3] data-[highlighted]:text-[#111b21] dark:data-[highlighted]:bg-[#2a3942] dark:data-[highlighted]:text-[#e9edef] focus:bg-[#f7f5f3] focus:text-[#111b21] dark:focus:bg-[#2a3942] dark:focus:text-[#e9edef]';
+  'flex cursor-pointer select-none items-center gap-3 rounded-md px-2.5 py-2 text-[14px] leading-snug text-[#111b21] outline-none transition-colors dark:text-[var(--wa-text)] data-[highlighted]:bg-[#f7f5f3] data-[highlighted]:text-[#111b21] dark:data-[highlighted]:bg-[var(--wa-input)] dark:data-[highlighted]:text-[var(--wa-text)] focus:bg-[#f7f5f3] focus:text-[#111b21] dark:focus:bg-[var(--wa-input)] dark:focus:text-[var(--wa-text)]';
 
 const WA_MSG_MENU_ITEM_DANGER =
   'flex cursor-pointer select-none items-center gap-3 rounded-md px-2.5 py-2 text-[14px] leading-snug text-red-600 outline-none transition-colors dark:text-red-400 data-[highlighted]:bg-red-50 data-[highlighted]:text-red-700 dark:data-[highlighted]:bg-red-950/35 dark:data-[highlighted]:text-red-300 focus:bg-red-50 focus:text-red-700 dark:focus:bg-red-950/35 dark:focus:text-red-300';
@@ -1699,7 +1705,7 @@ const MessageBubble = memo(function MessageBubble({
     m.reaction && m.reaction.trim() ? (
       <button
         type="button"
-        className={`absolute -bottom-2.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-white px-1.5 text-[14px] leading-none shadow-[0_1px_2px_rgba(0,0,0,0.15)] ring-1 ring-black/10 transition hover:scale-110 dark:bg-[#2a3942] dark:ring-white/10 ${
+        className={`absolute -bottom-2.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-white px-1.5 text-[14px] leading-none shadow-[0_1px_2px_rgba(0,0,0,0.15)] ring-1 ring-black/10 transition hover:scale-110 dark:bg-[var(--wa-input)] dark:ring-white/10 ${
           m.fromMe ? '-left-1.5' : '-right-1.5'
         }`}
         onClick={(e) => {
@@ -1725,8 +1731,8 @@ const MessageBubble = memo(function MessageBubble({
   const bubbleAppearanceClasses = isEmojiJumbo
     ? 'bg-transparent shadow-none'
     : m.fromMe
-      ? 'bg-[#d9fdd3] text-[#111b21] rounded-lg rounded-tr-none shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] dark:bg-[#005c4b] dark:text-[#e9edef]'
-      : 'bg-white text-[#111b21] rounded-lg rounded-tl-none shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] dark:bg-[#202c33] dark:text-[#e9edef]';
+      ? 'wa-bubble-out'
+      : 'wa-bubble-in';
   const bubblePadYClass = isEmojiJumbo ? 'py-2' : 'py-1.5';
 
   return (
@@ -1756,7 +1762,7 @@ const MessageBubble = memo(function MessageBubble({
               <DropdownMenuContent
                 sideOffset={6}
                 align={m.fromMe ? 'end' : 'start'}
-                className="min-w-[11.5rem] w-max max-w-[min(100vw-2rem,16rem)] rounded-lg border border-gray-200 p-1.5 shadow-lg dark:border-[#3b4a54] dark:bg-[#233138] dark:text-[#e9edef]"
+                className="min-w-[11.5rem] w-max max-w-[min(100vw-2rem,16rem)] rounded-lg border border-gray-200 p-1.5 shadow-lg dark:border-[#3b4a54] dark:bg-[#233138] dark:text-[var(--wa-text)]"
               >
                 {m.providerMessageId ? (
                   <>
@@ -1881,7 +1887,7 @@ const MessageBubble = memo(function MessageBubble({
                   Apagar pra mim
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="my-1 bg-gray-200 dark:bg-[#3b4a54]" />
-                <DropdownMenuLabel className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+                <DropdownMenuLabel className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                   Para todos no chat
                 </DropdownMenuLabel>
                 <DropdownMenuItem
@@ -1901,9 +1907,25 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : null}
         {showGroupParticipant && !m.fromMe && groupParticipantLabel ? (
-          <p className="mb-1 truncate text-[12px] font-semibold text-[#00a884] dark:text-[#00a884]">
+          <p className="mb-1 truncate text-[12px] font-semibold text-[#25d366] dark:text-[#25d366]">
             {groupParticipantLabel}
           </p>
+        ) : null}
+        {m.quotedContent || m.quotedProviderMessageId ? (
+          <div
+            className={`mb-1.5 overflow-hidden rounded-md border-l-4 px-2 py-1.5 ${
+              m.fromMe
+                ? 'border-[#25d366] bg-black/10 dark:bg-black/20'
+                : 'border-[#25d366] bg-black/[0.06] dark:bg-white/[0.06]'
+            }`}
+          >
+            <p className="truncate text-[12px] font-semibold text-[#25d366]">
+              {m.quotedAuthorName?.trim() || (m.quotedFromMe ? 'Você' : 'Contato')}
+            </p>
+            <p className="line-clamp-2 text-[12px] leading-snug text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
+              {m.quotedContent?.trim() || 'Mensagem'}
+            </p>
+          </div>
         ) : null}
         {hasMedia && (
           <MediaRenderer
@@ -1920,14 +1942,14 @@ const MessageBubble = memo(function MessageBubble({
           />
         )}
         {locationPayload ? (
-          <div className="mb-1 rounded-lg border border-[#d1d7db] bg-white/70 p-2 dark:border-[#2a3942] dark:bg-[#161717]/30">
-            <p className="text-[13px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+          <div className="mb-1 rounded-lg border border-[#d1d7db] bg-white/70 p-2 dark:border-[var(--wa-border)] dark:bg-[#161717]/30">
+            <p className="text-[13px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
               📍 {locationPayload.name || 'Localização'}
             </p>
             {locationPayload.address ? (
               <p className="mt-0.5 text-[12px] text-[#54656f] dark:text-[#a9b4ba]">{locationPayload.address}</p>
             ) : null}
-            <p className="mt-0.5 text-[11px] text-[#667781] dark:text-[#8696a0]">
+            <p className="mt-0.5 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
               {locationPayload.latitude.toFixed(6)}, {locationPayload.longitude.toFixed(6)}
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -1935,7 +1957,7 @@ const MessageBubble = memo(function MessageBubble({
                 href={`https://maps.google.com/?q=${locationPayload.latitude},${locationPayload.longitude}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-md border border-[#d1d7db] px-2 py-1 text-[11px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[#2a3942] dark:text-[#8696a0] dark:hover:bg-white/10"
+                className="rounded-md border border-[#d1d7db] px-2 py-1 text-[11px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[var(--wa-border)] dark:text-[var(--wa-text-sec)] dark:hover:bg-white/10"
               >
                 Abrir no mapa
               </a>
@@ -1947,34 +1969,69 @@ const MessageBubble = memo(function MessageBubble({
             className={`mb-1 min-w-[260px] max-w-[min(100%,320px)] overflow-hidden rounded-[10px] border shadow-sm ${
               m.fromMe
                 ? 'border-[#00000014] bg-white/90 dark:border-white/10 dark:bg-[#0b2a24]/90'
-                : 'border-[#d1d7db] bg-white dark:border-[#2a3942] dark:bg-[#182229]'
+                : 'border-[#d1d7db] bg-white dark:border-[var(--wa-border)] dark:bg-[#182229]'
             }`}
           >
             <div className="relative flex gap-2.5 px-2.5 pb-2 pt-2.5 pr-[4.5rem]">
               <div
                 className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[#54656f] ${
-                  m.fromMe ? 'bg-[#dfe5e7] dark:bg-[#2a3942]' : 'bg-[#dfe5e7] dark:bg-[#2a3942]'
+                  m.fromMe ? 'bg-[#dfe5e7] dark:bg-[var(--wa-input)]' : 'bg-[#dfe5e7] dark:bg-[var(--wa-input)]'
                 }`}
               >
                 <UserRound className="h-7 w-7 opacity-80" strokeWidth={1.5} aria-hidden />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-semibold leading-tight text-[#111b21] dark:text-[#e9edef]">
+                <p className="truncate text-[15px] font-semibold leading-tight text-[#111b21] dark:text-[var(--wa-text)]">
                   {vcard.displayName || 'Contato'}
                 </p>
                 {vcard.phoneDigits[0] ? (
                   <div className="mt-1.5 flex items-start gap-2">
-                    <span className="mt-0.5 rounded bg-[#00a884]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#00a884]/25 dark:text-[#53d4b0]">
+                    <span className="mt-0.5 rounded bg-[#25d366]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#25d366]/25 dark:text-[#53d4b0]">
                       Tel
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[13px] leading-snug text-[#111b21] dark:text-[#e9edef]">
+                      <button
+                        type="button"
+                        disabled={!onOpenPhoneFromText && !onNavigateWhatsappChat}
+                        onClick={() => {
+                          const d = vcard.phoneDigits[0];
+                          if (!d) return;
+                          if (onOpenPhoneFromText) {
+                            onOpenPhoneFromText(d);
+                            return;
+                          }
+                          const preferred = preferBrWhatsappDigitsForOpen(d);
+                          onNavigateWhatsappChat?.(
+                            toWhatsappChatId(preferred),
+                            formatInternationalBrFromDigits(preferred)
+                          );
+                        }}
+                        className="text-left text-[13px] leading-snug text-[#027eb5] underline decoration-[#027eb5]/50 hover:text-[#25d366] disabled:cursor-default disabled:no-underline disabled:text-[#111b21] dark:text-[#53bdeb] dark:hover:text-[#00d4aa] dark:disabled:text-[var(--wa-text)]"
+                        title="Abrir conversa"
+                      >
                         {formatInternationalBrFromDigits(vcard.phoneDigits[0])}
-                      </p>
+                      </button>
                       {vcard.phoneDigits.slice(1).map((d) => (
-                        <p key={d} className="mt-0.5 text-[12px] text-[#54656f] dark:text-[#a9b4ba]">
+                        <button
+                          key={d}
+                          type="button"
+                          disabled={!onOpenPhoneFromText && !onNavigateWhatsappChat}
+                          onClick={() => {
+                            if (onOpenPhoneFromText) {
+                              onOpenPhoneFromText(d);
+                              return;
+                            }
+                            const preferred = preferBrWhatsappDigitsForOpen(d);
+                            onNavigateWhatsappChat?.(
+                              toWhatsappChatId(preferred),
+                              formatInternationalBrFromDigits(preferred)
+                            );
+                          }}
+                          className="mt-0.5 block text-left text-[12px] text-[#027eb5] underline decoration-[#027eb5]/40 hover:text-[#25d366] disabled:cursor-default disabled:no-underline disabled:text-[#54656f] dark:text-[#53bdeb] dark:disabled:text-[#a9b4ba]"
+                          title="Abrir conversa"
+                        >
                           {formatInternationalBrFromDigits(d)}
-                        </p>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -1982,7 +2039,7 @@ const MessageBubble = memo(function MessageBubble({
               </div>
               <div
                 className={`absolute bottom-1.5 right-2 flex items-center gap-0.5 text-[11px] tabular-nums ${
-                  m.fromMe ? 'text-[#667781] dark:text-[#b8e8d8]' : 'text-[#667781]'
+                  m.fromMe ? 'text-[var(--wa-text-muted)] dark:text-[#b8e8d8]' : 'text-[var(--wa-text-muted)]'
                 }`}
               >
                 <span>{formatMsgTime(m.timestamp)}</span>
@@ -1993,7 +2050,7 @@ const MessageBubble = memo(function MessageBubble({
               className={`grid grid-cols-2 divide-x ${
                 m.fromMe
                   ? 'divide-[#00000012] border-t border-[#00000012] dark:divide-white/10 dark:border-white/10'
-                  : 'divide-[#e9edef] border-t border-[#e9edef] dark:divide-[#2a3942] dark:border-[#2a3942]'
+                  : 'divide-[#e9edef] border-t border-[#e9edef] dark:divide-[#2a3942] dark:border-[var(--wa-border)]'
               }`}
             >
               <button
@@ -2032,12 +2089,17 @@ const MessageBubble = memo(function MessageBubble({
                     toast.message('Telefone não disponível neste cartão');
                     return;
                   }
+                  if (onOpenPhoneFromText) {
+                    void onOpenPhoneFromText(d);
+                    return;
+                  }
                   if (!onNavigateWhatsappChat) {
                     toast.message('Abra o chat na lista para usar “Conversar”.');
                     return;
                   }
-                  const jid = toWhatsappChatId(d);
-                  onNavigateWhatsappChat(jid, formatInternationalBrFromDigits(d));
+                  const preferred = preferBrWhatsappDigitsForOpen(d);
+                  const jid = toWhatsappChatId(preferred);
+                  onNavigateWhatsappChat(jid, formatInternationalBrFromDigits(preferred));
                 }}
               >
                 <MessageCircle className="h-4 w-4 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
@@ -2074,7 +2136,7 @@ const MessageBubble = memo(function MessageBubble({
         {!embedAudioMetaFooter && !embedVCardMetaFooter ? (
           <div
             className={`absolute bottom-1 right-2 flex items-center gap-0.5 text-[11px] tabular-nums ${
-              m.fromMe ? 'text-[#667781]' : 'text-[#667781]'
+              m.fromMe ? 'text-[var(--wa-text-muted)]' : 'text-[var(--wa-text-muted)]'
             }`}
           >
             <span>{formatMsgTime(m.timestamp)}</span>
@@ -2378,6 +2440,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [contactPanelOpen, setContactPanelOpen] = useState(false);
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
   const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
+  const [waNav, setWaNav] = useState<WaNavId>('chats');
+  const [settingsPage, setSettingsPage] = useState<WaSettingsPage>('home');
+  const [profilePhotoOverlay, setProfilePhotoOverlay] = useState<{
+    name: string;
+    url: string | null;
+  } | null>(null);
+  const [inChatSearchOpen, setInChatSearchOpen] = useState(false);
+  const [inChatSearch, setInChatSearch] = useState('');
+  const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem('wa-chat-muted-ids');
+      const arr = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(arr)) return new Set(arr.filter((x) => typeof x === 'string'));
+    } catch {
+      /* ignore */
+    }
+    return new Set();
+  });
   const contactPanelAutoFetchKeyRef = useRef<string>('');
   const [actionsClienteSearch, setActionsClienteSearch] = useState('');
   const [actionsClienteSearchDebounced, setActionsClienteSearchDebounced] = useState('');
@@ -2496,6 +2576,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const recordingStoppingRef = useRef(false);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const recordingElapsedSecRef = useRef(0);
+  const sendAfterStopRef = useRef(false);
+  const [liveWaveBars, setLiveWaveBars] = useState<number[]>(() => Array.from({ length: 48 }, () => 0.12));
   const [pendingRecordedAudio, setPendingRecordedAudio] = useState<PendingRecordedAudio | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
@@ -2508,6 +2591,37 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const auth = useContext(AuthContext);
   const crmUser = auth?.user ?? null;
   const crmIsAdmin = useMemo(() => isCrmAdminUser(crmUser), [crmUser]);
+
+  const operatorPrefsQuery = useQuery({
+    queryKey: ['user-preferencias', crmUser?.id],
+    queryFn: async () => {
+      const r = await configuracoesService.getPreferenciasUsuario();
+      if (!r.success || !r.data) return { whatsappOutboundDisplayName: '' };
+      return r.data;
+    },
+    enabled: Boolean(crmUser?.id),
+    staleTime: 60_000,
+  });
+
+  const operatorDisplayName =
+    (operatorPrefsQuery.data?.whatsappOutboundDisplayName || '').trim() ||
+    (crmUser?.name || '').trim() ||
+    '';
+
+  const saveOperatorNameMut = useMutation({
+    mutationFn: async (name: string) => {
+      const r = await configuracoesService.salvarPreferenciasUsuario({
+        whatsappOutboundDisplayName: name.trim().slice(0, 80),
+      });
+      if (!r.success) throw new Error(r.error || 'Falha ao salvar nome');
+      return r.data;
+    },
+    onSuccess: () => {
+      toast.success('Nome no chat atualizado');
+      void queryClient.invalidateQueries({ queryKey: ['user-preferencias', crmUser?.id] });
+    },
+    onError: (e: Error) => toast.error(e.message || 'Erro ao salvar nome'),
+  });
   const realtime = useWhatsAppRealtimeStatus();
   chatIdRef.current = chatId;
 
@@ -2598,6 +2712,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
   }, [messages]);
+
+  const visibleMessages = useMemo(() => {
+    const q = inChatSearch.trim().toLowerCase();
+    if (!q) return displayMessages;
+    return displayMessages.filter((m) => (m.content || '').toLowerCase().includes(q));
+  }, [displayMessages, inChatSearch]);
 
   const evolutionNumberFromChat = useCallback((cid: string): string => {
     const digits = waJidToDigits(canonicalWhatsappChatId(cid));
@@ -3651,6 +3771,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     setGroupInfo(null);
     setGroupInviteUrl('');
     ackFallbackSignatureRef.current = '';
+    setInChatSearchOpen(false);
+    setInChatSearch('');
+    setProfilePhotoOverlay(null);
   }, [chatId]);
 
   useEffect(
@@ -3684,6 +3807,17 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       }
 
       // Prioridade: overlays/modais.
+      if (profilePhotoOverlay) {
+        e.preventDefault();
+        setProfilePhotoOverlay(null);
+        return;
+      }
+      if (inChatSearchOpen) {
+        e.preventDefault();
+        setInChatSearchOpen(false);
+        setInChatSearch('');
+        return;
+      }
       if (qrModalOpen) {
         e.preventDefault();
         setQrModalOpen(false);
@@ -3726,7 +3860,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       }
       if (profilePanelOpen) {
         e.preventDefault();
+        if (settingsPage !== 'home') {
+          setSettingsPage('home');
+          return;
+        }
         setProfilePanelOpen(false);
+        setWaNav('chats');
         return;
       }
 
@@ -3753,6 +3892,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     groupPanelOpen,
     contactPanelOpen,
     profilePanelOpen,
+    profilePhotoOverlay,
+    inChatSearchOpen,
+    settingsPage,
   ]);
 
   const mergeMessage = useCallback(
@@ -4657,6 +4799,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     setPreviewProgress(duration > 0 ? Math.min(1, current / duration) : 0);
   }, []);
 
+  const togglePreviewPlayback = useCallback(async () => {
+    const a = previewAudioRef.current;
+    if (!a || !pendingRecordedAudio) return;
+    if (a.paused) {
+      try {
+        await a.play();
+        setIsPreviewPlaying(true);
+      } catch {
+        toast.error('Não foi possível reproduzir a prévia');
+      }
+      return;
+    }
+    a.pause();
+    setIsPreviewPlaying(false);
+  }, [pendingRecordedAudio]);
+
   const cancelCurrentRecording = useCallback(() => {
     const rec = mediaRecorderRef.current;
     if (!rec || rec.state === 'inactive') {
@@ -4665,28 +4823,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     }
     recordingCancelRef.current = true;
     recordingStoppingRef.current = true;
+    sendAfterStopRef.current = false;
     rec.stop();
   }, [stopRecordingStream]);
 
   const confirmSendRecordedAudio = useCallback(async () => {
     if (!pendingRecordedAudio || sendAudioMut.isPending) return;
     try {
-      const audioDataUrl = await blobToDataUrl(pendingRecordedAudio.blob);
+      // Já convertido no stop; garante de novo por segurança.
+      const { blob, mimeType } = await ensureOggOpusVoiceBlob(pendingRecordedAudio.blob);
+      const audioDataUrl = await blobToDataUrl(blob);
       const commaIdx = audioDataUrl.indexOf(',');
       const base64Data = commaIdx >= 0 ? audioDataUrl.slice(commaIdx + 1) : audioDataUrl;
-      const mimetype = pendingRecordedAudio.mimeType || 'audio/ogg';
-      const ext =
-        mimetype.includes('ogg') || mimetype.includes('opus')
-          ? 'ogg'
-          : mimetype.includes('webm')
-            ? 'webm'
-            : mimetype.includes('mp3')
-              ? 'mp3'
-              : 'audio';
       sendAudioMut.mutate({
         base64Data,
-        mimetype,
-        filename: `audio-${Date.now()}.${ext}`,
+        mimetype: mimeType,
+        filename: `audio-${Date.now()}.ogg`,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao processar áudio gravado');
@@ -4746,7 +4898,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       recordingStoppingRef.current = false;
       recordingChunksRef.current = [];
       recordingWaveSamplesRef.current = [];
+      recordingElapsedSecRef.current = 0;
       setRecordingElapsedSec(0);
+      setLiveWaveBars(Array.from({ length: 48 }, () => 0.12));
       setIsRecordingAudio(true);
       discardRecordedAudio();
 
@@ -4779,6 +4933,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             const arr = recordingWaveSamplesRef.current;
             arr.push(normalized);
             if (arr.length > 1200) arr.shift();
+            // ~10 fps para o React não travar
+            if (arr.length % 6 === 0) {
+              const slice = arr.slice(-48);
+              while (slice.length < 48) slice.unshift(0.08);
+              setLiveWaveBars(slice.map((v) => Math.max(0.08, Math.min(1, v))));
+            }
             recordingWaveRafRef.current = requestAnimationFrame(sampleWave);
           };
           recordingWaveRafRef.current = requestAnimationFrame(sampleWave);
@@ -4793,7 +4953,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
       if (recordingTickerRef.current) clearInterval(recordingTickerRef.current);
       recordingTickerRef.current = setInterval(() => {
-        setRecordingElapsedSec((s) => s + 1);
+        recordingElapsedSecRef.current += 1;
+        setRecordingElapsedSec(recordingElapsedSecRef.current);
       }, 1000);
 
       recorder.ondataavailable = (evt) => {
@@ -4829,27 +4990,59 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           return;
         }
 
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-        if (blob.size < 500) {
+        const rawBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        if (rawBlob.size < 500) {
           toast.error('Áudio muito curto. Grave novamente.');
           return;
         }
-        const url = URL.createObjectURL(blob);
-        const bars = buildWaveformBars(recordingWaveSamplesRef.current, 40);
-        recordingWaveSamplesRef.current = [];
-        setPendingRecordedAudio({
-          blob,
-          url,
-          mimeType: recorder.mimeType || 'audio/webm',
-          size: blob.size,
-          elapsedSec: recordingElapsedSec,
-          waveformBars: bars
-        });
-        toast.message('Áudio pronto. Escute antes de enviar.');
+        const elapsed = recordingElapsedSecRef.current;
+        try {
+          const { blob, mimeType } = await ensureOggOpusVoiceBlob(rawBlob);
+          const url = URL.createObjectURL(blob);
+          let bars = buildWaveformBars(recordingWaveSamplesRef.current, 40);
+          recordingWaveSamplesRef.current = [];
+          try {
+            const peaks = await extractAudioWaveformPeaks(await blob.arrayBuffer(), 40);
+            if (peaks.peaks.length) bars = peaks.peaks;
+          } catch {
+            /* mantém barras da gravação ao vivo */
+          }
+          setPendingRecordedAudio({
+            blob,
+            url,
+            mimeType,
+            size: blob.size,
+            elapsedSec: elapsed,
+            waveformBars: bars,
+          });
+          if (sendAfterStopRef.current) {
+            sendAfterStopRef.current = false;
+            // Envia no próximo tick (estado pending já disponível via closure local).
+            window.setTimeout(() => {
+              void (async () => {
+                try {
+                  const audioDataUrl = await blobToDataUrl(blob);
+                  const commaIdx = audioDataUrl.indexOf(',');
+                  const base64Data = commaIdx >= 0 ? audioDataUrl.slice(commaIdx + 1) : audioDataUrl;
+                  sendAudioMut.mutate({
+                    base64Data,
+                    mimetype: mimeType,
+                    filename: `audio-${Date.now()}.ogg`,
+                  });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Falha ao enviar áudio');
+                }
+              })();
+            }, 0);
+          }
+        } catch (e) {
+          sendAfterStopRef.current = false;
+          toast.error(e instanceof Error ? e.message : 'Falha ao processar áudio gravado');
+        }
       };
 
       recorder.start(350);
-      toast.message('Gravação iniciada. Toque no microfone para enviar.');
+      toast.message('Gravando… toque em enviar para finalizar.');
     } catch (e) {
       mediaRecorderRef.current = null;
       recordingStoppingRef.current = false;
@@ -4857,7 +5050,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       stopRecordingStream();
       toast.error(e instanceof Error ? e.message : 'Permissão de microfone negada');
     }
-  }, [sendAudioMut, chatId, stopRecordingStream, discardRecordedAudio, recordingElapsedSec]);
+  }, [sendAudioMut, chatId, stopRecordingStream, discardRecordedAudio]);
 
   useEffect(() => {
     setPendingMediaList((prev) => {
@@ -5568,6 +5761,16 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       timestamp: new Date().toISOString(),
       ack: 0,
       providerMessageId: null,
+      ...(replySnapshot
+        ? {
+            quotedProviderMessageId: replySnapshot.providerMessageId || replySnapshot.id,
+            quotedContent: composerReplySnippet(replySnapshot),
+            quotedFromMe: replySnapshot.fromMe,
+            quotedAuthorName: replySnapshot.fromMe
+              ? 'Você'
+              : headerPrimary || title || 'Contato',
+          }
+        : {}),
     };
 
     setDraft('');
@@ -5577,24 +5780,32 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     refocusComposer();
 
     sendMut.mutate({ text: t, optimisticId, replySnapshot });
-  }, [sendMut, refocusComposer, replyToMessage, outboundChatId, mergeMessage, lidOutboundUnresolved]);
+  }, [sendMut, refocusComposer, replyToMessage, outboundChatId, mergeMessage, lidOutboundUnresolved, headerPrimary, title]);
 
   const handleOpenPhoneFromText = useCallback(
     async (rawDigits: string) => {
-      let digits = onlyDigits(rawDigits);
-      if (digits.length < 10) return;
-      if (digits.length <= 11 && !digits.startsWith('55')) digits = `55${digits}`;
-      const title = formatPhoneForDisplay(`${digits.replace(/^\+/, '')}@c.us`);
-      try {
-        const r = await fetchWhatsappResolveOpenChat(digits);
-        if (r.success && r.data?.chatId) {
-          onNavigateChat?.(canonicalWhatsappChatId(r.data.chatId), title);
-          return;
+      const candidates = brWhatsappOpenDigitCandidates(rawDigits);
+      if (candidates.length === 0) return;
+
+      for (const digits of candidates) {
+        const title = formatPhoneForDisplay(`${digits}@c.us`);
+        try {
+          const r = await fetchWhatsappResolveOpenChat(digits);
+          if (r.success && r.data?.chatId) {
+            onNavigateChat?.(canonicalWhatsappChatId(r.data.chatId), title);
+            return;
+          }
+        } catch {
+          // tenta próxima variante
         }
-      } catch {
-        // fallback abaixo
       }
-      onNavigateChat?.(canonicalWhatsappChatId(toWhatsappChatId(digits)), title);
+
+      const fallback = preferBrWhatsappDigitsForOpen(rawDigits);
+      if (fallback.length < 12) return;
+      onNavigateChat?.(
+        canonicalWhatsappChatId(toWhatsappChatId(fallback)),
+        formatPhoneForDisplay(`${fallback}@c.us`)
+      );
     },
     [onNavigateChat]
   );
@@ -5608,23 +5819,57 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   }, [chatId, isInForwardSelectionMode, sendContactStep, editingId]);
 
   const isWaMobile = useMatchMedia(WA_MOBILE_MEDIA);
+  const { effectiveTheme } = useTheme();
+  const waDark = effectiveTheme === 'dark';
   const mobileListOnly = isWaMobile && !chatId;
   const mobileChatOnly = isWaMobile && !!chatId;
 
   const rootClass =
     layout === 'full'
-      ? 'flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 bg-white shadow-none dark:bg-[#161717]'
-      : 'flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border-0 bg-white shadow-[0_6px_18px_rgba(11,20,26,0.15)] dark:bg-[#161717]';
+      ? 'wa-web flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 bg-[var(--wa-app)] shadow-none'
+      : 'wa-web flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border-0 bg-[var(--wa-app)] shadow-[0_6px_18px_rgba(11,20,26,0.15)]';
 
   const asideClass =
     layout === 'full'
-      ? `flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r-0 bg-white dark:bg-[#161717] min-[780px]:w-[var(--wa-aside-w,408px)] min-[780px]:max-w-[60vw] min-[780px]:shrink-0${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`
-      : `flex w-full max-w-[300px] shrink-0 flex-col border-r-0 bg-white dark:bg-[#161717] min-[780px]:max-w-[320px]${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`;
+      ? `flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[var(--wa-border)] bg-[var(--wa-panel)] min-[780px]:w-[var(--wa-aside-w,400px)] min-[780px]:max-w-[60vw] min-[780px]:shrink-0${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`
+      : `flex w-full max-w-[300px] shrink-0 flex-col border-r border-[var(--wa-border)] bg-[var(--wa-panel)] min-[780px]:max-w-[320px]${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`;
 
-  const chatColumnClass = `relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#161717]${mobileListOnly ? ' max-[779px]:hidden' : ''}${mobileChatOnly ? ' max-[779px]:w-full max-[779px]:flex-1' : ''}`;
+  const chatColumnClass = `relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--wa-app)]${mobileListOnly ? ' max-[779px]:hidden' : ''}${mobileChatOnly ? ' max-[779px]:w-full max-[779px]:flex-1' : ''}`;
 
   return (
     <div className={rootClass}>
+      {layout === 'full' ? (
+        <WhatsAppNavRail
+          active={profilePanelOpen ? 'settings' : waNav}
+          chatsBadge={totalUnreadMsgs}
+          profileUrl={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
+          profileLetter={avatarLetter(
+            pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) ||
+              crmUser?.name ||
+              '?'
+          )}
+          onSelect={(id) => {
+            if (id === 'settings') {
+              setWaNav('settings');
+              setSettingsPage('home');
+              setProfilePanelOpen(true);
+              return;
+            }
+            setProfilePanelOpen(false);
+            setSettingsPage('home');
+            setWaNav(id);
+            if (id === 'chats') return;
+            if (id === 'ai') {
+              toast.message('Meta AI ainda não está disponível neste CRM.');
+            }
+          }}
+          onProfile={() => {
+            setWaNav('settings');
+            setSettingsPage('home');
+            setProfilePanelOpen(true);
+          }}
+        />
+      ) : null}
       {/* Coluna esquerda — lista (estilo WhatsApp Web) */}
       <aside
         ref={asideRef}
@@ -5635,54 +5880,32 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             : undefined
         }
       >
-        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b-0 bg-white px-3 max-[779px]:pl-14 dark:bg-[#161717]">
+        <div className="wa-list-header flex h-[60px] shrink-0 items-center justify-between gap-3 px-4 max-[779px]:pl-14">
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <h1 className="truncate text-[19px] font-bold tracking-tight text-[#1daa61] dark:text-white">WhatsApp</h1>
-            {totalUnreadMsgs > 0 ? (
-              <span
-                className="inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-full bg-[#25d366] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm"
-                title={`${totalUnreadMsgs} mensagem(ns) não lida(s) no total`}
-              >
-                {totalUnreadMsgs > 99 ? '99+' : totalUnreadMsgs}
-              </span>
-            ) : null}
+            <h1 className="truncate text-[22px] font-normal tracking-tight text-[var(--wa-text)]">WhatsApp</h1>
           </div>
-          <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-            <button
-              type="button"
-              title="Nova conversa"
-              aria-expanded={newPhoneComposerOpen}
-              aria-controls="wa-sidebar-new-phone"
-              onClick={() => {
-                setNewPhoneComposerOpen(true);
-                setSidebarMenuOpen(false);
-              }}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#f7f5f3] dark:text-[#aebac1] dark:hover:bg-white/10"
-              aria-label="Nova conversa"
-            >
-              <NewChatSquareIcon className="h-[22px] w-[22px]" />
-            </button>
+          <div className="flex shrink-0 items-center gap-1">
             <div className="relative shrink-0" ref={sidebarMenuRef}>
             <button
               type="button"
               title="Menu"
               onClick={() => setSidebarMenuOpen((o) => !o)}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#aebac1] dark:hover:bg-white/10"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--wa-icon)] hover:bg-black/5 dark:hover:bg-white/10"
               aria-expanded={sidebarMenuOpen}
               aria-haspopup="menu"
               aria-label="Menu da lista de conversas"
             >
-              <EllipsisVerticalIcon className="h-5 w-5" />
+              <MoreVertical className="h-5 w-5" strokeWidth={1.75} />
             </button>
             {sidebarMenuOpen ? (
               <div
                 role="menu"
-                className="absolute right-0 top-full z-[60] mt-1 min-w-[min(92vw,260px)] max-w-[92vw] rounded-lg border border-[#e9edef] bg-white py-1 shadow-xl dark:border-[#2a3942] dark:bg-[#202c33]"
+                className="absolute right-0 top-full z-[60] mt-1 min-w-[min(92vw,260px)] max-w-[92vw] rounded-lg border border-[#e9edef] bg-white py-1 shadow-xl dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]"
               >
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     window.open(
                       connectionStatus?.dashboardUrl || getWhatsAppProviderDashboardUrl(),
@@ -5701,7 +5924,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     setQrModalOpen(true);
                     setSidebarMenuOpen(false);
@@ -5713,7 +5936,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     setContactsPanelOpen(true);
                     setCheckPhoneResult(null);
@@ -5723,11 +5946,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   <Contact className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Agenda de contatos
                 </button>
-                <div className="my-1 border-t border-[#e9edef] dark:border-[#2a3942]" role="separator" />
+                <div className="my-1 border-t border-[#e9edef] dark:border-[var(--wa-border)]" role="separator" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Para criar um grupo, use o WhatsApp no telefone ou o painel do provedor.');
                     setSidebarMenuOpen(false);
@@ -5739,7 +5962,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     setArchivedPanelOpen(true);
                     setSidebarMenuOpen(false);
@@ -5751,7 +5974,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Mensagens favoritas ainda não estão disponíveis no CRM.');
                     setSidebarMenuOpen(false);
@@ -5763,7 +5986,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Seleção em massa em breve.');
                     setSidebarMenuOpen(false);
@@ -5776,7 +5999,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   type="button"
                   role="menuitem"
                   disabled={markAllReadMut.isPending}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 disabled:opacity-50 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 disabled:opacity-50 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     markAllReadMut.mutate();
                     setSidebarMenuOpen(false);
@@ -5785,11 +6008,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   <CheckCheck className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Marcar todas como lidas
                 </button>
-                <div className="my-1 border-t border-[#e9edef] dark:border-[#2a3942]" role="separator" />
+                <div className="my-1 border-t border-[#e9edef] dark:border-[var(--wa-border)]" role="separator" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={() => {
                     setProfilePanelOpen(true);
                     setSidebarMenuOpen(false);
@@ -5801,7 +6024,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                   onClick={async () => {
                     setSidebarMenuOpen(false);
                     try {
@@ -5848,11 +6071,25 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             ) : null}
             </div>
+            <button
+              type="button"
+              title="Nova conversa"
+              aria-expanded={newPhoneComposerOpen}
+              aria-controls="wa-sidebar-new-phone"
+              onClick={() => {
+                setNewPhoneComposerOpen(true);
+                setSidebarMenuOpen(false);
+              }}
+              className="wa-plus-btn"
+              aria-label="Nova conversa"
+            >
+              <Plus className="h-5 w-5" strokeWidth={2.4} />
+            </button>
           </div>
         </div>
-        <div className="shrink-0 space-y-2 border-b-0 bg-white px-3 py-2 dark:bg-[#161717]">
+        <div className="shrink-0 space-y-2 bg-[var(--wa-panel)] px-3 py-2">
           <div className="relative" role="search">
-            <span className="pointer-events-none absolute left-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#8696a0] dark:text-[#8696a0]">
+            <span className="pointer-events-none absolute left-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[var(--wa-text-sec)]">
               <Search className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} aria-hidden />
             </span>
             <input
@@ -5861,7 +6098,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               onChange={(e) => setChatSearch(e.target.value)}
               placeholder="Pesquisar ou começar uma nova conversa"
               autoComplete="off"
-              className="w-full rounded-full border border-transparent bg-[#f7f5f3] py-2.5 pl-10 pr-4 text-[14px] text-[#111b21] shadow-none placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:bg-[#202c33] dark:text-[#e9edef]"
+              className="wa-search-pill w-full border-0 py-2 pl-10 pr-4 text-[14px] shadow-none placeholder:text-[var(--wa-text-sec)] focus:outline-none"
             />
           </div>
           <div
@@ -5902,11 +6139,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   role="tab"
                   aria-selected={active}
                   onClick={() => setChatSidebarFilter(tab.id)}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${
-                    active
-                      ? 'bg-[#00a884] text-white shadow-sm'
-                      : 'bg-[#f7f5f3] text-[#54656f] hover:bg-[#edeae7] dark:bg-[#202c33] dark:text-[#e9edef] dark:hover:bg-[#2a3942]'
-                  }`}
+                  className={`wa-chip ${active ? 'is-active' : ''}`}
                 >
                   {tab.label}
                   {showCount ? ` ${count}` : ''}
@@ -5938,11 +6171,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       ? { backgroundColor: label.cor, color: '#fff', borderColor: label.cor }
                       : undefined
                   }
-                  className={`flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-[13px] font-medium transition ${
-                    active
-                      ? 'bg-[#00a884] text-white shadow-sm'
-                      : 'border-[#e9edef] bg-[#f7f5f3] text-[#54656f] hover:bg-[#edeae7] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef] dark:hover:bg-[#2a3942]'
-                  }`}
+                  className={`wa-chip ${active ? 'is-active' : ''}`}
                 >
                   {label.emoji ? <span aria-hidden>{label.emoji}</span> : null}
                   <span className="truncate">{label.nome}</span>
@@ -5958,18 +6187,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 setLabelEditTarget(null);
                 setLabelEditOpen(true);
               }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-[#8696a0]/50 text-[#8696a0] hover:bg-[#f7f5f3] dark:hover:bg-white/10"
+              className="wa-chip wa-chip-plus"
             >
-              <span className="text-lg leading-none">+</span>
+              <Plus className="h-4 w-4" strokeWidth={2} />
             </button>
           </div>
         </div>
-        <div className="wa-scroll flex-1 overflow-y-auto bg-white px-1.5 dark:bg-[#161717]">
+        <div className="wa-scroll flex-1 overflow-y-auto bg-[var(--wa-panel)] px-0">
           {chatList.length === 0 && (
-            <p className="p-4 text-center text-[13px] text-[#667781]">Nenhuma conversa sincronizada ainda.</p>
+            <p className="p-4 text-center text-[13px] text-[var(--wa-text-muted)]">Nenhuma conversa sincronizada ainda.</p>
           )}
           {chatList.length > 0 && filteredChats.length === 0 ? (
-            <div className="p-4 text-center text-[13px] text-[#667781] dark:text-[#8696a0]">
+            <div className="p-4 text-center text-[13px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
               <p>
                 {chatSearch.trim()
                   ? `Nenhuma conversa corresponde a "${chatSearch.trim()}".`
@@ -5994,7 +6223,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       setLabelEditOpen(true);
                     }
                   }}
-                  className="mt-2 rounded-full bg-[#00a884] px-3 py-1 text-[12px] font-medium text-white hover:bg-[#008f6f]"
+                  className="mt-2 rounded-full bg-[#25d366] px-3 py-1 text-[12px] font-medium text-white hover:bg-[#1ebe57]"
                 >
                   Adicionar conversas
                 </button>
@@ -6013,6 +6242,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             const pinned = !!c.pinned;
             const fav = !!c.favorite;
             const lastPreview = repairUtf8Mojibake(c.lastContent);
+            const previewMeta = classifyWhatsappListPreview(lastPreview);
+            const mutedRow = mutedChatIds.has(canonCid);
             const rowPic =
               c.cachedProfilePictureUrl ||
               (c.chatId === chatId ? activeContactMeta?.profilePictureUrl : null) ||
@@ -6031,65 +6262,65 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     onNavigateChat?.(canonicalWhatsappChatId(c.chatId), headerForChat);
                   }
                 }}
-                className={`group relative my-0.5 flex min-h-[4.5rem] w-full cursor-pointer items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#111b21] ${
-                  active ? 'bg-[#edeae7] dark:bg-[#2a3942]' : 'hover:bg-[#f7f5f3] dark:hover:bg-[#2a3942]'
+                className={`wa-chat-row group relative flex w-full cursor-pointer items-center gap-3 text-left outline-none ${
+                  active ? 'is-active' : ''
                 }`}
               >
                 <ContactAvatar chatId={c.chatId} imageUrl={rowPic} label={avatarLabel} size="list" />
-                <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center gap-1">
+                <div className="flex min-h-[52px] min-w-0 flex-1 flex-col justify-center gap-0.5 border-b border-[var(--wa-border)] py-3 group-hover:border-transparent group-[.is-active]:border-transparent">
                   <div className="flex items-center justify-between gap-2">
                     <span
-                      className={`min-w-0 truncate text-[16px] leading-tight text-[#111b21] dark:text-[#e9edef] ${
-                        unread ? 'font-bold text-[#111b21] dark:text-white' : 'font-medium'
+                      className={`min-w-0 truncate text-[17px] leading-[22px] text-[var(--wa-text)] ${
+                        unread ? 'font-medium' : 'font-normal'
                       }`}
                     >
                       {listTitle}
                     </span>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      {pinned ? (
-                        <span className="text-[12px] leading-none text-[#8696a0] dark:text-[#667781]" title="Fixada" aria-hidden>
-                          📌
-                        </span>
-                      ) : null}
-                      <span
-                        className={`text-[11px] tabular-nums leading-none ${
-                          unread ? 'font-semibold text-[#25d366]' : 'font-normal text-[#667781] dark:text-[#8696a0]'
-                        }`}
-                      >
-                        {formatListTime(c.lastAt)}
-                      </span>
-                    </div>
+                    <span
+                      className={`shrink-0 text-[12px] tabular-nums leading-none ${
+                        unread ? 'font-medium text-[#25d366]' : 'font-normal text-[var(--wa-text-sec)]'
+                      }`}
+                    >
+                      {formatListTime(c.lastAt)}
+                    </span>
                   </div>
-                  <div className="flex items-end justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
                     <p
-                      className={`min-w-0 flex-1 truncate text-[14px] leading-snug ${
-                        unread ? 'font-medium text-[#111b21] dark:text-[#e9edef]' : 'font-normal text-[#667781] dark:text-[#8696a0]'
+                      className={`flex min-w-0 flex-1 items-center gap-0.5 truncate text-[14px] leading-[20px] ${
+                        unread ? 'font-normal text-[var(--wa-text)]' : 'font-normal text-[var(--wa-text-sec)]'
                       }`}
                     >
                       {c.lastFromMe ? (
-                        <>
-                          <span className="inline-flex translate-y-[1px]">
-                            <OutboundAckIcon ack={c.lastAck} />
-                          </span>{' '}
-                          Você:{' '}
-                        </>
+                        <span className="inline-flex shrink-0 translate-y-[1px]">
+                          <OutboundAckIcon ack={c.lastAck} />
+                        </span>
                       ) : null}
-                      {lastPreview.slice(0, 52)}
-                      {lastPreview.length > 52 ? '…' : ''}
+                      {previewMeta.kind === 'audio' ? (
+                        <Mic className="mr-0.5 inline h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                      ) : null}
+                      {isG && !c.lastFromMe && !lastPreview.startsWith('~') ? (
+                        <span className="shrink-0 text-[var(--wa-text-sec)]">~</span>
+                      ) : null}
+                      {truncateWhatsappPreview(previewMeta.text || lastPreview)}
                     </p>
-                    {unread ? (
-                      <span
-                        className="flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[11px] font-semibold tabular-nums leading-none text-white"
-                        aria-label={`${uCount} não lidas`}
-                      >
-                        {uCount > 99 ? '99+' : uCount}
-                      </span>
-                    ) : null}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {mutedRow ? (
+                        <BellOff className="h-4 w-4 text-[var(--wa-text-sec)]" strokeWidth={1.75} aria-label="Silenciada" />
+                      ) : null}
+                      {pinned ? (
+                        <Pin className="h-4 w-4 text-[var(--wa-text-sec)]" strokeWidth={1.75} aria-label="Fixada" />
+                      ) : null}
+                      {unread ? (
+                        <span className="wa-unread-badge" aria-label={`${uCount} não lidas`}>
+                          {uCount > 99 ? '99+' : uCount}
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
                 </div>
 
                 {/* Indicadores (favorito — fixado já aparece ao lado do horário) */}
-                <div className="absolute right-11 top-1/2 z-0 hidden -translate-y-1/2 items-center gap-1.5 text-[12px] text-[#667781] group-hover:flex dark:text-[#8696a0]">
+                <div className="absolute right-11 top-1/2 z-0 hidden -translate-y-1/2 items-center gap-1.5 text-[12px] text-[var(--wa-text-muted)] group-hover:flex dark:text-[var(--wa-text-sec)]">
                   {fav ? <span title="Conversa favorita">⭐</span> : null}
                 </div>
 
@@ -6153,67 +6384,38 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           })}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t-0 bg-white px-2 py-2 dark:bg-[#202c33]">
-          <button
-            type="button"
-            onClick={() => setProfilePanelOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-[#f7f5f3] dark:hover:bg-white/5"
-            title="Meu perfil (WhatsApp e CRM)"
-          >
-            {whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl) ? (
-              <img
-                src={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
-                alt=""
-                className="h-10 w-10 shrink-0 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-[15px] font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
-                {avatarLetter(crmUser?.name || pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) || '?')}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
-                {pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) || crmUser?.name || 'Meu perfil'}
-              </p>
-              <p className="truncate text-[11px] text-[#667781] dark:text-[#8696a0]">
-                {crmUser?.email ? `CRM · ${crmUser.email}` : 'Toque para ver dados'}
-              </p>
-            </div>
-          </button>
-        </div>
-
         {qrModalOpen ? (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-            <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl dark:bg-[#202c33]">
+            <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl dark:bg-[var(--wa-panel-header)]">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">Conectar WhatsApp</h2>
+                <h2 className="text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">Conectar WhatsApp</h2>
                 <button
                   type="button"
                   onClick={() => setQrModalOpen(false)}
-                  className="rounded-lg px-2 py-1 text-[12px] font-medium text-[#00a884] hover:bg-black/5 dark:hover:bg-white/5"
+                  className="rounded-lg px-2 py-1 text-[12px] font-medium text-[#25d366] hover:bg-black/5 dark:hover:bg-white/5"
                 >
                   Fechar
                 </button>
               </div>
 
-              <p className="mb-3 text-[12px] text-[#667781] dark:text-[#8696a0]">
+              <p className="mb-3 text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Escaneie este QR no WhatsApp do celular em <strong>Aparelhos conectados</strong>.
               </p>
               {!connectionStatus?.connected ? (
-                <p className="mb-3 text-[11px] text-[#667781] dark:text-[#8696a0]">
+                <p className="mb-3 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                   O QR atual permanece na tela para leitura. Se nao conectar em ~75s, um novo QR sera solicitado automaticamente.
                 </p>
               ) : null}
 
-              <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-[#e9edef] bg-[#f8f9fa] p-3 dark:border-[#2a3942] dark:bg-[#161717]">
+              <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-[#e9edef] bg-[#f8f9fa] p-3 dark:border-[var(--wa-border)] dark:bg-[#161717]">
                 {loadingConnectionQr ? (
-                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 ) : connectionQr?.base64 ? (
                   <img src={connectionQr.base64} alt="QR code WhatsApp" className="h-64 w-64 rounded-md bg-white p-2" />
                 ) : (
                   <div className="space-y-1 text-center">
-                    <p className="text-[13px] text-[#111b21] dark:text-[#e9edef]">QR indisponível no momento.</p>
-                    <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">
+                    <p className="text-[13px] text-[#111b21] dark:text-[var(--wa-text)]">QR indisponível no momento.</p>
+                    <p className="text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                       {connectionQr?.message ||
                         (connectionQrError instanceof Error
                           ? connectionQrError.message
@@ -6228,7 +6430,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   type="button"
                   onClick={() => void refetchConnectionQr()}
                   disabled={fetchingConnectionQr}
-                  className="rounded-lg border border-[#00a884] px-3 py-1.5 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="rounded-lg border border-[#25d366] px-3 py-1.5 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   {fetchingConnectionQr ? 'Atualizando…' : 'Atualizar QR'}
                 </button>
@@ -6237,7 +6439,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   onClick={() =>
                     window.open(connectionStatus?.dashboardUrl || getWhatsAppProviderDashboardUrl(), '_blank', 'noopener,noreferrer')
                   }
-                  className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#008f6f]"
+                  className="rounded-lg bg-[#25d366] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#1ebe57]"
                 >
                   Abrir dashboard
                 </button>
@@ -6248,30 +6450,30 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
         {archivedPanelOpen ? (
           <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
-            <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+            <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
                 Arquivadas
               </h2>
               <button
                 type="button"
                 onClick={() => setArchivedPanelOpen(false)}
-                className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#00a884] hover:bg-black/5 dark:hover:bg-white/5"
+                className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#25d366] hover:bg-black/5 dark:hover:bg-white/5"
               >
                 Fechar
               </button>
             </div>
-            <p className="shrink-0 border-b border-[#e9edef] px-3 py-2 text-[12px] text-[#667781] dark:border-[#2a3942] dark:text-[#8696a0]">
+            <p className="shrink-0 border-b border-[#e9edef] px-3 py-2 text-[12px] text-[var(--wa-text-muted)] dark:border-[var(--wa-border)] dark:text-[var(--wa-text-sec)]">
               Conversas que você arquivou no CRM (sincronizado com o provedor). Toque para abrir ou em &quot;Desarquivar&quot; para
               voltar à lista principal.
             </p>
             <div className="wa-scroll min-h-0 flex-1 overflow-y-auto">
               {archivedLoading ? (
                 <div className="flex justify-center py-12">
-                  <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                  <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 </div>
               ) : null}
               {!archivedLoading && archivedChatList.length === 0 ? (
-                <p className="p-4 text-center text-[13px] text-[#667781]">Nenhuma conversa arquivada.</p>
+                <p className="p-4 text-center text-[13px] text-[var(--wa-text-muted)]">Nenhuma conversa arquivada.</p>
               ) : null}
               {!archivedLoading &&
                 archivedChatList.map((c) => {
@@ -6282,7 +6484,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   return (
                     <div
                       key={c.chatId}
-                      className="flex w-full gap-2 border-b border-[#f0f2f5] px-2 py-2 dark:border-[#2a3942]"
+                      className="flex w-full gap-2 border-b border-[#f0f2f5] px-2 py-2 dark:border-[var(--wa-border)]"
                     >
                       <button
                         type="button"
@@ -6290,10 +6492,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           onNavigateChat?.(canonicalWhatsappChatId(c.chatId), headerForChat);
                           setArchivedPanelOpen(false);
                         }}
-                        className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left hover:bg-white dark:hover:bg-[#202c33]"
+                        className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left hover:bg-white dark:hover:bg-[var(--wa-panel-header)]"
                       >
-                        <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">{listTitle}</p>
-                        <p className="mt-0.5 truncate text-[13px] text-[#667781] dark:text-[#8696a0]">
+                        <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">{listTitle}</p>
+                        <p className="mt-0.5 truncate text-[13px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                           {repairUtf8Mojibake(c.lastContent).slice(0, 56)}
                         </p>
                       </button>
@@ -6301,7 +6503,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         type="button"
                         disabled={unarchiveMut.isPending}
                         onClick={() => unarchiveMut.mutate(c.chatId)}
-                        className="shrink-0 self-center rounded-lg border border-[#00a884] px-2 py-1.5 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                        className="shrink-0 self-center rounded-lg border border-[#25d366] px-2 py-1.5 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                       >
                         Desarquivar
                       </button>
@@ -6313,72 +6515,86 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {profilePanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
-            <div className="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">Perfil</h2>
-              <button
-                type="button"
-                onClick={() => setProfilePanelOpen(false)}
-                className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#00a884] hover:bg-black/5 dark:hover:bg-white/5"
-              >
-                Fechar
-              </button>
-            </div>
-            <div className="flex flex-col items-center px-4 py-6">
-              {whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl) ? (
-                <img
-                  src={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
-                  alt=""
-                  className="h-28 w-28 rounded-full object-cover shadow-md"
-                />
-              ) : (
-                <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#dfe5e7] text-3xl font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
-                  {avatarLetter(
-                    pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) || crmUser?.name || '?'
-                  )}
-                </div>
-              )}
-              <p className="mt-4 text-center text-[20px] font-semibold text-[#111b21] dark:text-[#e9edef]">
-                {pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) || crmUser?.name || '—'}
-              </p>
-              {sessionProfilePayload?.whatsappId ? (
-                <p className="mt-1 text-center text-[13px] text-[#667781] dark:text-[#8696a0]">
-                  WhatsApp ID:{' '}
-                  <code className="rounded bg-black/5 px-1.5 py-0.5 text-[12px] dark:bg-white/10">
-                    {sessionProfilePayload.whatsappId}
-                  </code>
-                </p>
-              ) : null}
-            </div>
-            <div className="mx-3 mb-4 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+          <WhatsAppAccountSettingsPanel
+            displayName={
+              pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) ||
+              crmUser?.name ||
+              'WhatsApp'
+            }
+            accountWhatsappName={pickWhatsappSessionProfileDisplayName(
+              sessionProfilePayload?.sessionProfile ?? null
+            )}
+            operatorDisplayName={operatorDisplayName}
+            operatorNameSaving={saveOperatorNameMut.isPending}
+            onSaveOperatorDisplayName={async (name) => {
+              await saveOperatorNameMut.mutateAsync(name);
+            }}
+            avatarUrl={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
+            avatarLetter={avatarLetter(
+              pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) ||
+                crmUser?.name ||
+                '?'
+            )}
+            connected={Boolean(connectionStatus?.connected)}
+            page={settingsPage}
+            onPageChange={setSettingsPage}
+            onAvatarClick={() =>
+              setProfilePhotoOverlay({
+                name:
+                  pickWhatsappSessionProfileDisplayName(sessionProfilePayload?.sessionProfile ?? null) ||
+                  crmUser?.name ||
+                  'Perfil',
+                url: whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl),
+              })
+            }
+            onShareThought={() => setSettingsPage('profile')}
+            chatsSection={
+              <div className="space-y-3 px-4 py-4 text-[14px] text-[var(--wa-text)]">
+                <p className="text-[var(--wa-text-sec)]">Tema escuro, papel de parede e listas seguem o WhatsApp Web.</p>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[#25d366] px-3 py-2 text-[13px] font-medium text-[#111b21]"
+                  onClick={() => {
+                    setArchivedPanelOpen(true);
+                    setProfilePanelOpen(false);
+                    setWaNav('chats');
+                  }}
+                >
+                  Conversas arquivadas
+                </button>
+              </div>
+            }
+            accountSection={
+              <div className="px-1 pb-6">
+            <div className="mx-3 mb-4 space-y-3 rounded-xl border border-[var(--wa-border)] bg-[var(--wa-panel-header)] p-4">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Conta no CRM (S3E)
               </p>
               {crmUser ? (
-                <ul className="space-y-2 text-[14px] text-[#111b21] dark:text-[#e9edef]">
+                <ul className="space-y-2 text-[14px] text-[#111b21] dark:text-[var(--wa-text)]">
                   <li>
-                    <span className="text-[#667781] dark:text-[#8696a0]">Nome: </span>
+                    <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome: </span>
                     {crmUser.name}
                   </li>
                   <li>
-                    <span className="text-[#667781] dark:text-[#8696a0]">E-mail: </span>
+                    <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">E-mail: </span>
                     {crmUser.email}
                   </li>
                   <li>
-                    <span className="text-[#667781] dark:text-[#8696a0]">Função: </span>
+                    <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Função: </span>
                     {crmUser.role}
                   </li>
                 </ul>
               ) : (
-                <p className="text-[13px] text-[#667781]">Não foi possível carregar o usuário do CRM.</p>
+                <p className="text-[13px] text-[var(--wa-text-muted)]">Não foi possível carregar o usuário do CRM.</p>
               )}
             </div>
-            <div className="mx-3 mb-6 space-y-2 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 mb-6 space-y-2 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Sessão WhatsApp (provedor)
               </p>
               {connectionStatus?.connected ? (
-                <p className="text-[13px] text-[#111b21] dark:text-[#e9edef]">
+                <p className="text-[13px] text-[#111b21] dark:text-[var(--wa-text)]">
                   Sessão ativa ({connectionStatus.sessionStatus || 'conectado'}).
                 </p>
               ) : (
@@ -6387,21 +6603,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </p>
               )}
               {sessionProfilePayload?.sessionProfile && Object.keys(sessionProfilePayload.sessionProfile).length > 0 ? (
-                <pre className="max-h-40 overflow-auto rounded-lg bg-black/5 p-2 text-[11px] text-[#111b21] dark:bg-white/5 dark:text-[#e9edef]">
+                <pre className="max-h-40 overflow-auto rounded-lg bg-black/5 p-2 text-[11px] text-[#111b21] dark:bg-white/5 dark:text-[var(--wa-text)]">
                   {JSON.stringify(sessionProfilePayload.sessionProfile, null, 2)}
                 </pre>
               ) : (
-                <p className="text-[13px] text-[#667781]">
+                <p className="text-[13px] text-[var(--wa-text-muted)]">
                   Perfil bruto da API não disponível (verifique a versão do provedor / endpoints /me e /profile).
                 </p>
               )}
             </div>
-
-            <div className="mx-3 mb-6 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+              </div>
+            }
+            profileSection={
+              <div className="px-1 pb-6">
+            <div className="mx-3 mb-6 space-y-3 rounded-xl border border-[var(--wa-border)] bg-[var(--wa-panel-header)] p-4">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Editar perfil WhatsApp (Evolution)
               </p>
-              <p className="text-[11px] leading-snug text-[#667781] dark:text-[#8696a0]">
+              <p className="text-[11px] leading-snug text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Altera a <strong>conta conectada</strong> na sessão. Requer provedor Evolution (
                 <code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">WHATSAPP_PROVIDER_KIND=evolution</code>
                 ) e sessão ativa.
@@ -6410,55 +6629,55 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <p className="text-[13px] text-amber-800 dark:text-amber-200">Conecte o WhatsApp para usar estas ações.</p>
               ) : (
                 <>
-                  <label className="block text-[12px] text-[#667781] dark:text-[#8696a0]">Nome exibido</label>
+                  <label className="block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome exibido</label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <input
                       value={profileWpName}
                       onChange={(e) => setProfileWpName(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                       placeholder="Nome no WhatsApp"
                     />
                     <button
                       type="button"
                       disabled={evoProfileNameMut.isPending || !profileWpName.trim()}
                       onClick={() => evoProfileNameMut.mutate(profileWpName)}
-                      className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                     >
                       Salvar nome
                     </button>
                   </div>
-                  <label className="mt-2 block text-[12px] text-[#667781] dark:text-[#8696a0]">Recado (status)</label>
+                  <label className="mt-2 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Recado (status)</label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <input
                       value={profileWpStatus}
                       onChange={(e) => setProfileWpStatus(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                       placeholder="Texto do recado"
                     />
                     <button
                       type="button"
                       disabled={evoProfileStatusMut.isPending || !profileWpStatus.trim()}
                       onClick={() => evoProfileStatusMut.mutate(profileWpStatus)}
-                      className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                     >
                       Salvar recado
                     </button>
                   </div>
-                  <label className="mt-2 block text-[12px] text-[#667781] dark:text-[#8696a0]">
+                  <label className="mt-2 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                     Nova foto (URL pública ou base64, conforme sua Evolution)
                   </label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <input
                       value={profileWpPicture}
                       onChange={(e) => setProfileWpPicture(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                      className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                       placeholder="https://... ou data:image/..."
                     />
                     <button
                       type="button"
                       disabled={evoProfilePictureMut.isPending || !profileWpPicture.trim()}
                       onClick={() => evoProfilePictureMut.mutate(profileWpPicture)}
-                      className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                     >
                       Atualizar foto
                     </button>
@@ -6472,13 +6691,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     Remover foto de perfil
                   </button>
 
-                  <p className="pt-2 text-[12px] font-medium text-[#111b21] dark:text-[#e9edef]">
+                  <p className="pt-2 text-[12px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">
                     Consultar perfil de outro número
                   </p>
                   <input
                     value={profileFetchNumber}
                     onChange={(e) => setProfileFetchNumber(e.target.value)}
-                    className="w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                    className="w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                     placeholder="5511999999999 ou JID"
                   />
                   <div className="flex flex-wrap gap-2">
@@ -6490,7 +6709,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         !profileFetchNumber.trim()
                       }
                       onClick={() => evoFetchContactProfileMut.mutate(profileFetchNumber)}
-                      className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                      className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                     >
                       Fetch perfil
                     </button>
@@ -6502,18 +6721,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         !profileFetchNumber.trim()
                       }
                       onClick={() => evoFetchBusinessProfileMut.mutate(profileFetchNumber)}
-                      className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                      className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                     >
                       Fetch business
                     </button>
                   </div>
                   {profileLookupJson ? (
-                    <pre className="max-h-36 overflow-auto rounded-lg bg-black/5 p-2 text-[10px] text-[#111b21] dark:bg-white/5 dark:text-[#e9edef]">
+                    <pre className="max-h-36 overflow-auto rounded-lg bg-black/5 p-2 text-[10px] text-[#111b21] dark:bg-white/5 dark:text-[var(--wa-text)]">
                       {profileLookupJson}
                     </pre>
                   ) : null}
 
-                  <p className="pt-2 text-[12px] font-medium text-[#111b21] dark:text-[#e9edef]">Privacidade</p>
+                  <p className="pt-2 text-[12px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">Privacidade</p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {(
                       [
@@ -6525,7 +6744,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         ['groupadd', 'Adicionar a grupos', ['all', 'contacts', 'contact_blacklist']] as const,
                       ] as const
                     ).map(([key, label, opts]) => (
-                      <label key={key} className="block text-[11px] text-[#667781] dark:text-[#8696a0]">
+                      <label key={key} className="block text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                         {label}
                         <select
                           value={privacyForm[key as keyof EvolutionPrivacySettingsBody]}
@@ -6535,7 +6754,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               [key]: e.target.value as EvolutionPrivacySettingsBody[typeof key],
                             }))
                           }
-                          className="mt-0.5 w-full rounded-lg border border-[#d1d7db] bg-white px-2 py-1.5 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                          className="mt-0.5 w-full rounded-lg border border-[#d1d7db] bg-white px-2 py-1.5 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                         >
                           {opts.map((o) => (
                             <option key={o} value={o}>
@@ -6551,7 +6770,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       type="button"
                       disabled={evoLoadPrivacyMut.isPending}
                       onClick={() => evoLoadPrivacyMut.mutate()}
-                      className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                      className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                     >
                       Carregar do WhatsApp
                     </button>
@@ -6559,7 +6778,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       type="button"
                       disabled={evoSavePrivacyMut.isPending}
                       onClick={() => evoSavePrivacyMut.mutate(privacyForm)}
-                      className="rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                      className="rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                     >
                       Salvar privacidade
                     </button>
@@ -6567,24 +6786,26 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </>
               )}
             </div>
-          </div>
+              </div>
+            }
+          />
         ) : null}
 
-        {contactPanelOpen ? (
+        {contactPanelOpen && isWaMobile ? (
           <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
-            <div className="sticky top-0 flex h-12 shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
+            <div className="sticky top-0 flex h-12 shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
               <button
                 type="button"
                 aria-label="Fechar"
                 title="Fechar"
                 onClick={() => setContactPanelOpen(false)}
-                className="shrink-0 rounded-lg p-2 text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
+                className="shrink-0 rounded-lg p-2 text-[#54656f] hover:bg-black/5 dark:text-[var(--wa-text-sec)] dark:hover:bg-white/5"
               >
                 <span className="text-xl leading-none" aria-hidden>
                   ✕
                 </span>
               </button>
-              <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+              <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
                 Dados do contato
               </h2>
               <div className="w-8" aria-hidden />
@@ -6617,41 +6838,41 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   }}
                 />
               ) : (
-                <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#dfe5e7] text-3xl font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
+                <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#dfe5e7] text-3xl font-medium text-[#54656f] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text-sec)]">
                   {avatarLetter(headerPrimary || formatPhoneForDisplay(chatId))}
                 </div>
               )}
-              <p className="mt-4 text-center text-[20px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+              <p className="mt-4 text-center text-[20px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
                 {headerPrimary || '—'}
               </p>
-              <p className="mt-1 text-center text-[13px] text-[#667781] dark:text-[#8696a0]">{formatPhoneForDisplay(chatId)}</p>
+              <p className="mt-1 text-center text-[13px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{formatPhoneForDisplay(chatId)}</p>
             </div>
 
-            <div className="mx-3 mb-4 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 mb-4 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Dados no CRM / cache
               </p>
-              <ul className="space-y-2 text-[14px] text-[#111b21] dark:text-[#e9edef]">
+              <ul className="space-y-2 text-[14px] text-[#111b21] dark:text-[var(--wa-text)]">
                 <li>
-                  <span className="text-[#667781] dark:text-[#8696a0]">Nome (CRM): </span>
+                  <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome (CRM): </span>
                   {activePreview?.contactName || '—'}
                 </li>
                 <li>
-                  <span className="text-[#667781] dark:text-[#8696a0]">Nome (cache WhatsApp): </span>
+                  <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome (cache WhatsApp): </span>
                   {activePreview?.providerCachedName || '—'}
                 </li>
                 <li>
-                  <span className="text-[#667781] dark:text-[#8696a0]">Chat ID: </span>
+                  <span className="text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Chat ID: </span>
                   <code className="rounded bg-black/5 px-1.5 py-0.5 text-[12px] dark:bg-white/10">{canonicalWhatsappChatId(chatId)}</code>
                 </li>
               </ul>
             </div>
 
-            <div className="mx-3 mb-6 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 mb-6 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Evolution API — perfil (contato)
               </p>
-              <p className="text-[11px] leading-snug text-[#667781] dark:text-[#8696a0]">
+              <p className="text-[11px] leading-snug text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Usa as rotas do backend: <code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">/api/whatsapp/evolution/profile/fetch-contact</code> e{' '}
                 <code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">/api/whatsapp/evolution/profile/fetch-business</code>.
               </p>
@@ -6676,7 +6897,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       toast.error(e instanceof Error ? e.message : 'Erro ao resolver JID do contato');
                     }
                   }}
-                  className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   {evoFetchContactProfileMut.isPending ? 'Buscando…' : 'Buscar perfil'}
                 </button>
@@ -6700,25 +6921,25 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       toast.error(e instanceof Error ? e.message : 'Erro ao resolver JID do contato');
                     }
                   }}
-                  className="rounded-lg border border-[#d1d7db] px-3 py-2 text-[12px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[#2a3942] dark:text-[#8696a0] dark:hover:bg-white/10 disabled:opacity-50"
+                  className="rounded-lg border border-[#d1d7db] px-3 py-2 text-[12px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[var(--wa-border)] dark:text-[var(--wa-text-sec)] dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   {evoFetchBusinessProfileMut.isPending ? 'Buscando…' : 'Perfil comercial'}
                 </button>
               </div>
 
               {profileLookupJson ? (
-                <pre className="max-h-72 overflow-auto rounded-lg bg-black/5 p-2 text-[11px] text-[#111b21] dark:bg-white/5 dark:text-[#e9edef]">
+                <pre className="max-h-72 overflow-auto rounded-lg bg-black/5 p-2 text-[11px] text-[#111b21] dark:bg-white/5 dark:text-[var(--wa-text)]">
                   {profileLookupJson}
                 </pre>
               ) : (
-                <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">
+                <p className="text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                   Clique em “Buscar perfil” para ver o JSON retornado pela Evolution para este número.
                 </p>
               )}
             </div>
 
-            <div className="mx-3 mb-8 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 mb-8 space-y-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Mídia, links e docs
               </p>
               {(() => {
@@ -6747,7 +6968,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 const preview = mediaImages.slice(-12);
                 return (
                   <div className="space-y-3">
-                    <div className="flex flex-wrap gap-2 text-[11px] text-[#667781] dark:text-[#8696a0]">
+                    <div className="flex flex-wrap gap-2 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                       <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">{mediaImages.length} mídias</span>
                       <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">{links.length} links</span>
                       <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">{mediaDocs.length} docs</span>
@@ -6778,12 +6999,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         })}
                       </div>
                     ) : (
-                      <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">Nenhuma mídia encontrada neste chat.</p>
+                      <p className="text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nenhuma mídia encontrada neste chat.</p>
                     )}
 
                     {links.length > 0 ? (
                       <div className="space-y-1.5">
-                        <p className="text-[12px] font-semibold text-[#111b21] dark:text-[#e9edef]">Links recentes</p>
+                        <p className="text-[12px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">Links recentes</p>
                         <ul className="space-y-1 text-[12px]">
                           {links.map((u) => (
                             <li key={u} className="truncate">
@@ -6791,7 +7012,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                 href={u}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-[#00a884] hover:underline"
+                                className="text-[#25d366] hover:underline"
                               >
                                 {u}
                               </a>
@@ -6809,8 +7030,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
         {groupPanelOpen ? (
           <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
-            <div className="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">Gerenciar grupo</h2>
+            <div className="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">Gerenciar grupo</h2>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -6833,29 +7054,29 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         lastGroupMetaFetchAtRef.current.set(cid, now);
                         refreshGroupInfoMut.mutate();
                       }}
-                  className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-[#00a884] hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/5"
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-[#25d366] hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/5"
                 >
                   {refreshGroupInfoMut.isPending ? 'Atualizando…' : 'Atualizar'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setGroupPanelOpen(false)}
-                  className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#00a884] hover:bg-black/5 dark:hover:bg-white/5"
+                  className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#25d366] hover:bg-black/5 dark:hover:bg-white/5"
                 >
                   Fechar
                 </button>
               </div>
             </div>
 
-            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">Resumo do grupo</p>
-              <p className="mt-2 text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Resumo do grupo</p>
+              <p className="mt-2 text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
                 {groupInfo?.subject || headerPrimary || 'Grupo sem nome'}
               </p>
-              <p className="mt-0.5 text-[12px] text-[#667781] dark:text-[#8696a0]">
+              <p className="mt-0.5 text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 {groupInfo?.id || canonicalWhatsappChatId(chatId)}
               </p>
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[#667781] dark:text-[#8696a0]">
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
                       {(groupMembersQuery.data?.length ?? groupInfo?.participants.length ?? 0)} membros
                 </span>
@@ -6872,72 +7093,72 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             </div>
 
-            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">Nome, descrição e foto</p>
+            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome, descrição e foto</p>
 
-              <label className="mt-2 block text-[12px] text-[#667781] dark:text-[#8696a0]">Nome do grupo</label>
+              <label className="mt-2 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nome do grupo</label>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   value={groupSubjectDraft}
                   onChange={(e) => setGroupSubjectDraft(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   placeholder="Nome visível no WhatsApp"
                 />
                 <button
                   type="button"
                   disabled={evoGroupSubjectMut.isPending || !groupSubjectDraft.trim()}
                   onClick={() => evoGroupSubjectMut.mutate()}
-                  className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Salvar nome
                 </button>
               </div>
 
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">Descrição</label>
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Descrição</label>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   value={groupDescriptionDraft}
                   onChange={(e) => setGroupDescriptionDraft(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   placeholder="Descrição do grupo"
                 />
                 <button
                   type="button"
                   disabled={evoGroupDescriptionMut.isPending || !groupDescriptionDraft.trim()}
                   onClick={() => evoGroupDescriptionMut.mutate()}
-                  className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Salvar descrição
                 </button>
               </div>
 
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">Foto do grupo (URL)</label>
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Foto do grupo (URL)</label>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   value={groupPictureDraft}
                   onChange={(e) => setGroupPictureDraft(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   placeholder="https://... (imagem pública)"
                 />
                 <button
                   type="button"
                   disabled={evoGroupPictureMut.isPending || !groupPictureDraft.trim()}
                   onClick={() => evoGroupPictureMut.mutate()}
-                  className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Atualizar foto
                 </button>
               </div>
             </div>
 
-            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">Convite do grupo</p>
+            <div className="mx-3 mt-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Convite do grupo</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
                   disabled={evoGroupInviteCodeMut.isPending}
                   onClick={() => evoGroupInviteCodeMut.mutate()}
-                  className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   Buscar link de convite
                 </button>
@@ -6954,7 +7175,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <input
                   value={groupInviteUrl}
                   onChange={(e) => setGroupInviteUrl(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   placeholder="URL de convite"
                 />
                 <button
@@ -6969,39 +7190,39 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       toast.error('Não foi possível copiar o link');
                     }
                   }}
-                  className="shrink-0 rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="shrink-0 rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   Copiar link
                 </button>
               </div>
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">Mensagem do convite</label>
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Mensagem do convite</label>
               <input
                 value={groupInviteDescription}
                 onChange={(e) => setGroupInviteDescription(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 placeholder="Ex.: Entre no nosso grupo de atendimento"
               />
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">Números (um por linha ou separados por vírgula)</label>
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Números (um por linha ou separados por vírgula)</label>
               <textarea
                 value={groupInviteNumbers}
                 onChange={(e) => setGroupInviteNumbers(e.target.value)}
                 rows={3}
-                className="mt-1 w-full resize-y rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                className="mt-1 w-full resize-y rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 placeholder={'5511999999999\n5511888888888'}
               />
               <button
                 type="button"
                 disabled={evoGroupSendInviteMut.isPending || !groupInviteNumbers.trim()}
                 onClick={() => evoGroupSendInviteMut.mutate()}
-                className="mt-2 rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                className="mt-2 rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
               >
                 Enviar convite para números
               </button>
             </div>
 
-            <div className="mx-3 my-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">Membros</p>
-              <p className="mt-1 text-[11px] text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 my-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Membros</p>
+              <p className="mt-1 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Para adicionar/remover/promover/rebaixar, informe números com DDI (ex.: 5511999999999).
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -7039,11 +7260,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       registerBackoffSuccess(backoffKey);
                     }
                   }}
-                  className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="rounded-lg border border-[#25d366] px-3 py-2 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   {groupMembersQuery.isFetching ? 'Buscando…' : 'Buscar membros'}
                 </button>
-                <span className="text-[11px] text-[#667781] dark:text-[#8696a0]">
+                <span className="text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                   (somente quando necessário — evita rate-limit)
                 </span>
               </div>
@@ -7051,7 +7272,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <select
                   value={groupMembersAction}
                   onChange={(e) => setGroupMembersAction(e.target.value as 'add' | 'remove' | 'promote' | 'demote')}
-                  className="rounded-lg border border-[#d1d7db] bg-white px-2 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="rounded-lg border border-[#d1d7db] bg-white px-2 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 >
                   <option value="add">Adicionar</option>
                   <option value="remove">Remover</option>
@@ -7062,7 +7283,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   type="button"
                   disabled={evoGroupUpdateMembersMut.isPending || !groupMembersDraft.trim()}
                   onClick={() => evoGroupUpdateMembersMut.mutate()}
-                  className="rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Aplicar ação
                 </button>
@@ -7071,35 +7292,35 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 value={groupMembersDraft}
                 onChange={(e) => setGroupMembersDraft(e.target.value)}
                 rows={3}
-                className="mt-2 w-full resize-y rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                className="mt-2 w-full resize-y rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 placeholder={'5511999999999\n5511888888888'}
               />
-              <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[#e9edef] dark:border-[#2a3942]">
+              <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[#e9edef] dark:border-[var(--wa-border)]">
                 {(groupMembersQuery.data?.length ?? groupInfo?.participants.length ?? 0) > 0 ? (
                   (groupMembersQuery.data?.length ? groupMembersQuery.data : groupInfo?.participants || []).map((p) => (
                     <div
                       key={p.id}
-                      className="flex items-center justify-between border-b border-[#f0f2f5] px-3 py-2 text-[12px] last:border-b-0 dark:border-[#2a3942]"
+                      className="flex items-center justify-between border-b border-[#f0f2f5] px-3 py-2 text-[12px] last:border-b-0 dark:border-[var(--wa-border)]"
                     >
-                      <span className="truncate text-[#111b21] dark:text-[#e9edef]">{formatPhoneForDisplay(p.id)}</span>
-                      <span className="ml-2 shrink-0 text-[#667781] dark:text-[#8696a0]">{p.admin || 'membro'}</span>
+                      <span className="truncate text-[#111b21] dark:text-[var(--wa-text)]">{formatPhoneForDisplay(p.id)}</span>
+                      <span className="ml-2 shrink-0 text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{p.admin || 'membro'}</span>
                     </div>
                   ))
                 ) : (
-                  <p className="px-3 py-4 text-center text-[12px] text-[#667781] dark:text-[#8696a0]">Sem membros carregados.</p>
+                  <p className="px-3 py-4 text-center text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Sem membros carregados.</p>
                 )}
               </div>
             </div>
 
-            <div className="mx-3 mb-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+            <div className="mx-3 mb-3 rounded-xl border border-[#e9edef] bg-white p-4 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Configurações avançadas
               </p>
-              <p className="mt-1 text-[11px] text-[#667781] dark:text-[#8696a0]">
+              <p className="mt-1 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Controle de envio/edição no grupo, mensagens temporárias e saída do grupo.
               </p>
 
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">Update setting</label>
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Update setting</label>
               <div className="mt-1 flex flex-wrap gap-2">
                 <select
                   value={groupSettingAction}
@@ -7108,7 +7329,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       e.target.value as 'announcement' | 'not_announcement' | 'locked' | 'unlocked'
                     )
                   }
-                  className="rounded-lg border border-[#d1d7db] bg-white px-2 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="rounded-lg border border-[#d1d7db] bg-white px-2 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 >
                   <option value="announcement">announcement (somente admins enviam)</option>
                   <option value="not_announcement">not_announcement (todos enviam)</option>
@@ -7119,33 +7340,33 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   type="button"
                   disabled={evoGroupUpdateSettingMut.isPending}
                   onClick={() => evoGroupUpdateSettingMut.mutate()}
-                  className="rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Aplicar setting
                 </button>
               </div>
 
-              <label className="mt-3 block text-[12px] text-[#667781] dark:text-[#8696a0]">
+              <label className="mt-3 block text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                 Toggle ephemeral (expiração em segundos)
               </label>
               <div className="mt-1 flex flex-wrap gap-2">
                 <input
                   value={groupEphemeralExpiration}
                   onChange={(e) => setGroupEphemeralExpiration(e.target.value)}
-                  className="w-[200px] rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="w-[200px] rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[12px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   placeholder="Ex.: 0, 86400, 604800"
                 />
                 <button
                   type="button"
                   disabled={evoGroupToggleEphemeralMut.isPending || !groupEphemeralExpiration.trim()}
                   onClick={() => evoGroupToggleEphemeralMut.mutate()}
-                  className="rounded-lg bg-[#00a884] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="rounded-lg bg-[#25d366] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   Atualizar temporárias
                 </button>
               </div>
 
-              <div className="mt-4 border-t border-[#e9edef] pt-3 dark:border-[#2a3942]">
+              <div className="mt-4 border-t border-[#e9edef] pt-3 dark:border-[var(--wa-border)]">
                 <button
                   type="button"
                   disabled={evoGroupLeaveMut.isPending}
@@ -7164,26 +7385,26 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
         {contactsPanelOpen ? (
           <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
-            <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+            <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+              <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">
                 Agenda de contatos
               </h2>
               <button
                 type="button"
                 onClick={() => setContactsPanelOpen(false)}
-                className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#00a884] hover:bg-black/5 dark:hover:bg-white/5"
+                className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#25d366] hover:bg-black/5 dark:hover:bg-white/5"
               >
                 Fechar
               </button>
             </div>
-            <p className="shrink-0 border-b border-[#e9edef] px-3 py-2 text-[11px] leading-snug text-[#667781] dark:border-[#2a3942] dark:text-[#8696a0]">
+            <p className="shrink-0 border-b border-[#e9edef] px-3 py-2 text-[11px] leading-snug text-[var(--wa-text-muted)] dark:border-[var(--wa-border)] dark:text-[var(--wa-text-sec)]">
               Lista completa via backend (<code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">GET …/whatsapp/provider-contacts</code>
               ) e busca por nome/número em{' '}
               <code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">GET …/whatsapp/provider-contacts/search</code>.
               Os nomes no CRM continuam vindo das mensagens e do cache; aqui são os contatos salvos no aparelho (Evolution/WAHA).
               No motor NOWEB mantenha a <strong>Store</strong> ativa. Para número novo no Brasil, use a verificação abaixo.
             </p>
-            <div className="shrink-0 space-y-2 border-b border-[#e9edef] px-3 py-2 dark:border-[#2a3942]">
+            <div className="shrink-0 space-y-2 border-b border-[#e9edef] px-3 py-2 dark:border-[var(--wa-border)]">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -7200,11 +7421,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       setContactsPanelForceRefresh(false);
                     }
                   }}
-                  className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                  className="rounded-lg bg-[#25d366] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
                 >
                   {agendaDisplayedLoading ? 'Carregando…' : 'Atualizar lista'}
                 </button>
-                <label className="flex items-center gap-1 text-[12px] text-[#667781]">
+                <label className="flex items-center gap-1 text-[12px] text-[var(--wa-text-muted)]">
                   Ordenar
                   <select
                     value={`${contactsSortBy}-${contactsSortOrder}`}
@@ -7213,7 +7434,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       setContactsSortBy(sb);
                       setContactsSortOrder(so);
                     }}
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1 text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                    className="rounded border border-[#d1d7db] bg-white px-2 py-1 text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                   >
                     <option value="name-asc">Nome A–Z</option>
                     <option value="name-desc">Nome Z–A</option>
@@ -7227,7 +7448,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 value={contactsAgendaSearchInput}
                 onChange={(e) => setContactsAgendaSearchInput(e.target.value)}
                 placeholder={`Buscar na agenda (mín. ${WHATSAPP_AGENDA_SEARCH_MIN_CHARS} letras ou 2+ dígitos no número) — vazio lista todos`}
-                className="w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                className="w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
               />
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
@@ -7239,22 +7460,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     setCheckPhoneResult(null);
                   }}
                   placeholder="Verificar número (DDI+DDD+nº, ex. 5511999999999)"
-                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 />
                 <button
                   type="button"
                   disabled={checkPhoneMut.isPending || !checkPhoneDraft.replace(/\D/g, '').length}
                   onClick={() => checkPhoneMut.mutate(checkPhoneDraft)}
-                  className="shrink-0 rounded-lg border border-[#00a884] px-3 py-2 text-[13px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                  className="shrink-0 rounded-lg border border-[#25d366] px-3 py-2 text-[13px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                 >
                   Verificar no WhatsApp
                 </button>
               </div>
               {checkPhoneResult ? (
-                <div className="rounded-lg bg-white px-3 py-2 text-[13px] dark:bg-[#202c33]">
+                <div className="rounded-lg bg-white px-3 py-2 text-[13px] dark:bg-[var(--wa-panel-header)]">
                   {checkPhoneResult.numberExists && checkPhoneResult.chatId ? (
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="text-[#111b21] dark:text-[#e9edef]">
+                      <span className="text-[#111b21] dark:text-[var(--wa-text)]">
                         Cadastrado: <code className="text-[12px]">{checkPhoneResult.chatId}</code>
                       </span>
                       <button
@@ -7264,13 +7485,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           onNavigateChat?.(jid, formatPhoneForDisplay(jid));
                           setContactsPanelOpen(false);
                         }}
-                        className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#008f6f]"
+                        className="rounded-lg bg-[#25d366] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#1ebe57]"
                       >
                         Abrir conversa
                       </button>
                     </div>
                   ) : (
-                    <span className="text-[#667781]">Número não encontrado no WhatsApp.</span>
+                    <span className="text-[var(--wa-text-muted)]">Número não encontrado no WhatsApp.</span>
                   )}
                 </div>
               ) : null}
@@ -7278,11 +7499,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             <div className="wa-scroll min-h-0 flex-1 overflow-y-auto">
               {agendaDisplayedLoading && !agendaDisplayedRowsSorted.length ? (
                 <div className="flex justify-center py-12">
-                  <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                  <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 </div>
               ) : null}
               {!agendaDisplayedLoading && agendaDisplayedRowsSorted.length === 0 ? (
-                <p className="p-4 text-center text-[13px] text-[#667781]">
+                <p className="p-4 text-center text-[13px] text-[var(--wa-text-muted)]">
                   {useAgendaServerSearch
                     ? 'Nenhum contato encontrado para essa busca.'
                     : agendaListFull.length === 0
@@ -7327,7 +7548,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       onNavigateChat?.(jid, title);
                       setContactsPanelOpen(false);
                     }}
-                    className="flex w-full gap-3 border-b border-[#e9edef] px-3 py-2.5 text-left transition-colors hover:bg-white dark:border-[#2a3942] dark:hover:bg-[#202c33]"
+                    className="flex w-full gap-3 border-b border-[#e9edef] px-3 py-2.5 text-left transition-colors hover:bg-white dark:border-[var(--wa-border)] dark:hover:bg-[var(--wa-panel-header)]"
                   >
                     <ContactAvatar
                       chatId={canonicalWhatsappChatId(row.id)}
@@ -7338,9 +7559,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     />
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">{primary}</span>
+                        <span className="truncate text-[15px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">{primary}</span>
                         {row.isGroup ? (
-                          <span className="shrink-0 rounded bg-[#8696a0]/20 px-1.5 py-0.5 text-[10px] text-[#54656f] dark:text-[#8696a0]">
+                          <span className="shrink-0 rounded bg-[#8696a0]/20 px-1.5 py-0.5 text-[10px] text-[#54656f] dark:text-[var(--wa-text-sec)]">
                             Grupo
                           </span>
                         ) : null}
@@ -7350,13 +7571,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           </span>
                         ) : null}
                         {row.isMe ? (
-                          <span className="shrink-0 text-[10px] text-[#667781]">(eu)</span>
+                          <span className="shrink-0 text-[10px] text-[var(--wa-text-muted)]">(eu)</span>
                         ) : null}
                       </div>
                       {sub ? (
-                        <span className="truncate text-[12px] text-[#667781] dark:text-[#8696a0]">{sub}</span>
+                        <span className="truncate text-[12px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{sub}</span>
                       ) : null}
-                      <span className="truncate font-mono text-[12px] text-[#00a884] dark:text-[#25d366]" title="Usado para abrir a conversa e enviar mensagem">
+                      <span className="truncate font-mono text-[12px] text-[#25d366] dark:text-[#25d366]" title="Usado para abrir a conversa e enviar mensagem">
                         WhatsApp: {waLine}
                       </span>
                     </div>
@@ -7433,13 +7654,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             onPointerCancel={handleAsideResizeEnd}
             onDoubleClick={() => setAsideWidth(WA_ASIDE_MIN_WIDTH)}
             className={`group absolute -right-[3px] top-0 z-30 hidden h-full w-1.5 cursor-col-resize select-none touch-none min-[780px]:block ${
-              isResizingAside ? 'bg-[#00a884]/30' : 'hover:bg-[#00a884]/20'
+              isResizingAside ? 'bg-[#25d366]/30' : 'hover:bg-[#25d366]/20'
             }`}
           >
             <span
               aria-hidden
               className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px transition-colors ${
-                isResizingAside ? 'bg-[#00a884]' : 'bg-transparent group-hover:bg-[#00a884]/70'
+                isResizingAside ? 'bg-[#25d366]' : 'bg-transparent group-hover:bg-[#25d366]/70'
               }`}
             />
           </div>
@@ -7449,23 +7670,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       {/* Coluna direita — conversa ativa */}
       <div className={chatColumnClass}>
         {!chatId ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-[#efeae2] px-6 text-center dark:bg-[#161717]">
-            <div className="text-5xl opacity-40" aria-hidden>
-              💬
-            </div>
-            <p className="max-w-md text-[15px] leading-relaxed text-[#667781] dark:text-[#8696a0]">
-              Selecione uma conversa à esquerda ou abra um lead pelo{' '}
-              <span className="font-medium text-[#111b21] dark:text-[#e9edef]">Funil de Atendimento</span>.
+          <div className="wa-empty-chat flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+            <Lock className="h-8 w-8 text-[var(--wa-text-sec)]" strokeWidth={1.5} />
+            <p className="max-w-md text-[32px] font-light leading-tight text-[var(--wa-text)]">WhatsApp</p>
+            <p className="max-w-md text-[14px] leading-relaxed text-[var(--wa-text-sec)]">
+              Selecione uma conversa à esquerda para enviar e receber mensagens.
+            </p>
+            <p className="mt-8 max-w-sm text-[13px] text-[var(--wa-text-muted)]">
+              Suas mensagens pessoais são protegidas com a criptografia de ponta a ponta.
             </p>
           </div>
         ) : (
           <>
-            <header className="flex h-[60px] shrink-0 items-center gap-1 border-b-0 bg-white px-2 min-[780px]:gap-2 min-[780px]:px-3 dark:bg-[#161717]">
+            <header className="wa-chat-header flex h-[60px] shrink-0 items-center gap-1 px-2 min-[780px]:gap-2 min-[780px]:px-4">
               {onClose ? (
                 <button
                   type="button"
                   onClick={onClose}
-                  className="mr-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 min-[780px]:hidden dark:text-[#8696a0] dark:hover:bg-white/5"
+                  className="mr-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 min-[780px]:hidden dark:text-[var(--wa-text-sec)] dark:hover:bg-white/5"
                   aria-label="Voltar para conversas"
                   title="Voltar"
                 >
@@ -7479,7 +7701,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   if (activeIsGroup) setGroupPanelOpen(true);
                   else setContactPanelOpen(true);
                 }}
-                className="flex items-center gap-2 rounded-lg px-1 py-1 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                className="flex items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-black/5 dark:hover:bg-white/5"
                 title={activeIsGroup ? 'Ver dados do grupo' : 'Ver dados do contato'}
               >
                 <ContactAvatar
@@ -7499,10 +7721,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   size="header"
                 />
                 <div className="min-w-0">
-                  <p className="truncate text-[16px] font-medium text-[#111b21] dark:text-[#e9edef]">{headerPrimary}</p>
-                  <p className="truncate text-[13px] text-[#667781] dark:text-[#8696a0]">
+                  <p className="truncate text-[16px] font-medium text-[var(--wa-text)]">{headerPrimary}</p>
+                  <p className="truncate text-[13px] text-[var(--wa-text-sec)]">
                     {peerTyping ? (
-                      <span className="font-medium italic text-[#00a884]">
+                      <span className="font-medium italic text-[#25d366]">
                         {isWhatsappGroupChatId(chatId) ? 'alguém está digitando…' : 'digitando…'}
                       </span>
                     ) : (
@@ -7512,6 +7734,35 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </div>
               </button>
               <div className="min-w-0 flex-1" />
+              {inChatSearchOpen ? (
+                <input
+                  autoFocus
+                  value={inChatSearch}
+                  onChange={(e) => setInChatSearch(e.target.value)}
+                  placeholder="Pesquisar"
+                  className="wa-search-pill mr-1 max-w-[220px] border-0 px-3 text-[14px]"
+                />
+              ) : null}
+              <button
+                type="button"
+                title="Pesquisar"
+                aria-label="Pesquisar na conversa"
+                onClick={() => setInChatSearchOpen((o) => !o)}
+                className="wa-header-icon-btn"
+              >
+                <Search className="h-5 w-5" strokeWidth={2.35} />
+              </button>
+              {!activeIsGroup ? (
+                <button
+                  type="button"
+                  title="Ações"
+                  aria-label="Ações do contato"
+                  onClick={() => setActionsPanelOpen(true)}
+                  className="wa-header-icon-btn"
+                >
+                  <ClipboardList className="h-5 w-5" strokeWidth={2.15} />
+                </button>
+              ) : null}
               <div className="relative shrink-0">
                 <button
                   type="button"
@@ -7522,23 +7773,21 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     e.stopPropagation();
                     setChatMenuOpen((o) => !o);
                   }}
-                  className="rounded-full p-2 text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
+                  className="wa-header-icon-btn"
                 >
-                  <span className="text-xl leading-none" aria-hidden>
-                    ⋮
-                  </span>
+                  <MoreVertical className="h-5 w-5" strokeWidth={2.15} />
                 </button>
                 {chatMenuOpen ? (
                   <div
                     role="menu"
-                    className="absolute right-0 top-full z-30 mt-1 min-w-[200px] rounded-lg border border-[#e9edef] bg-white py-1 shadow-lg dark:border-[#2a3942] dark:bg-[#202c33]"
+                    className="absolute right-0 top-full z-30 mt-1 min-w-[200px] rounded-lg border border-[#e9edef] bg-white py-1 shadow-lg dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
                       type="button"
                       role="menuitem"
                       disabled={archiveConversationMut.isPending}
-                      className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5 disabled:opacity-50"
+                      className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5 disabled:opacity-50"
                       onClick={(e) => {
                         e.stopPropagation();
                         archiveConversationMut.mutate();
@@ -7550,7 +7799,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       type="button"
                       role="menuitem"
                       disabled={markUnreadMut.isPending}
-                      className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5 disabled:opacity-50"
+                      className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5 disabled:opacity-50"
                       onClick={(e) => {
                         e.stopPropagation();
                         markUnreadMut.mutate();
@@ -7562,7 +7811,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                        className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[var(--wa-text)] dark:hover:bg-white/5"
                         onClick={(e) => {
                           e.stopPropagation();
                           setChatMenuOpen(false);
@@ -7572,18 +7821,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         Gerenciar grupo
                       </button>
                     ) : null}
-                    {!activeIsGroup ? (
+                    {onEditLead && !activeIsGroup ? (
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-4 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                        className="block w-full px-4 py-2.5 text-left text-[14px] text-[var(--wa-text)] hover:bg-black/5 dark:hover:bg-white/5"
                         onClick={(e) => {
                           e.stopPropagation();
                           setChatMenuOpen(false);
-                          setActionsPanelOpen(true);
+                          onEditLead();
                         }}
                       >
-                        Ações
+                        Editar lead
                       </button>
                     ) : null}
                     <button
@@ -7605,34 +7854,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   </div>
                 ) : null}
               </div>
-              {onEditLead && !isWhatsappGroupChatId(chatId) && (
-                <button
-                  type="button"
-                  onClick={onEditLead}
-                  className="rounded-full px-3 py-1.5 text-[13px] font-medium text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
-                >
-                  Editar lead
-                </button>
-              )}
-              {!isWhatsappGroupChatId(chatId) && (
-                <button
-                  type="button"
-                  onClick={() => setActionsPanelOpen(true)}
-                  className="rounded-full bg-[#d9fdd3] px-3 py-1.5 text-[13px] font-semibold text-[#075e54] hover:bg-[#c9f7c0] dark:bg-[#1f3d34] dark:text-[#5ee8a2] dark:hover:bg-[#23493e]"
-                >
-                  AÇÕES
-                </button>
-              )}
-              {onClose && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="hidden rounded-full p-2 text-[#54656f] hover:bg-black/5 min-[780px]:inline-flex dark:text-[#8696a0] dark:hover:bg-white/5"
-                  aria-label="Fechar painel"
-                >
-                  <span className="text-lg leading-none">✕</span>
-                </button>
-              )}
             </header>
 
             <div
@@ -7683,23 +7904,17 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             <div className="relative flex min-h-0 flex-1 flex-col">
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-0 z-0 bg-[#efeae2] dark:hidden"
-                style={chatWallpaperLayerStyle(CHAT_BG_TILE_LIGHT, '#efeae2')}
-              />
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 z-0 hidden bg-[#161717] dark:block"
-                style={chatWallpaperLayerStyle(CHAT_BG_TILE_DARK, '#161717')}
+                className="wa-wallpaper pointer-events-none absolute inset-0 z-0"
               />
               <div className="wa-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto bg-transparent py-2">
               {loadingMsgs && (
                 <div className="flex justify-center py-16">
-                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 </div>
               )}
               {!loadingMsgs &&
-                displayMessages.map((m, idx) => {
-                  const prev = idx > 0 ? displayMessages[idx - 1] : null;
+                visibleMessages.map((m, idx) => {
+                  const prev = idx > 0 ? visibleMessages[idx - 1] : null;
                   const showDateHeader = idx === 0 || (prev ? !isSameChatDay(m.timestamp, prev.timestamp) : true);
                   return (
                   <div
@@ -7708,26 +7923,26 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   >
                     {showDateHeader ? (
                       <div className="pointer-events-none sticky top-3 z-[12] my-2 flex w-full justify-center">
-                        <span className="pointer-events-auto rounded-full bg-[#1f2c33]/70 px-3 py-1 text-[11px] font-medium text-[#e9edef] shadow-sm backdrop-blur-sm">
+                        <span className="pointer-events-auto rounded-full bg-[#1f2c33]/70 px-3 py-1 text-[11px] font-medium text-[var(--wa-text)] shadow-sm backdrop-blur-sm">
                           {formatChatDate(m.timestamp)}
                         </span>
                       </div>
                     ) : null}
                     {editingId === m.id ? (
                       <div
-                        className="flex w-full max-w-[min(78%,720px)] flex-col gap-2 rounded-lg border border-[#00a884] bg-white p-3 shadow-sm dark:border-[#00a884] dark:bg-[#202c33] sm:max-w-[min(65%,420px)]"
+                        className="flex w-full max-w-[min(78%,720px)] flex-col gap-2 rounded-lg border border-[#25d366] bg-white p-3 shadow-sm dark:border-[#25d366] dark:bg-[var(--wa-panel-header)] sm:max-w-[min(65%,420px)]"
                       >
                         <textarea
                           value={editDraft}
                           onChange={(e) => setEditDraft(e.target.value)}
                           rows={4}
-                          className="w-full resize-y rounded border border-[#d1d7db] bg-white px-2 py-2 text-[14px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                          className="w-full resize-y rounded border border-[#d1d7db] bg-white px-2 py-2 text-[14px] text-[#111b21] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                         />
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
                             onClick={cancelEditMessage}
-                            className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 dark:text-[#8696a0]"
+                            className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 dark:text-[var(--wa-text-sec)]"
                           >
                             Cancelar
                           </button>
@@ -7738,7 +7953,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               editingId &&
                               editMessageMut.mutate({ messageId: editingId, text: editDraft.trim() })
                             }
-                            className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+                            className="rounded-lg bg-[#25d366] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
                           >
                             Salvar
                           </button>
@@ -7770,8 +7985,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               <span
                                 className={`flex h-5 w-5 items-center justify-center rounded border ${
                                   selectedMessageIds.has(m.id)
-                                    ? 'border-[#00a884] bg-[#00a884] text-white'
-                                    : 'border-[#cbd5da] bg-transparent text-transparent dark:border-[#2a3942]'
+                                    ? 'border-[#25d366] bg-[#25d366] text-white'
+                                    : 'border-[#cbd5da] bg-transparent text-transparent dark:border-[var(--wa-border)]'
                                 }`}
                               >
                                 <CheckIcon className="h-4 w-4" />
@@ -7809,13 +8024,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </div>
 
             {!isInForwardSelectionMode && pendingMediaList.length > 0 ? (
-              <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-                <p className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">
+              <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+                <p className="text-[12px] font-medium text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                   {pendingMediaList.length === 1
                     ? '1 arquivo para enviar'
                     : `${pendingMediaList.length} arquivos para enviar (fila com concorrência limitada)`}
                 </p>
-                <div className="max-h-[min(40vh,280px)] overflow-y-auto rounded-lg border border-[#d1d7db] bg-white/80 p-2 dark:border-[#2a3942] dark:bg-[#161717]/60">
+                <div className="max-h-[min(40vh,280px)] overflow-y-auto rounded-lg border border-[#d1d7db] bg-white/80 p-2 dark:border-[var(--wa-border)] dark:bg-[#161717]/60">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                     {pendingMediaList.map((pm) => {
                       const label =
@@ -7833,7 +8048,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       return (
                         <div
                           key={pm.id}
-                          className="group relative flex flex-col gap-1 rounded-md border border-[#e9edef] bg-[#f8f9fa] p-1.5 dark:border-[#2a3942] dark:bg-[#202c33]"
+                          className="group relative flex flex-col gap-1 rounded-md border border-[#e9edef] bg-[#f8f9fa] p-1.5 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]"
                         >
                           <button
                             type="button"
@@ -7845,7 +8060,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           >
                             ✕
                           </button>
-                          <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-[#dfe5e7] dark:bg-[#2a3942]">
+                          <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-[#dfe5e7] dark:bg-[var(--wa-input)]">
                             {pm.previewUrl ? (
                               <img
                                 src={pm.previewUrl}
@@ -7858,10 +8073,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               </span>
                             )}
                           </div>
-                          <p className="line-clamp-2 px-0.5 text-[11px] font-medium leading-tight text-[#111b21] dark:text-[#e9edef]">
+                          <p className="line-clamp-2 px-0.5 text-[11px] font-medium leading-tight text-[#111b21] dark:text-[var(--wa-text)]">
                             {displayName}
                           </p>
-                          <p className="px-0.5 text-[10px] text-[#667781] dark:text-[#8696a0]">
+                          <p className="px-0.5 text-[10px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                             {sizeStr} · {label}
                           </p>
                         </div>
@@ -7880,14 +8095,14 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     }
                   }}
                   placeholder="Legenda (opcional; aplicada ao primeiro arquivo da fila)"
-                  className="w-full rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] placeholder:text-[#8696a0] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="w-full rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] placeholder:text-[var(--wa-text-sec)] dark:border-[var(--wa-border)] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text)]"
                 />
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
                     disabled={sendMediaMut.isPending}
                     onClick={cancelMedia}
-                    className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 disabled:opacity-50 dark:text-[#8696a0]"
+                    className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 disabled:opacity-50 dark:text-[var(--wa-text-sec)]"
                   >
                     Cancelar tudo
                   </button>
@@ -7895,7 +8110,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     type="button"
                     disabled={sendMediaMut.isPending}
                     onClick={handleSendMedia}
-                    className="flex items-center gap-1.5 rounded-lg bg-[#00a884] px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-lg bg-[#25d366] px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
                   >
                     {sendMediaMut.isPending ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -7908,85 +8123,19 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             ) : null}
 
-            {!isInForwardSelectionMode && pendingRecordedAudio && !isRecordingAudio ? (
-              <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
-                    <Mic className="h-6 w-6" strokeWidth={1.75} aria-hidden />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
-                      Pré-escuta de áudio
-                    </p>
-                    <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">
-                      {formatRecordingElapsed(pendingRecordedAudio.elapsedSec)} · {(pendingRecordedAudio.size / 1024).toFixed(0)} KB
-                    </p>
-                  </div>
-                </div>
-                <audio
-                  ref={previewAudioRef}
-                  controls
-                  preload="metadata"
-                  src={pendingRecordedAudio.url}
-                  className="w-full"
-                  onPlay={() => setIsPreviewPlaying(true)}
-                  onPause={() => setIsPreviewPlaying(false)}
-                  onEnded={() => {
-                    setIsPreviewPlaying(false);
-                    setPreviewProgress(1);
-                  }}
-                  onTimeUpdate={syncPreviewAudioProgress}
-                  onLoadedMetadata={syncPreviewAudioProgress}
-                />
-                <div className="space-y-1">
-                  <VoiceWaveformPreview
-                    progress={previewProgress}
-                    playing={isPreviewPlaying}
-                    bars={pendingRecordedAudio.waveformBars}
-                  />
-                  <div className="flex items-center justify-between text-[11px] text-[#667781] dark:text-[#8696a0]">
-                    <span>{formatRecordingElapsed(Math.floor(previewCurrentSec))}</span>
-                    <span>{formatRecordingElapsed(Math.floor(previewDurationSec || pendingRecordedAudio.elapsedSec))}</span>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={discardRecordedAudio}
-                    className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 dark:text-[#8696a0]"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    disabled={sendAudioMut.isPending}
-                    onClick={confirmSendRecordedAudio}
-                    className="flex items-center gap-1.5 rounded-lg bg-[#00a884] px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
-                  >
-                    {sendAudioMut.isPending ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    ) : (
-                      <SendPlaneIcon className="h-4 w-4" />
-                    )}
-                    Enviar áudio
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
             {isInForwardSelectionMode ? (
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={exitForwardSelectionMode}
-                    className="flex h-11 w-11 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/10"
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 dark:text-[var(--wa-text-sec)] dark:hover:bg-white/10"
                     aria-label="Cancelar seleção"
                     title="Cancelar"
                   >
                     <CloseXIcon className="h-5 w-5" />
                   </button>
-                  <p className="text-[13px] font-medium text-[#111b21] dark:text-[#e9edef]">
+                  <p className="text-[13px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">
                     {selectedMessageIds.size} selecionada(s)
                   </p>
                 </div>
@@ -7996,7 +8145,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   onClick={() => {
                     setForwardModalOpen(true);
                   }}
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-[#00a884] text-white shadow-sm transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:bg-[#8696a0]/40 disabled:text-white/70 dark:disabled:bg-[#2a3942]"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-[#25d366] text-white shadow-sm transition enabled:hover:bg-[#1ebe57] disabled:cursor-not-allowed disabled:bg-[#8696a0]/40 disabled:text-white/70 dark:disabled:bg-[var(--wa-input)]"
                   aria-label="Encaminhar mensagens selecionadas"
                   title="Encaminhar"
                 >
@@ -8004,14 +8153,14 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </button>
               </div>
             ) : (
-              <footer className="flex shrink-0 flex-col gap-2 border-t-0 bg-[#f0f2f5] px-2 py-2 max-[779px]:pb-[max(0.5rem,env(safe-area-inset-bottom))] min-[780px]:px-3 dark:bg-[#161717]">
+              <footer className="wa-composer-bar shrink-0 max-[779px]:pb-[max(5px,env(safe-area-inset-bottom))]">
                 {(sendMediaMut.isPending && !pendingMediaList.length) || batchUploadProgress ? (
                   <div
-                    className="flex items-center gap-2 rounded-lg border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-[13px] font-medium text-[#075e54] dark:border-[#00a884]/40 dark:bg-[#00a884]/15 dark:text-[#5ee8a2]"
+                    className="mb-2 flex items-center gap-2 rounded-lg border border-[#25d366]/30 bg-[#25d366]/10 px-3 py-2 text-[13px] font-medium text-[#075e54] dark:border-[#25d366]/40 dark:bg-[#25d366]/15 dark:text-[#5ee8a2]"
                     role="status"
                     aria-live="polite"
                   >
-                    <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                    <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                     {batchUploadProgress && batchUploadProgress.total > 1 ? (
                       <span>
                         Enviando lote {batchUploadProgress.current}/{batchUploadProgress.total}…
@@ -8021,87 +8170,212 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     )}
                   </div>
                 ) : null}
-                <div className="flex min-h-[52px] flex-col gap-2">
-                  {lidOutboundUnresolved ? (
-                    <div
-                      className="rounded-lg border border-amber-300/80 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
-                      role="status"
-                    >
-                      Telefone deste contato ainda não foi confirmado. Cadastre o número em{' '}
-                      <strong>Contatos S3E</strong> ou use <strong>Buscar perfil</strong> no menu do chat antes de
-                      enviar mensagens.
-                    </div>
-                  ) : null}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept={MEDIA_ACCEPT}
-                    className="hidden"
-                    onChange={handleFileSelected}
-                  />
-                  <input
-                    ref={stickerInputRef}
-                    type="file"
-                    accept="image/webp,image/png,image/jpeg"
-                    className="hidden"
-                    onChange={handleStickerSelected}
-                  />
-                  <input
-                    ref={gifInputRef}
-                    type="file"
-                    accept="image/gif"
-                    className="hidden"
-                    onChange={handleGifSelected}
-                  />
-                  <input
-                    ref={photosVideosInputRef}
-                    type="file"
-                    multiple
-                    accept="image/*,video/*"
-                    className="hidden"
-                    onChange={handlePhotosVideosSelected}
-                  />
-                  {isRecordingAudio ? (
-                    <div className="flex w-full items-center gap-2 rounded-full border border-[#e9edef] bg-white px-2 py-1.5 dark:border-[#2a3942] dark:bg-[#2a3942]">
-                      <div className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full bg-red-100 px-3 py-2 text-[12px] font-medium text-red-800 dark:bg-red-900/35 dark:text-red-200">
-                        <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
-                        <span className="truncate">Gravando {formatRecordingElapsed(recordingElapsedSec)}</span>
+                {lidOutboundUnresolved ? (
+                  <div
+                    className="mb-2 rounded-lg border border-amber-300/80 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+                    role="status"
+                  >
+                    Telefone deste contato ainda não foi confirmado. Cadastre o número em{' '}
+                    <strong>Contatos S3E</strong> ou use <strong>Buscar perfil</strong> no menu do chat antes de
+                    enviar mensagens.
+                  </div>
+                ) : null}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={MEDIA_ACCEPT}
+                  className="hidden"
+                  onChange={handleFileSelected}
+                />
+                <input
+                  ref={stickerInputRef}
+                  type="file"
+                  accept="image/webp,image/png,image/jpeg"
+                  className="hidden"
+                  onChange={handleStickerSelected}
+                />
+                <input
+                  ref={gifInputRef}
+                  type="file"
+                  accept="image/gif"
+                  className="hidden"
+                  onChange={handleGifSelected}
+                />
+                <input
+                  ref={photosVideosInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,video/*"
+                  className="hidden"
+                  onChange={handlePhotosVideosSelected}
+                />
+                {isRecordingAudio || pendingRecordedAudio ? (
+                  <div className="wa-composer-row items-center gap-2">
+                    {pendingRecordedAudio ? (
+                      <audio
+                        ref={previewAudioRef}
+                        preload="metadata"
+                        src={pendingRecordedAudio.url}
+                        className="hidden"
+                        onPlay={() => setIsPreviewPlaying(true)}
+                        onPause={() => setIsPreviewPlaying(false)}
+                        onEnded={() => {
+                          setIsPreviewPlaying(false);
+                          setPreviewProgress(1);
+                        }}
+                        onTimeUpdate={syncPreviewAudioProgress}
+                        onLoadedMetadata={syncPreviewAudioProgress}
+                      />
+                    ) : null}
+                    <div className="wa-composer-input !flex min-h-[52px] w-full items-center gap-1.5 !rounded-full !px-2 py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isRecordingAudio) cancelCurrentRecording();
+                          else discardRecordedAudio();
+                        }}
+                        className="wa-composer-icon-btn !h-10 !w-10"
+                        aria-label="Descartar áudio"
+                        title="Descartar"
+                      >
+                        <Trash2 className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                      </button>
+
+                      {pendingRecordedAudio && !isRecordingAudio ? (
+                        <button
+                          type="button"
+                          onClick={() => void togglePreviewPlayback()}
+                          className="wa-composer-icon-btn !h-10 !w-10"
+                          aria-label={isPreviewPlaying ? 'Pausar prévia' : 'Ouvir prévia'}
+                          title={isPreviewPlaying ? 'Pausar' : 'Ouvir'}
+                        >
+                          {isPreviewPlaying ? (
+                            <Pause className="h-5 w-5" strokeWidth={2} aria-hidden />
+                          ) : (
+                            <Play className="h-5 w-5 translate-x-[1px]" strokeWidth={2} aria-hidden />
+                          )}
+                        </button>
+                      ) : null}
+
+                      <span
+                        className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
+                          isRecordingAudio ? 'animate-pulse bg-[#ea0038]' : 'bg-[#25d366]'
+                        }`}
+                        aria-hidden
+                      />
+
+                      <div
+                        className="flex h-9 min-w-0 flex-1 items-center gap-[2px] overflow-hidden px-1"
+                        aria-hidden
+                      >
+                        {(isRecordingAudio
+                          ? liveWaveBars
+                          : pendingRecordedAudio?.waveformBars || WAVEFORM_BARS
+                        ).map((amp, i) => {
+                          const h = Math.max(4, Math.round(amp * 28));
+                          const bars = isRecordingAudio
+                            ? liveWaveBars
+                            : pendingRecordedAudio?.waveformBars || WAVEFORM_BARS;
+                          const threshold = (i + 1) / bars.length;
+                          const active = !isRecordingAudio && previewProgress >= threshold;
+                          return (
+                            <span
+                              key={`live-wave-${i}`}
+                              className={`w-[2px] shrink-0 rounded-full ${
+                                isRecordingAudio
+                                  ? 'bg-[var(--wa-text)]'
+                                  : active
+                                    ? 'bg-[#53bdeb]'
+                                    : 'bg-[var(--wa-text-sec)]'
+                              }`}
+                              style={{ height: `${h}px` }}
+                            />
+                          );
+                        })}
                       </div>
-                      <button
-                        type="button"
-                        onClick={cancelCurrentRecording}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/10"
-                        aria-label="Cancelar gravação"
-                        title="Cancelar gravação sem enviar"
-                      >
-                        <span className="text-lg leading-none" aria-hidden>
-                          ✕
+
+                      <span className="shrink-0 px-1 text-[13px] tabular-nums text-[var(--wa-text)]">
+                        {isRecordingAudio
+                          ? formatRecordingElapsed(recordingElapsedSec)
+                          : formatRecordingElapsed(
+                              Math.floor(
+                                isPreviewPlaying || previewCurrentSec > 0
+                                  ? previewCurrentSec
+                                  : previewDurationSec || pendingRecordedAudio?.elapsedSec || 0
+                              )
+                            )}
+                      </span>
+
+                      {isRecordingAudio ? (
+                        <button
+                          type="button"
+                          onClick={toggleAudioRecording}
+                          disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
+                          className="wa-composer-icon-btn !h-10 !w-10 text-[#ea0038]"
+                          aria-label="Parar gravação"
+                          title="Parar"
+                        >
+                          <Pause className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+                        </button>
+                      ) : (
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center text-[#ea0038]" aria-hidden>
+                          <Mic className="h-5 w-5" strokeWidth={2} />
                         </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleAudioRecording}
-                        disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition hover:bg-[#008f6f] disabled:opacity-40"
-                        aria-label="Parar e enviar áudio"
-                        title="Parar e enviar áudio"
-                      >
-                        {sendAudioMut.isPending ? (
-                          <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        ) : (
-                          <span className="text-base font-bold leading-none" aria-hidden>
-                            ■
-                          </span>
-                        )}
-                      </button>
+                      )}
                     </div>
-                  ) : (
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isRecordingAudio) {
+                          sendAfterStopRef.current = true;
+                          toggleAudioRecording();
+                          return;
+                        }
+                        void confirmSendRecordedAudio();
+                      }}
+                      disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-[#111b21] shadow-sm transition enabled:hover:bg-[#1ebe57] disabled:opacity-40"
+                      aria-label={isRecordingAudio ? 'Enviar áudio' : 'Enviar áudio'}
+                      title="Enviar"
+                    >
+                      {sendAudioMut.isPending ? (
+                        <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#111b21] border-t-transparent" />
+                      ) : (
+                        <SendPlaneIcon className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="wa-composer-row">
+                    <ComposerEmojiGifStickerModal
+                      open={composerPickerOpen}
+                      onClose={() => setComposerPickerOpen(false)}
+                      panelRef={composerPickerPanelRef}
+                      tab={composerPickerTab}
+                      onTabChange={setComposerPickerTab}
+                      darkMode={waDark}
+                      onEmojiSelect={(emoji) => {
+                        composerDraftInputRef.current?.insertAtCursor(emoji);
+                        setComposerPickerOpen(false);
+                      }}
+                      onChooseGif={() => {
+                        gifInputRef.current?.click();
+                        setComposerPickerOpen(false);
+                      }}
+                      onChooseSticker={() => {
+                        stickerInputRef.current?.click();
+                        setComposerPickerOpen(false);
+                      }}
+                    />
+
+                    {/* Pill WA Web: + | emoji | texto | mic — tudo no mesmo fundo */}
                     <div
-                      className={`relative flex w-full border border-[#d1d7db] bg-white shadow-sm dark:border-transparent dark:bg-[#2a3942] dark:shadow-none ${
+                      className={`wa-composer-input relative ${
                         composerReplyMeta
-                          ? 'flex-col rounded-[21px]'
-                          : 'items-center gap-0.5 rounded-full px-1.5 py-1'
+                          ? 'flex-col !items-stretch !rounded-[18px] !px-1.5 py-1'
+                          : '!gap-0 !px-1.5'
                       }`}
                     >
                       {composerReplyMeta ? (
@@ -8124,191 +8398,158 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           <div className="whatsapp-composer-reply-divider" aria-hidden />
                         </>
                       ) : null}
-                      <div
-                        className={`flex w-full items-end gap-0.5 ${
-                          composerReplyMeta ? 'px-1.5 pb-1 pt-0.5' : ''
-                        }`}
-                      >
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                      <div className="flex w-full min-w-0 items-center gap-0.5">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="wa-composer-icon-btn !h-10 !w-10"
+                              aria-label="Anexar"
+                              title="Anexar"
+                            >
+                              <Plus className="h-6 w-6" strokeWidth={2} aria-hidden />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            sideOffset={8}
+                            align="start"
+                            className="min-w-[240px] rounded-xl border border-[#e9edef] bg-white p-1 shadow-xl dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]"
+                          >
+                            <DropdownMenuItem
+                              onSelect={(ev) => {
+                                ev.preventDefault();
+                                fileInputRef.current?.click();
+                              }}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:focus:bg-[var(--wa-input)]"
+                            >
+                              <FileText className="h-[18px] w-[18px] shrink-0 text-[#a67bf0]" strokeWidth={1.75} />
+                              Documento
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={(ev) => {
+                                ev.preventDefault();
+                                photosVideosInputRef.current?.click();
+                              }}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:focus:bg-[var(--wa-input)]"
+                            >
+                              <Images className="h-[18px] w-[18px] shrink-0 text-[#0386f0]" strokeWidth={1.75} />
+                              Fotos e vídeos
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={(ev) => {
+                                ev.preventDefault();
+                                if (isWhatsappGroupChatId(chatId)) return;
+                                setSendContactStep('pick');
+                                setSendContactSearch('');
+                                setSendContactSelectedIds([]);
+                                setSendContactConfirmRows([]);
+                              }}
+                              disabled={isWhatsappGroupChatId(chatId)}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 dark:text-[var(--wa-text)] dark:focus:bg-[var(--wa-input)]"
+                            >
+                              <UserRound className="h-[18px] w-[18px] shrink-0 text-[#0aabfe]" strokeWidth={1.75} />
+                              Contato
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={(ev) => {
+                                ev.preventDefault();
+                                toast.message('Envio de evento em breve.');
+                              }}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:focus:bg-[var(--wa-input)]"
+                            >
+                              <CalendarFold className="h-[18px] w-[18px] shrink-0 text-[#f04154]" strokeWidth={1.75} />
+                              Evento
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator className="my-1 bg-[#e9edef] dark:bg-[var(--wa-input)]" />
+                            <DropdownMenuItem
+                              onSelect={async (ev) => {
+                                ev.preventDefault();
+                                try {
+                                  const r = await deleteWhatsappContactCacheAll();
+                                  if (r.success) {
+                                    const deleted = r.data?.deleted ?? 0;
+                                    const rebuilt = r.data?.rebuilt ?? 0;
+                                    toast.success(
+                                      rebuilt > 0
+                                        ? `Cache limpo (${deleted} apagados). ${rebuilt} entradas regravadas a partir do CRM (Cliente/Lead).`
+                                        : `Cache do WhatsApp apagado (${deleted} registros). Nada foi regravado na hora — se o nome continuar errado, verifique o cadastro Cliente/Lead ou o nome que o WhatsApp envia ao chegar mensagem.`
+                                    );
+                                    void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+                                    if (chatId) {
+                                      void queryClient.invalidateQueries({ queryKey: ['whatsapp-contact-meta', chatId] });
+                                    }
+                                    queryClient.removeQueries({ queryKey: ['whatsapp-contact-meta'] });
+                                  } else {
+                                    toast.error('Erro ao limpar cache');
+                                  }
+                                } catch {
+                                  toast.error('Erro ao limpar cache de nomes');
+                                }
+                              }}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:focus:bg-[var(--wa-input)]"
+                            >
+                              <Trash2 className="h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[var(--wa-text-sec)]" strokeWidth={1.75} />
+                              Limpar cache de nomes
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <button
+                          ref={composerPickerTriggerRef}
+                          type="button"
+                          onClick={() => {
+                            setComposerPickerTab('emoji');
+                            setComposerPickerOpen((o) => !o);
+                          }}
+                          className="wa-composer-icon-btn !h-10 !w-10"
+                          aria-label="Emojis, GIFs e figurinhas"
+                          title="Emojis, GIFs e figurinhas"
+                          aria-expanded={composerPickerOpen}
+                        >
+                          <Smile className="h-6 w-6" strokeWidth={1.85} />
+                        </button>
+
+                        <WhatsappComposerEditor
+                          ref={composerDraftInputRef}
+                          value={draft}
+                          onChange={setDraft}
+                          onSubmit={handleSend}
+                        />
+
+                        {draft.trim() ? (
                           <button
                             type="button"
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
-                            aria-label="Anexar"
-                            title="Anexar"
+                            onClick={handleSend}
+                            disabled={!draft.trim() || lidOutboundUnresolved}
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-white transition enabled:hover:bg-[#1ebe57] disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Enviar"
                           >
-                            <Plus className="h-6 w-6" strokeWidth={1.9} aria-hidden />
+                            <SendPlaneIcon className="ml-0.5 h-5 w-5" />
                           </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          sideOffset={8}
-                          align="start"
-                          className="min-w-[240px] rounded-xl border border-[#e9edef] bg-white p-1 shadow-xl dark:border-[#2a3942] dark:bg-[#202c33]"
-                        >
-                          <DropdownMenuItem
-                            onSelect={(ev) => {
-                              ev.preventDefault();
-                              fileInputRef.current?.click();
-                            }}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={toggleAudioRecording}
+                            disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
+                            className="wa-composer-icon-btn !h-10 !w-10"
+                            aria-label="Gravar áudio WhatsApp"
+                            title="Gravar áudio (sendWhatsAppAudio)"
                           >
-                            <FileText className="h-[18px] w-[18px] shrink-0 text-[#a67bf0]" strokeWidth={1.75} />
-                            Documento
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={(ev) => {
-                              ev.preventDefault();
-                              photosVideosInputRef.current?.click();
-                            }}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
-                          >
-                            <Images className="h-[18px] w-[18px] shrink-0 text-[#0386f0]" strokeWidth={1.75} />
-                            Fotos e vídeos
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={(ev) => {
-                              ev.preventDefault();
-                              if (isWhatsappGroupChatId(chatId)) return;
-                              setSendContactStep('pick');
-                              setSendContactSearch('');
-                              setSendContactSelectedIds([]);
-                              setSendContactConfirmRows([]);
-                            }}
-                            disabled={isWhatsappGroupChatId(chatId)}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
-                          >
-                            <UserRound className="h-[18px] w-[18px] shrink-0 text-[#0aabfe]" strokeWidth={1.75} />
-                            Contato
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={(ev) => {
-                              ev.preventDefault();
-                              toast.message('Envio de evento em breve.');
-                            }}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
-                          >
-                            <CalendarFold className="h-[18px] w-[18px] shrink-0 text-[#f04154]" strokeWidth={1.75} />
-                            Evento
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator className="my-1 bg-[#e9edef] dark:bg-[#2a3942]" />
-                          <DropdownMenuItem
-                            onSelect={async (ev) => {
-                              ev.preventDefault();
-                              try {
-                                const r = await deleteWhatsappContactCacheAll();
-                                if (r.success) {
-                                  const deleted = r.data?.deleted ?? 0;
-                                  const rebuilt = r.data?.rebuilt ?? 0;
-                                  toast.success(
-                                    rebuilt > 0
-                                      ? `Cache limpo (${deleted} apagados). ${rebuilt} entradas regravadas a partir do CRM (Cliente/Lead).`
-                                      : `Cache do WhatsApp apagado (${deleted} registros). Nada foi regravado na hora — se o nome continuar errado, verifique o cadastro Cliente/Lead ou o nome que o WhatsApp envia ao chegar mensagem.`
-                                  );
-                                  void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
-                                  if (chatId) {
-                                    void queryClient.invalidateQueries({ queryKey: ['whatsapp-contact-meta', chatId] });
-                                  }
-                                  queryClient.removeQueries({ queryKey: ['whatsapp-contact-meta'] });
-                                } else {
-                                  toast.error('Erro ao limpar cache');
-                                }
-                              } catch {
-                                toast.error('Erro ao limpar cache de nomes');
-                              }
-                            }}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
-                          >
-                            <Trash2 className="h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[#8696a0]" strokeWidth={1.75} />
-                            Limpar cache de nomes
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-
-                      <button
-                        ref={composerPickerTriggerRef}
-                        type="button"
-                        onClick={() => {
-                          setComposerPickerTab('emoji');
-                          setComposerPickerOpen((o) => !o);
-                        }}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
-                        aria-label="Emojis, GIFs e figurinhas"
-                        title="Emojis, GIFs e figurinhas"
-                        aria-expanded={composerPickerOpen}
-                      >
-                        <span className="relative inline-flex h-[24px] w-[24px] items-center justify-center" aria-hidden>
-                          <Sticker className="h-[20px] w-[20px]" strokeWidth={1.85} />
-                          <Smile
-                            className="absolute -bottom-0.5 -right-0.5 h-[12px] w-[12px] rounded-[3px] bg-white stroke-[#54656f] dark:bg-[#2a3942] dark:stroke-[#8696a0]"
-                            strokeWidth={2.2}
-                          />
-                        </span>
-                      </button>
-
-                      <ComposerEmojiGifStickerModal
-                        open={composerPickerOpen}
-                        onClose={() => setComposerPickerOpen(false)}
-                        panelRef={composerPickerPanelRef}
-                        tab={composerPickerTab}
-                        onTabChange={setComposerPickerTab}
-                        darkMode={
-                          typeof document !== 'undefined' &&
-                          document.documentElement.classList.contains('dark')
-                        }
-                        onEmojiSelect={(emoji) => {
-                          composerDraftInputRef.current?.insertAtCursor(emoji);
-                          setComposerPickerOpen(false);
-                        }}
-                        onChooseGif={() => {
-                          gifInputRef.current?.click();
-                          setComposerPickerOpen(false);
-                        }}
-                        onChooseSticker={() => {
-                          stickerInputRef.current?.click();
-                          setComposerPickerOpen(false);
-                        }}
-                      />
-
-                      <WhatsappComposerEditor
-                        ref={composerDraftInputRef}
-                        value={draft}
-                        onChange={setDraft}
-                        onSubmit={handleSend}
-                      />
-                      {draft.trim() ? (
-                        <button
-                          type="button"
-                          onClick={handleSend}
-                          disabled={!draft.trim() || lidOutboundUnresolved}
-                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label="Enviar"
-                        >
-                          <SendPlaneIcon className="ml-0.5 h-5 w-5" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={toggleAudioRecording}
-                          disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
-                          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition-colors hover:bg-[#00a884] hover:text-white hover:[&_svg]:stroke-[2.5] disabled:opacity-40 dark:text-[#8696a0] dark:hover:bg-[#00a884] dark:hover:text-white"
-                          aria-label="Gravar áudio WhatsApp"
-                          title="Gravar áudio (sendWhatsAppAudio)"
-                        >
-                          {sendAudioMut.isPending ? (
-                            <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent dark:border-[#e9edef]" />
-                          ) : (
-                            <Mic
-                              className="pointer-events-none h-6 w-6 shrink-0 text-inherit"
-                              strokeWidth={1.85}
-                              aria-hidden
-                            />
-                          )}
-                        </button>
-                      )}
+                            {sendAudioMut.isPending ? (
+                              <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            ) : (
+                              <Mic
+                                className="pointer-events-none h-6 w-6 shrink-0 text-inherit"
+                                strokeWidth={1.85}
+                                aria-hidden
+                              />
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </footer>
             )}
 
@@ -8327,33 +8568,33 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             {sendContactStep !== 'idle' ? (
               <div className="absolute inset-0 z-[200] flex items-end justify-center bg-black/35 p-3 backdrop-blur-[2px] sm:items-center">
                 {sendContactStep === 'pick' ? (
-                  <div className="flex h-[min(560px,88vh)] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]">
-                    <div className="flex shrink-0 items-center gap-1 border-b border-[#e9edef] px-1 py-1 dark:border-[#2a3942]">
+                  <div className="flex h-[min(560px,88vh)] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+                    <div className="flex shrink-0 items-center gap-1 border-b border-[#e9edef] px-1 py-1 dark:border-[var(--wa-border)]">
                       <button
                         type="button"
                         onClick={closeSendContactFlow}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#e9edef] dark:hover:bg-white/10"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:hover:bg-white/10"
                         aria-label="Fechar"
                       >
                         ✕
                       </button>
                       <div className="flex-1 text-center">
-                        <p className="text-[16px] font-semibold text-[#111b21] dark:text-[#e9edef]">Enviar contatos</p>
-                        <p className="text-[11px] font-medium text-[#667781] dark:text-[#8696a0]">Agenda S3E</p>
+                        <p className="text-[16px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">Enviar contatos</p>
+                        <p className="text-[11px] font-medium text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Agenda S3E</p>
                       </div>
                       <span className="w-10 shrink-0" aria-hidden />
                     </div>
                     <div className="shrink-0 px-3 pb-2 pt-2">
-                      <div className="flex items-center gap-2 rounded-full border-2 border-[#00a884] bg-white px-3 py-1.5 dark:bg-[#2a3942]">
-                        <Search className="h-[18px] w-[18px] shrink-0 text-[#8696a0]" strokeWidth={2} aria-hidden />
+                      <div className="flex items-center gap-2 rounded-full border-2 border-[#25d366] bg-white px-3 py-1.5 dark:bg-[var(--wa-input)]">
+                        <Search className="h-[18px] w-[18px] shrink-0 text-[var(--wa-text-sec)]" strokeWidth={2} aria-hidden />
                         <input
                           value={sendContactSearch}
                           onChange={(e) => setSendContactSearch(e.target.value)}
                           placeholder="Pesquisar nome, empresa ou número"
-                          className="min-w-0 flex-1 bg-transparent text-[15px] text-[#111b21] outline-none placeholder:text-[#8696a0] dark:text-[#e9edef]"
+                          className="min-w-0 flex-1 bg-transparent text-[15px] text-[#111b21] outline-none placeholder:text-[var(--wa-text-sec)] dark:text-[var(--wa-text)]"
                         />
                       </div>
-                      <p className="mt-1.5 px-1 text-[11px] text-[#667781] dark:text-[#8696a0]">
+                      <p className="mt-1.5 px-1 text-[11px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">
                         Até {WA_SEND_CONTACT_MAX} contatos · intervalo de {WA_SEND_CONTACT_API_GAP_MS} ms entre envios na API
                         {sendPickerLayout.hiddenCount > 0 ? (
                           <span className="mt-1 block text-amber-800 dark:text-amber-200">
@@ -8366,15 +8607,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     <div className="min-h-0 flex-1 overflow-y-auto wa-scroll">
                       {sendContactPickerLoading ? (
                         <div className="flex justify-center py-16">
-                          <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                          <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                         </div>
                       ) : !sendContactFilteredRows.length ? (
-                        <p className="px-4 py-10 text-center text-[14px] text-[#667781] dark:text-[#8696a0]">Nenhum contato encontrado.</p>
+                        <p className="px-4 py-10 text-center text-[14px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">Nenhum contato encontrado.</p>
                       ) : (
                         <>
                           {sendContactOtherRows.length ? (
                             <div>
-                              <p className="sticky top-0 z-[1] bg-[#f0f2f5] px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:bg-[#1e2a31] dark:text-[#8696a0]">
+                              <p className="sticky top-0 z-[1] bg-[#f0f2f5] px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--wa-text-muted)] dark:bg-[#1e2a31] dark:text-[var(--wa-text-sec)]">
                                 Agenda S3E
                               </p>
                               {sendContactOtherRows.map((row) => {
@@ -8397,7 +8638,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                 return (
                                   <label
                                     key={row.id}
-                                    className={`flex cursor-pointer items-center gap-3 border-b border-[#f0f2f5] px-2 py-2.5 transition hover:bg-[#f7f5f3] dark:border-[#2a3942] dark:hover:bg-[#2a3942]/50 ${
+                                    className={`flex cursor-pointer items-center gap-3 border-b border-[#f0f2f5] px-2 py-2.5 transition hover:bg-[#f7f5f3] dark:border-[var(--wa-border)] dark:hover:bg-[var(--wa-input)]/50 ${
                                       !sendable ? 'cursor-not-allowed opacity-55' : ''
                                     }`}
                                   >
@@ -8411,8 +8652,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                     <span
                                       className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded border-2 ${
                                         checked
-                                          ? 'border-[#00a884] bg-[#00a884] text-white'
-                                          : 'border-[#cfd4d8] bg-white dark:border-[#536471] dark:bg-[#202c33]'
+                                          ? 'border-[#25d366] bg-[#25d366] text-white'
+                                          : 'border-[#cfd4d8] bg-white dark:border-[#536471] dark:bg-[var(--wa-panel-header)]'
                                       }`}
                                       aria-hidden
                                     >
@@ -8426,7 +8667,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                     />
                                     <div className="min-w-0 flex-1">
                                       <div className="flex items-center gap-1.5">
-                                        <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">
+                                        <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[var(--wa-text)]">
                                           {primary}
                                         </p>
                                         {showNovoBadge ? (
@@ -8439,7 +8680,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                         ) : null}
                                       </div>
                                       {subLine ? (
-                                        <p className="truncate text-[13px] text-[#667781] dark:text-[#8696a0]">{subLine}</p>
+                                        <p className="truncate text-[13px] text-[var(--wa-text-muted)] dark:text-[var(--wa-text-sec)]">{subLine}</p>
                                       ) : null}
                                     </div>
                                   </label>
@@ -8450,15 +8691,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         </>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-3 py-2.5 dark:border-[#2a3942] dark:bg-[#1e2a31]">
-                      <div className="min-w-0 flex-1 truncate text-[14px] text-[#111b21] dark:text-[#e9edef]">
+                    <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-3 py-2.5 dark:border-[var(--wa-border)] dark:bg-[#1e2a31]">
+                      <div className="min-w-0 flex-1 truncate text-[14px] text-[#111b21] dark:text-[var(--wa-text)]">
                         {sendContactSelectedIds.length ? sendContactSelectedSummary || 'Selecionado(s)' : 'Nenhum selecionado'}
                       </div>
                       <button
                         type="button"
                         disabled={!sendContactSelectedIds.length}
                         onClick={openSendContactConfirmStep}
-                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white shadow-md transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-35"
+                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-white shadow-md transition enabled:hover:bg-[#1ebe57] disabled:cursor-not-allowed disabled:opacity-35"
                         aria-label="Continuar"
                         title="Continuar"
                       >
@@ -8467,17 +8708,17 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="relative flex h-[min(520px,86vh)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]">
-                    <div className="flex shrink-0 items-start gap-2 border-b border-[#e9edef] px-2 py-2 dark:border-[#2a3942]">
+                  <div className="relative flex h-[min(520px,86vh)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[var(--wa-border)] dark:bg-[var(--wa-panel-header)]">
+                    <div className="flex shrink-0 items-start gap-2 border-b border-[#e9edef] px-2 py-2 dark:border-[var(--wa-border)]">
                       <button
                         type="button"
                         onClick={() => setSendContactStep('pick')}
-                        className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#e9edef] dark:hover:bg-white/10"
+                        className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[var(--wa-text)] dark:hover:bg-white/10"
                         aria-label="Voltar"
                       >
                         <ArrowLeft className="h-5 w-5" strokeWidth={2} />
                       </button>
-                      <p className="flex-1 pt-1.5 text-[15px] font-medium leading-snug text-[#111b21] dark:text-[#e9edef]">
+                      <p className="flex-1 pt-1.5 text-[15px] font-medium leading-snug text-[#111b21] dark:text-[var(--wa-text)]">
                         Deseja enviar {sendContactConfirmRows.length}{' '}
                         {sendContactConfirmRows.length === 1 ? 'contato' : 'contatos'} para {sendContactRecipientPretty}?
                       </p>
@@ -8489,7 +8730,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         return (
                           <div
                             key={row.id}
-                            className="flex gap-3 border-b border-[#e9edef] py-3 last:border-b-0 dark:border-[#2a3942]"
+                            className="flex gap-3 border-b border-[#e9edef] py-3 last:border-b-0 dark:border-[var(--wa-border)]"
                           >
                             <ContactAvatar
                               chatId={canonicalWhatsappChatId(row.id)}
@@ -8498,15 +8739,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                               size="list"
                             />
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-[16px] font-semibold text-[#111b21] dark:text-[#e9edef]">{primary}</p>
+                              <p className="truncate text-[16px] font-semibold text-[#111b21] dark:text-[var(--wa-text)]">{primary}</p>
                               <div className="mt-1 flex items-start gap-2">
-                                <span className="mt-0.5 rounded bg-[#00a884]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#00a884]/25 dark:text-[#53d4b0]">
+                                <span className="mt-0.5 rounded bg-[#25d366]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#25d366]/25 dark:text-[#53d4b0]">
                                   Tel
                                 </span>
-                                <p className="text-[14px] text-[#111b21] dark:text-[#e9edef]">{phoneLabel}</p>
+                                <p className="text-[14px] text-[#111b21] dark:text-[var(--wa-text)]">{phoneLabel}</p>
                               </div>
                             </div>
-                            <MessageCircle className="mt-1 h-5 w-5 shrink-0 text-[#aebac1]" strokeWidth={1.75} aria-hidden />
+                            <MessageCircle className="mt-1 h-5 w-5 shrink-0 text-[var(--wa-icon)]" strokeWidth={1.75} aria-hidden />
                           </div>
                         );
                       })}
@@ -8515,7 +8756,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       type="button"
                       disabled={sendContactConfirmMut.isPending || !sendContactConfirmRows.length}
                       onClick={() => sendContactConfirmMut.mutate(sendContactConfirmRows)}
-                      className="absolute bottom-5 right-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#00a884] text-white shadow-lg transition enabled:hover:bg-[#008f6f] disabled:opacity-45"
+                      className="absolute bottom-5 right-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#25d366] text-white shadow-lg transition enabled:hover:bg-[#1ebe57] disabled:opacity-45"
                       aria-label="Enviar contatos"
                       title="Enviar"
                     >
@@ -8577,6 +8818,102 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         )}
       </div>
 
+      {contactPanelOpen && !activeIsGroup && !isWaMobile ? (
+        <WhatsAppContactInfoDrawer
+          name={headerPrimary || formatPhoneForDisplay(chatId) || 'Contato'}
+          phone={formatPhoneForDisplay(chatId)}
+          avatarUrl={whatsappProfilePictureImageUrl(
+            chatId,
+            Boolean(
+              activePreview?.cachedProfilePictureUrl ||
+                activeContactMeta?.profilePictureUrl ||
+                contactPanelOpen
+            ) && !isWhatsappProfilePictureMissing(chatId)
+          )}
+          avatarLetter={avatarLetter(headerPrimary || formatPhoneForDisplay(chatId))}
+          mediaCount={(() => {
+            const msgs = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(chatId)) ?? [];
+            return msgs.filter((m) =>
+              Boolean(m.hasMedia || m.mediaUrl || m.mediaType || m.mediaMimetype || m.mimeType || m.fileName || m.mediaFilename)
+            ).length;
+          })()}
+          mediaThumbs={(() => {
+            const msgs = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(chatId)) ?? [];
+            return msgs
+              .filter(
+                (m) =>
+                  mediaMimeCategory(
+                    m.mediaMimetype ?? m.mimeType ?? undefined,
+                    m.mediaType,
+                    m.mediaFilename || m.fileName
+                  ) === 'image'
+              )
+              .slice(-4)
+              .map((m) => {
+                const fname = repairUtf8Mojibake(m.mediaFilename || m.fileName || 'imagem');
+                const legacy = m.mediaUrl ? whatsappProviderMediaProxyUrl(m.mediaUrl, fname) + tokenQueryString() : null;
+                const byId = m.hasMedia ? whatsappMessageMediaInlineUrl(m.id) : null;
+                return { id: m.id, src: byId || legacy || '', alt: fname };
+              })
+              .filter((x) => x.src);
+          })()}
+          muted={mutedChatIds.has(canonicalWhatsappChatId(chatId))}
+          muteUntilLabel={
+            mutedChatIds.has(canonicalWhatsappChatId(chatId)) ? 'Até você desativar' : undefined
+          }
+          onClose={() => setContactPanelOpen(false)}
+          onEdit={() => {
+            setActionsPanelOpen(true);
+          }}
+          onAvatarClick={() =>
+            setProfilePhotoOverlay({
+              name: headerPrimary || formatPhoneForDisplay(chatId) || 'Contato',
+              url:
+                whatsappProfilePictureImageUrl(
+                  chatId,
+                  Boolean(
+                    activePreview?.cachedProfilePictureUrl ||
+                      activeContactMeta?.profilePictureUrl ||
+                      true
+                  )
+                ) || null,
+            })
+          }
+          onSearch={() => {
+            setInChatSearchOpen(true);
+            setContactPanelOpen(false);
+          }}
+          onStarred={() => toast.message('Mensagens favoritas ainda não estão disponíveis no CRM.')}
+          onToggleMute={() => {
+            const cid = canonicalWhatsappChatId(chatId);
+            setMutedChatIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(cid)) next.delete(cid);
+              else next.add(cid);
+              try {
+                window.localStorage.setItem('wa-chat-muted-ids', JSON.stringify([...next]));
+              } catch {
+                /* ignore */
+              }
+              return next;
+            });
+          }}
+          onTemporary={() => toast.message('Mensagens temporárias são gerenciadas no WhatsApp do celular.')}
+          onPrivacy={() => toast.message('Privacidade avançada é gerenciada no WhatsApp do celular.')}
+          onEncryption={() =>
+            toast.message('As mensagens e as ligações são protegidas com a criptografia de ponta a ponta.')
+          }
+        />
+      ) : null}
+
+      <WhatsAppProfilePhotoOverlay
+        open={Boolean(profilePhotoOverlay)}
+        name={profilePhotoOverlay?.name || ''}
+        avatarUrl={profilePhotoOverlay?.url}
+        thumbUrl={profilePhotoOverlay?.url}
+        onClose={() => setProfilePhotoOverlay(null)}
+      />
+
       {deleteConfirm ? (
         <div
           role="dialog"
@@ -8595,18 +8932,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           }}
         >
           <div
-            className="w-full max-w-[440px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#202c33]"
+            className="w-full max-w-[440px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[var(--wa-panel-header)]"
             onClick={(e) => e.stopPropagation()}
           >
             <h2
               id="wa-delete-conv-title"
-              className="text-[18px] font-medium leading-snug text-[#111b21] dark:text-[#e9edef]"
+              className="text-[18px] font-medium leading-snug text-[#111b21] dark:text-[var(--wa-text)]"
             >
               {`Tem certeza que deseja excluir a conversa${
                 firstNameOnly(deleteConfirm.label) ? ` com ${firstNameOnly(deleteConfirm.label)}` : ''
               }?`}
             </h2>
-            <p className="mt-3 text-[14px] leading-relaxed text-[#54656f] dark:text-[#aebac1]">
+            <p className="mt-3 text-[14px] leading-relaxed text-[#54656f] dark:text-[var(--wa-icon)]">
               As mensagens serão removidas do CRM e do WhatsApp. Esta ação não pode ser desfeita.
             </p>
             <div className="mt-6 flex items-center justify-end gap-2">
@@ -8614,7 +8951,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 type="button"
                 disabled={deleteConversationMut.isPending}
                 onClick={() => setDeleteConfirm(null)}
-                className="rounded-full px-5 py-2 text-[14px] font-semibold uppercase tracking-wide text-[#00a884] transition hover:bg-[#00a884]/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-[#00a884]/15"
+                className="rounded-full px-5 py-2 text-[14px] font-semibold uppercase tracking-wide text-[#25d366] transition hover:bg-[#25d366]/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-[#25d366]/15"
               >
                 Cancelar
               </button>
@@ -8695,7 +9032,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           opacity: .85;
         }
         .wa-wave-bar--active {
-          background: #00a884;
+          background: #25d366;
           opacity: 1;
         }
         .wa-wave-bar--playing {

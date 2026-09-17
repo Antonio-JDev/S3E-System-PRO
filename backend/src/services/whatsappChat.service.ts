@@ -37,13 +37,15 @@ import { shouldPromoteOrcamentoToEnviadoOnWhatsappPdf } from '../utils/orcamento
 import { normalizeStoredMediaFilename, normalizeUserFilename } from '../utils/filename.util';
 import {
   expandedStorageChatIdVariants,
+  isLidJid,
   loadWhatsappChatIdentities,
   mergeKeyForChatPreviewRow,
   normalizePhoneDigitsKey,
   recordWhatsappChatIdentity,
   resolvePhoneDigitKeysForChat,
   resolvePreferredChatIdForOutbound,
-  socketRoomsForChat
+  socketRoomsForChat,
+  tryResolveAndRegisterIdentityFromPhone
 } from './whatsappIdentity.service';
 import { upsertContatoS3eFromInboundMessage } from './contatosS3e.service';
 import * as EvoChat from './whatsappEvolutionChat.service';
@@ -95,6 +97,11 @@ export interface WhatsappProviderMessagePayload {
   notify?: string;
   name?: string;
   verifiedName?: string;
+  /** Id do provedor da mensagem citada (stanzaId / contextInfo). */
+  quotedProviderMessageId?: string | null;
+  quotedContent?: string | null;
+  quotedFromMe?: boolean | null;
+  quotedAuthorName?: string | null;
 }
 
 export interface WhatsappProviderWebhookBody {
@@ -138,7 +145,11 @@ export function toSocketDto(m: ChatMessage) {
     mimeType: m.mediaMimetype ?? null,
     fileName: m.mediaFilename ?? null,
     providerMediaId: m.providerMediaId ?? null,
-    reaction: m.reaction ?? null
+    reaction: m.reaction ?? null,
+    quotedProviderMessageId: m.quotedProviderMessageId ?? null,
+    quotedContent: m.quotedContent ?? null,
+    quotedFromMe: m.quotedFromMe ?? null,
+    quotedAuthorName: m.quotedAuthorName ?? null
   };
 }
 
@@ -591,8 +602,13 @@ function parseWhatsappOrcamentoStatusMode(raw: unknown): WhatsappOrcamentoStatus
 async function resolveOutboundDisplayName(userId: string, fallbackName?: string | null): Promise<string> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { name: true, setor: true }
+    select: { name: true, setor: true, preferences: true }
   });
+  const prefs = (user?.preferences as Record<string, unknown>) || {};
+  const custom = typeof prefs.whatsappOutboundDisplayName === 'string'
+    ? prefs.whatsappOutboundDisplayName.trim()
+    : '';
+  if (custom) return custom;
   const name = (user?.name || fallbackName || 'Usuário').trim() || 'Usuário';
   const setor = (user?.setor || '').trim();
   return setor ? `${name} - ${setor}` : name;
@@ -764,12 +780,8 @@ export async function linkWhatsappChatToCliente(chatIdRaw: string, clienteId: st
     }
   }
 
-  if (!cliente.telefone?.trim()) {
-    await prisma.cliente.update({
-      where: { id: cliente.id },
-      data: { telefone: phone }
-    });
-  }
+  // Vincular no funil NÃO altera telefone do cliente: o contato do WhatsApp
+  // pode ser só um representante; o cadastro costuma ser a empresa.
 }
 
 export async function unlinkWhatsappChatFromCliente(chatIdRaw: string): Promise<void> {
@@ -788,6 +800,17 @@ export async function unlinkWhatsappChatFromCliente(chatIdRaw: string): Promise<
     where: { id: lead.id },
     data: { clienteId: null }
   });
+
+  // Garante que o envio continue pelo número da conversa (não pelo cadastro da empresa).
+  try {
+    const phoneKeys = await resolvePhoneDigitKeysForChat(chatIdRaw);
+    const phone = phoneKeys[0] || waJidToDigits(chatId);
+    if (phone && phone.length >= 10) {
+      await tryResolveAndRegisterIdentityFromPhone(phone, isLidJid(chatId) ? chatId : undefined);
+    }
+  } catch {
+    /* best-effort — desvínculo CRM já concluído */
+  }
 }
 
 function normalizeMetaString(v: unknown): string | null {
@@ -1329,7 +1352,11 @@ async function ingestWhatsappProviderMessage(
         providerMediaId: persistProviderMediaId,
         clienteId: clienteId ?? undefined,
         contatoLeadId: contatoLeadId ?? undefined,
-        ack: pl.fromMe ? 1 : null
+        ack: pl.fromMe ? 1 : null,
+        quotedProviderMessageId: pl.quotedProviderMessageId?.trim() || undefined,
+        quotedContent: pl.quotedContent?.trim() || undefined,
+        quotedFromMe: typeof pl.quotedFromMe === 'boolean' ? pl.quotedFromMe : undefined,
+        quotedAuthorName: pl.quotedAuthorName?.trim() || undefined
       }
     });
 
@@ -1339,6 +1366,31 @@ async function ingestWhatsappProviderMessage(
     // schema interno `local-inbound:{id}.{ext}` — o `getWhatsappMediaById`
     // detecta esse prefixo e serve direto do disco.
     let finalRow = created;
+    const quoteId = (pl.quotedProviderMessageId || '').trim();
+    if (quoteId && !(finalRow.quotedContent || '').trim()) {
+      try {
+        const quoted = await prisma.chatMessage.findFirst({
+          where: { providerMessageId: quoteId },
+          select: { content: true, fromMe: true, hasMedia: true, mediaType: true }
+        });
+        if (quoted) {
+          const snippet =
+            (quoted.content || '').trim() ||
+            (quoted.hasMedia ? mediaLabel(undefined, undefined, quoted.mediaType) : '');
+          if (snippet || typeof quoted.fromMe === 'boolean') {
+            finalRow = await prisma.chatMessage.update({
+              where: { id: created.id },
+              data: {
+                ...(snippet ? { quotedContent: snippet.slice(0, 500) } : {}),
+                quotedFromMe: quoted.fromMe
+              }
+            });
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
     const inboundIsSticker = (storedType || '').toLowerCase() === 'sticker';
     if (
       persistHasMedia &&
@@ -2341,6 +2393,25 @@ export async function sendChatMessageFromUser(params: {
   const clienteId = await resolveClienteIdForChat(chatId);
   const contatoLeadId = await resolveContatoLeadIdForChat(chatId);
 
+  let quotedContent: string | undefined;
+  let quotedFromMe: boolean | undefined = params.quotedFromMe;
+  let quotedAuthorName: string | undefined;
+  const qid = (params.quotedMessageId || '').trim();
+  if (qid) {
+    const quoted = await prisma.chatMessage.findFirst({
+      where: { providerMessageId: qid },
+      select: { content: true, fromMe: true, hasMedia: true, mediaType: true }
+    });
+    if (quoted) {
+      quotedContent =
+        (quoted.content || '').trim() ||
+        (quoted.hasMedia ? mediaLabel(undefined, undefined, quoted.mediaType) : '') ||
+        undefined;
+      quotedFromMe = quoted.fromMe;
+      quotedAuthorName = quoted.fromMe ? 'Você' : undefined;
+    }
+  }
+
   const created = await prisma.chatMessage.create({
     data: {
       content: fullText,
@@ -2350,7 +2421,15 @@ export async function sendChatMessageFromUser(params: {
       providerMessageId: providerMsgId || undefined,
       ack: 1,
       clienteId: clienteId ?? undefined,
-      contatoLeadId: contatoLeadId ?? undefined
+      contatoLeadId: contatoLeadId ?? undefined,
+      ...(qid
+        ? {
+            quotedProviderMessageId: qid,
+            quotedContent: quotedContent?.slice(0, 500),
+            quotedFromMe,
+            quotedAuthorName
+          }
+        : {})
     }
   });
   emitWhatsAppMessage(created);
@@ -2429,7 +2508,13 @@ export async function sendMediaMessageFromUser(params: {
           : inferStoredMediaType(params.mimetype || '', safeFilename),
       fileSize: typeof params.fileSize === 'number' ? params.fileSize : undefined,
       clienteId: clienteId ?? undefined,
-      contatoLeadId: contatoLeadId ?? undefined
+      contatoLeadId: contatoLeadId ?? undefined,
+      ...(params.quotedMessageId?.trim()
+        ? {
+            quotedProviderMessageId: params.quotedMessageId.trim(),
+            quotedFromMe: params.quotedFromMe
+          }
+        : {})
     }
   });
 

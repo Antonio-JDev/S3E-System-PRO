@@ -181,7 +181,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
               setNovaConversaInitialNumero(undefined);
               setNovaConversaOpen(true);
             }}
-            className="flex items-center gap-1.5 rounded-md bg-[#00a884] px-3 py-2 text-sm font-medium text-white hover:bg-[#008f6f]"
+            className="flex items-center gap-1.5 rounded-md bg-[#25d366] px-3 py-2 text-sm font-medium text-white hover:bg-[#1ebe57]"
           >
             <MessageCirclePlus className="h-4 w-4" />
             Nova conversa
@@ -348,7 +348,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
                                   setNovaConversaOpen(true);
                                 }
                               }}
-                              className="flex items-center gap-1 rounded border border-[#00a884] px-2 py-1 text-xs text-[#00a884] hover:bg-[#00a884]/10"
+                              className="flex items-center gap-1 rounded border border-[#25d366] px-2 py-1 text-xs text-[#25d366] hover:bg-[#25d366]/10"
                               title="Abrir conversa no WhatsApp"
                             >
                               <MessageCirclePlus className="h-3 w-3" />

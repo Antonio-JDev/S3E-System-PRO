@@ -44,7 +44,7 @@ function labelMutationErrorMessage(
   return resp.error || fallback;
 }
 
-const PALETTE = ['#00a884', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#10b981', '#ec4899'];
+const PALETTE = ['#25d366', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#10b981', '#ec4899'];
 
 const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = ({
   open,
@@ -70,7 +70,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
     Boolean(initialLabel?.userId) &&
     initialLabel!.userId !== currentUserId;
   const [nome, setNome] = useState('');
-  const [cor, setCor] = useState<string | null>('#00a884');
+  const [cor, setCor] = useState<string | null>('#25d366');
   const [emoji, setEmoji] = useState<string | null>(null);
   const [chatIds, setChatIds] = useState<string[]>([]);
   const [scope, setScope] = useState<'personal' | 'global'>('personal');
@@ -80,7 +80,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
   useEffect(() => {
     if (!open) return;
     setNome(initialLabel?.nome || '');
-    setCor(initialLabel?.cor ?? '#00a884');
+    setCor(initialLabel?.cor ?? '#25d366');
     setEmoji(initialLabel?.emoji ?? null);
     setChatIds(initialLabel?.chatIds ?? []);
     setScope(initialLabel?.isGlobal ? 'global' : 'personal');
@@ -165,7 +165,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
 
   return (
     <div className="absolute inset-0 z-[60] flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
-      <div className="flex h-14 shrink-0 items-center gap-2 bg-[#00a884] px-4 text-white">
+      <div className="flex h-14 shrink-0 items-center gap-2 bg-[#25d366] px-4 text-white">
         <button type="button" onClick={onClose} className="rounded-full p-1 hover:bg-white/15" aria-label="Voltar">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -193,7 +193,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
         ) : null}
         <label className="block">
           <span className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">Nome da lista</span>
-          <div className="mt-1 flex items-center gap-2 border-b-2 border-[#e9edef] py-1 focus-within:border-[#00a884] dark:border-[#2a3942]">
+          <div className="mt-1 flex items-center gap-2 border-b-2 border-[#e9edef] py-1 focus-within:border-[#25d366] dark:border-[#2a3942]">
             <input
               value={nome}
               onChange={(e) => setNome(e.target.value)}
@@ -222,30 +222,30 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
           <div className="mt-4">
             <span className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">Quem pode ver este filtro?</span>
             <div className="mt-2 flex flex-col gap-2">
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#00a884] has-[:checked]:bg-[#00a884]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#00a884]/15">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#25d366] has-[:checked]:bg-[#25d366]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#25d366]/15">
                 <input
                   type="radio"
                   name="label-scope"
                   checked={scope === 'personal'}
                   onChange={() => setScope('personal')}
-                  className="h-4 w-4 accent-[#00a884]"
+                  className="h-4 w-4 accent-[#25d366]"
                 />
                 <span className="text-[14px] text-[#111b21] dark:text-[#e9edef]">Só pra mim</span>
               </label>
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#00a884] has-[:checked]:bg-[#00a884]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#00a884]/15">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#25d366] has-[:checked]:bg-[#25d366]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#25d366]/15">
                 <input
                   type="radio"
                   name="label-scope"
                   checked={scope === 'global'}
                   onChange={() => setScope('global')}
-                  className="h-4 w-4 accent-[#00a884]"
+                  className="h-4 w-4 accent-[#25d366]"
                 />
                 <span className="text-[14px] text-[#111b21] dark:text-[#e9edef]">Para todos usuários</span>
               </label>
             </div>
           </div>
         ) : initialLabel?.isGlobal && !editingAsAdmin ? (
-          <p className="mt-4 rounded-lg bg-[#00a884]/10 px-3 py-2 text-[12px] text-[#008069] dark:text-[#53d4b0]">
+          <p className="mt-4 rounded-lg bg-[#25d366]/10 px-3 py-2 text-[12px] text-[#008069] dark:text-[#53d4b0]">
             Lista compartilhada com todos os usuários do sistema.
           </p>
         ) : null}
@@ -292,9 +292,9 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
           <button
             type="button"
             onClick={handlePickChats}
-            className="mt-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-[#00a884] p-3 text-left transition hover:bg-[#00a884]/5"
+            className="mt-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-[#25d366] p-3 text-left transition hover:bg-[#25d366]/5"
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#25d366] text-white">
               <UserPlus className="h-5 w-5" />
             </span>
             <span className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
@@ -340,7 +340,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
           type="button"
           onClick={handleSave}
           disabled={!canSave}
-          className="rounded-full bg-[#00a884] px-5 py-2 text-[14px] font-medium text-white hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full bg-[#25d366] px-5 py-2 text-[14px] font-medium text-white hover:bg-[#1ebe57] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? 'Salvando…' : isEdit ? 'Salvar alterações' : 'Criar lista'}
         </button>

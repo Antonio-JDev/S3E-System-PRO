@@ -55,6 +55,8 @@ export type OrcamentoInsercaoModo = 'check' | 'ocultar';
 
 export interface PreferenciasUsuario {
   orcamentoInsercaoModo: OrcamentoInsercaoModo;
+  /** Nome customizado no prefixo das mensagens WhatsApp do operador. */
+  whatsappOutboundDisplayName?: string;
 }
 
 /** Meta de vendas global (API /api/configuracoes/meta-vendas) */
@@ -210,7 +212,10 @@ class ConfiguracoesService {
   /**
    * Salva as preferências do usuário logado
    */
-  async salvarPreferenciasUsuario(data: { orcamentoInsercaoModo?: OrcamentoInsercaoModo }) {
+  async salvarPreferenciasUsuario(data: {
+    orcamentoInsercaoModo?: OrcamentoInsercaoModo;
+    whatsappOutboundDisplayName?: string;
+  }) {
     return axiosApiService.put<PreferenciasUsuario>('/api/configuracoes/usuarios/me/preferencias', data);
   }
 }

@@ -191,6 +191,11 @@ export interface WhatsappMessageDto {
    * `whatsapp:message:reaction`.
    */
   reaction?: string | null;
+  /** Resposta a outra mensagem. */
+  quotedProviderMessageId?: string | null;
+  quotedContent?: string | null;
+  quotedFromMe?: boolean | null;
+  quotedAuthorName?: string | null;
 }
 
 export function fetchWhatsappChats() {

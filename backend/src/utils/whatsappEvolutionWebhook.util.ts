@@ -34,6 +34,67 @@ function asTrimmedString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
+function extractQuotedSnippetFromQuotedMessage(quotedMessage: unknown): string {
+  if (!quotedMessage || typeof quotedMessage !== 'object') return '';
+  const qm = quotedMessage as Record<string, unknown>;
+  if (typeof qm.conversation === 'string' && qm.conversation.trim()) return qm.conversation.trim();
+  if (qm.extendedTextMessage && typeof qm.extendedTextMessage === 'object') {
+    const t = (qm.extendedTextMessage as Record<string, unknown>).text;
+    if (typeof t === 'string' && t.trim()) return t.trim();
+  }
+  if (qm.imageMessage) return 'Imagem';
+  if (qm.videoMessage) return 'Vídeo';
+  if (qm.audioMessage || qm.pttMessage) return 'Áudio';
+  if (qm.stickerMessage) return 'Figurinha';
+  if (qm.documentMessage && typeof qm.documentMessage === 'object') {
+    const fn = (qm.documentMessage as Record<string, unknown>).fileName;
+    if (typeof fn === 'string' && fn.trim()) return fn.trim();
+    return 'Documento';
+  }
+  if (qm.locationMessage) return 'Localização';
+  if (qm.contactMessage || qm.contactsArrayMessage) return 'Contato';
+  return '';
+}
+
+function extractQuoteMetaFromInner(inner: Record<string, unknown> | null): {
+  quotedProviderMessageId?: string;
+  quotedContent?: string;
+  quotedFromMe?: boolean;
+  quotedAuthorName?: string;
+} {
+  if (!inner) return {};
+  let ctx: Record<string, unknown> | null = null;
+  for (const v of Object.values(inner)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const o = v as Record<string, unknown>;
+    if (o.contextInfo && typeof o.contextInfo === 'object') {
+      ctx = o.contextInfo as Record<string, unknown>;
+      break;
+    }
+  }
+  if (!ctx && inner.contextInfo && typeof inner.contextInfo === 'object') {
+    ctx = inner.contextInfo as Record<string, unknown>;
+  }
+  if (!ctx) return {};
+
+  const stanzaId = asTrimmedString(ctx.stanzaId);
+  const snippet = extractQuotedSnippetFromQuotedMessage(ctx.quotedMessage);
+  const participant = asTrimmedString(ctx.participant);
+  const out: {
+    quotedProviderMessageId?: string;
+    quotedContent?: string;
+    quotedFromMe?: boolean;
+    quotedAuthorName?: string;
+  } = {};
+  if (stanzaId) out.quotedProviderMessageId = stanzaId;
+  if (snippet) out.quotedContent = snippet.slice(0, 500);
+  if (typeof ctx.participant === 'string' || ctx.remoteJid) {
+    // fromMe da citação: se participant vazio e fromMe no key da original — Evolution manda participant
+    out.quotedFromMe = !participant && ctx.quotedMessage != null ? undefined : undefined;
+  }
+  return out;
+}
+
 function isLidJid(jid: string): boolean {
   return jid.toLowerCase().endsWith('@lid');
 }
@@ -455,6 +516,8 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
     ack = evolutionStatusToInternalAck(rawStatus);
   }
 
+  const quoteMeta = extractQuoteMetaFromInner(inner);
+
   return {
     id: messageId,
     from,
@@ -477,6 +540,7 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
     type,
     mediaMimetype,
     mediaFilename,
+    ...quoteMeta,
     mediaUrl,
     providerMediaId,
     _data: m

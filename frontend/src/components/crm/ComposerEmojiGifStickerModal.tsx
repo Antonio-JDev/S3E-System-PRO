@@ -132,7 +132,7 @@ export function ComposerEmojiGifStickerModal({
       <button
         type="button"
         onClick={onChooseGif}
-        className="rounded-full bg-[#00a884] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#008f6f]"
+        className="rounded-full bg-[#25d366] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#1ebe57]"
       >
         Selecionar GIF
       </button>
@@ -147,7 +147,7 @@ export function ComposerEmojiGifStickerModal({
       <button
         type="button"
         onClick={onChooseSticker}
-        className="rounded-full bg-[#00a884] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#008f6f]"
+        className="rounded-full bg-[#25d366] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#1ebe57]"
       >
         Selecionar figurinha
       </button>
@@ -192,7 +192,7 @@ export function ComposerEmojiGifStickerModal({
   return (
     <div
       ref={panelRef}
-      className="absolute bottom-[calc(100%+10px)] left-0 z-[125] flex w-[min(400px,calc(100vw-32px))] max-h-[min(520px,70vh)] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]"
+      className="absolute bottom-full left-0 z-[125] mb-2 flex h-[min(420px,58vh)] w-[min(400px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]"
       role="dialog"
       aria-modal="true"
       aria-label="Emojis, GIFs e figurinhas"

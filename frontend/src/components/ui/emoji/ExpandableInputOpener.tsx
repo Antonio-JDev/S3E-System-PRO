@@ -16,7 +16,7 @@ export function ExpandableInputOpener({
 }: ExpandableInputOpenerProps) {
   const hover =
     waGreenHover
-      ? 'hover:bg-[#00a884]/14 dark:hover:bg-[#00a884]/28'
+      ? 'hover:bg-[#25d366]/14 dark:hover:bg-[#25d366]/28'
       : 'hover:bg-black/5 dark:hover:bg-white/5';
   return (
     <button

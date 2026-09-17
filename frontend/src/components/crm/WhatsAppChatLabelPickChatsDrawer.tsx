@@ -74,7 +74,7 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
 
   return (
     <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
-      <div className="flex h-14 shrink-0 items-center gap-2 bg-[#00a884] px-4 text-white">
+      <div className="flex h-14 shrink-0 items-center gap-2 bg-[#25d366] px-4 text-white">
         <button type="button" onClick={onClose} className="rounded-full p-1 hover:bg-white/15" aria-label="Voltar">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -85,7 +85,7 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
         <button
           type="button"
           onClick={handleConfirm}
-          className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-[#00a884] hover:bg-white/90"
+          className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-[#25d366] hover:bg-white/90"
         >
           OK
         </button>
@@ -99,7 +99,7 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Pesquisar nome ou número"
-            className="w-full rounded-full border border-[#e9edef] bg-[#f7f5f3] py-2 pl-9 pr-3 text-[13px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+            className="w-full rounded-full border border-[#e9edef] bg-[#f7f5f3] py-2 pl-9 pr-3 text-[13px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#25d366] focus:outline-none focus:ring-1 focus:ring-[#25d366] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
           />
         </div>
       </div>
@@ -130,7 +130,7 @@ const WhatsAppChatLabelPickChatsDrawer: React.FC<WhatsAppChatLabelPickChatsDrawe
                     <span
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 ${
                         isOn
-                          ? 'border-[#00a884] bg-[#00a884] text-white'
+                          ? 'border-[#25d366] bg-[#25d366] text-white'
                           : 'border-[#8696a0] bg-transparent text-transparent'
                       }`}
                     >

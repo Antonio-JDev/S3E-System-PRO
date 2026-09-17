@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { detectAudioContainerMime, extractAudioWaveformPeaks } from '../../utils/whatsappVoiceAudio.util';
 
 export type AudioMessageVariant = 'outgoing' | 'incoming';
 
@@ -12,19 +13,6 @@ interface AudioMessageProps {
   isVoiceNote?: boolean;
   /** Rodapé à direita (ex.: horário da mensagem + ✓✓), como no WhatsApp Web na mesma linha da duração. */
   footerRight?: React.ReactNode;
-}
-
-function normalizeAudioMimeType(mimeType: string | null | undefined, filename: string | null | undefined): string {
-  const mime = (mimeType || '').trim().toLowerCase();
-  const lowName = (filename || '').trim().toLowerCase();
-  if (mime.includes('ogg') || lowName.endsWith('.ogg') || lowName.endsWith('.oga') || lowName.endsWith('.opus')) {
-    return 'audio/ogg';
-  }
-  if (mime.includes('webm') || lowName.endsWith('.webm')) {
-    return 'audio/webm';
-  }
-  if (mime) return mime;
-  return 'audio/ogg';
 }
 
 function MicBadgeIcon(p: React.SVGProps<SVGSVGElement>) {
@@ -51,6 +39,14 @@ function PauseBarsIcon(p: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+function placeholderBars(seedKey: string, n = 40): number[] {
+  const seed = seedKey.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return Array.from({ length: n }, (_, idx) => {
+    const v = Math.sin((seed + idx * 19) * 0.11);
+    return 0.15 + Math.abs(v) * 0.75;
+  });
+}
+
 const AudioMessage: React.FC<AudioMessageProps> = ({
   src,
   mimeType,
@@ -61,21 +57,63 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const waveRef = useRef<HTMLDivElement | null>(null);
-  const resolvedMime = useMemo(() => normalizeAudioMimeType(mimeType, filename), [mimeType, filename]);
+  const objectUrlRef = useRef<string | null>(null);
+  const [playSrc, setPlaySrc] = useState<string | null>(null);
+  const [peakBars, setPeakBars] = useState<number[]>(() => placeholderBars(`${filename || ''}-${src}`));
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loadError, setLoadError] = useState(false);
 
-  const bars = useMemo(() => {
-    const seed = `${filename || ''}-${src}`.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-    return Array.from({ length: 36 }, (_, idx) => {
-      const v = Math.sin((seed + idx * 19) * 0.11);
-      return 8 + Math.round(Math.abs(v) * 22);
-    });
-  }, [filename, src]);
+  useEffect(() => {
+    let cancelled = false;
+    const prevUrl = objectUrlRef.current;
+    objectUrlRef.current = null;
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+
+    (async () => {
+      try {
+        setLoadError(false);
+        const resp = await fetch(src, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        if (cancelled) return;
+        const bytes = new Uint8Array(buf);
+        const detected = detectAudioContainerMime(bytes, mimeType || 'audio/ogg');
+        const blob = new Blob([buf], { type: detected.split(';')[0].trim() });
+        const url = URL.createObjectURL(blob);
+        objectUrlRef.current = url;
+        setPlaySrc(url);
+
+        const { peaks, durationSec } = await extractAudioWaveformPeaks(buf, 40);
+        if (cancelled) return;
+        setPeakBars(peaks);
+        if (durationSec > 0) setDuration(durationSec);
+      } catch {
+        if (cancelled) return;
+        // Fallback: toca direto da URL original (áudios recebidos via CDN costumam funcionar).
+        setPlaySrc(src);
+        setPeakBars(placeholderBars(`${filename || ''}-${src}`));
+        setLoadError(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, [src, mimeType, filename]);
+
+  const barsPx = useMemo(
+    () => peakBars.map((amp) => 8 + Math.round(Math.max(0, Math.min(1, amp)) * 22)),
+    [peakBars]
+  );
 
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
-  const activeBars = Math.round(progress * bars.length);
+  const activeBars = Math.round(progress * barsPx.length);
 
   const formatTime = (value: number): string => {
     if (!Number.isFinite(value) || value < 0) return '0:00';
@@ -87,12 +125,12 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
 
   const handleTogglePlay = async () => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !playSrc) return;
     if (audio.paused) {
       try {
         await audio.play();
       } catch {
-        /* ignore */
+        setLoadError(true);
       }
       return;
     }
@@ -126,23 +164,16 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
 
   const playBtnClass = outgoing
     ? 'inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40'
-    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#00a884] text-white transition hover:bg-[#008f6f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884]/50 dark:border-white/15';
+    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#25d366] text-white transition hover:bg-[#1ebe57] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25d366]/50 dark:border-white/15';
 
-  const barInactive = outgoing
-    ? 'bg-[#b0ceae] dark:bg-[#b0ceae]'
-    : 'bg-[#ced0d1] dark:bg-white/18';
-
+  const barInactive = outgoing ? 'bg-[#b0ceae] dark:bg-[#b0ceae]' : 'bg-[#ced0d1] dark:bg-white/18';
   const barActive = outgoing ? 'bg-[#728977] dark:bg-[#728977]' : 'bg-[#858a8d] dark:bg-[#53bdeb]';
-
   const thumbClass = outgoing
     ? 'bg-[#4fc3f7] shadow-[0_0_0_2px_rgba(0,0,0,0.12)]'
     : 'bg-[#4fc3f7] shadow-[0_0_0_2px_rgba(255,255,255,0.35)]';
-
   const timeMuted = outgoing ? 'text-white/85' : 'text-[#54656f] dark:text-[#a9b4ba]';
   const footerMetaClass = outgoing ? 'text-[#667781] dark:text-white/80' : 'text-[#667781] dark:text-[#8696a0]';
-
   const avatarRing = outgoing ? 'ring-2 ring-white/25' : 'ring-2 ring-black/8 dark:ring-white/15';
-
   const avatarBg = outgoing ? 'bg-white/20 text-white' : 'bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#e9edef]';
 
   const label = (filename || '').trim() || 'Áudio';
@@ -151,23 +182,27 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
 
   return (
     <div className="mb-0.5 w-full max-w-[min(100%,320px)] sm:max-w-[340px]">
-      <audio
-        ref={audioRef}
-        preload="metadata"
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => {
-          setIsPlaying(false);
-          setCurrentTime(0);
-        }}
-        onTimeUpdate={(e) => setCurrentTime((e.currentTarget as HTMLAudioElement).currentTime || 0)}
-        onLoadedMetadata={(e) => setDuration((e.currentTarget as HTMLAudioElement).duration || 0)}
-      >
-        <source src={src} type={resolvedMime} />
-        Seu navegador não suporta áudio.
-      </audio>
+      {playSrc ? (
+        <audio
+          ref={audioRef}
+          key={playSrc}
+          preload="metadata"
+          src={playSrc}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+          onTimeUpdate={(e) => setCurrentTime((e.currentTarget as HTMLAudioElement).currentTime || 0)}
+          onLoadedMetadata={(e) => {
+            const d = (e.currentTarget as HTMLAudioElement).duration || 0;
+            if (Number.isFinite(d) && d > 0) setDuration(d);
+          }}
+          onError={() => setLoadError(true)}
+        />
+      ) : null}
 
-      {/* Uma linha: avatar (foto placeholder) | play | waveform — alinhados ao centro, estilo WhatsApp Web */}
       <div className="flex items-center gap-3">
         <div className="relative h-11 w-11 shrink-0">
           <div
@@ -193,6 +228,7 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
         <button
           type="button"
           onClick={handleTogglePlay}
+          disabled={!playSrc}
           className={playBtnClass}
           aria-label={isPlaying ? 'Pausar áudio' : 'Reproduzir áudio'}
           title={isPlaying ? 'Pausar' : 'Reproduzir'}
@@ -227,7 +263,7 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
             }
           }}
         >
-          {bars.map((height, idx) => (
+          {barsPx.map((height, idx) => (
             <span
               key={`bar-${idx}`}
               className={`w-[2.5px] shrink-0 self-center rounded-full transition-colors duration-150 ${idx < activeBars ? barActive : barInactive}`}
@@ -246,7 +282,7 @@ const AudioMessage: React.FC<AudioMessageProps> = ({
         style={{ paddingLeft: 'calc(2.75rem + 0.75rem + 2.25rem)' }}
       >
         <span className="font-medium" title="Duração">
-          {formatTime(Number.isFinite(duration) && duration > 0 ? duration : 0)}
+          {loadError ? 'Erro' : formatTime(Number.isFinite(duration) && duration > 0 ? (isPlaying || currentTime > 0 ? currentTime : duration) : 0)}
         </span>
         {footerRight ? (
           <div className={`ml-auto flex shrink-0 items-center gap-0.5 leading-none ${footerMetaClass}`}>{footerRight}</div>

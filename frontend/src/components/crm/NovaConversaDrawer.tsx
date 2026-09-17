@@ -294,7 +294,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
     <div className={wrapperClass}>
       <div className={innerClass}>
         {/* HEADER */}
-        <div className="flex h-14 shrink-0 items-center gap-2 bg-[#00a884] px-4 text-white">
+        <div className="flex h-14 shrink-0 items-center gap-2 bg-[#25d366] px-4 text-white">
           <button
             type="button"
             onClick={() => {
@@ -344,7 +344,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="Pesquisar nome ou número"
-                  className="w-full rounded-full border border-[#e9edef] bg-[#f7f5f3] py-2 pl-9 pr-3 text-[13px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                  className="w-full rounded-full border border-[#e9edef] bg-[#f7f5f3] py-2 pl-9 pr-3 text-[13px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#25d366] focus:outline-none focus:ring-1 focus:ring-[#25d366] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
                 />
               </div>
             </div>
@@ -354,7 +354,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 onClick={() => toast.message('Para criar um grupo, use o WhatsApp do aparelho.')}
                 className="flex items-center gap-3 border-b border-[#e9edef] bg-white px-4 py-3 text-left hover:bg-[#f7f5f3] dark:border-[#2a3942] dark:bg-[#202c33] dark:hover:bg-[#2a3942]"
               >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#25d366] text-white">
                   <Users className="h-5 w-5" />
                 </span>
                 <span className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">Novo grupo</span>
@@ -368,7 +368,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 }}
                 className="flex items-center gap-3 border-b border-[#e9edef] bg-white px-4 py-3 text-left hover:bg-[#f7f5f3] dark:border-[#2a3942] dark:bg-[#202c33] dark:hover:bg-[#2a3942]"
               >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#25d366] text-white">
                   <UserPlus className="h-5 w-5" />
                 </span>
                 <span className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
@@ -379,7 +379,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
             <div className="wa-scroll min-h-0 flex-1 overflow-y-auto bg-white dark:bg-[#202c33]">
               {loading && contatos.length === 0 ? (
                 <div className="flex justify-center py-10">
-                  <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                  <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 </div>
               ) : contatos.length === 0 ? (
                 <p className="px-4 py-10 text-center text-[13px] text-[#667781] dark:text-[#8696a0]">
@@ -430,7 +430,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                     type="button"
                     onClick={() => loadContatos({ search, page: page + 1, replace: false })}
                     disabled={loading}
-                    className="rounded-full border border-[#00a884] px-4 py-1 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                    className="rounded-full border border-[#25d366] px-4 py-1 text-[12px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
                   >
                     {loading ? 'Carregando…' : 'Carregar mais'}
                   </button>
@@ -460,7 +460,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                   }
                 }}
                 placeholder="+55 (DDD) 9xxxx-xxxx"
-                className="w-full max-w-sm border-b-2 border-[#e9edef] bg-transparent pb-1 text-center text-[22px] font-medium tracking-wider text-[#111b21] focus:border-[#00a884] focus:outline-none dark:border-[#2a3942] dark:text-[#e9edef]"
+                className="w-full max-w-sm border-b-2 border-[#e9edef] bg-transparent pb-1 text-center text-[22px] font-medium tracking-wider text-[#111b21] focus:border-[#25d366] focus:outline-none dark:border-[#2a3942] dark:text-[#e9edef]"
               />
               <div className="grid w-full max-w-xs grid-cols-3 gap-2 pb-4">
                 {DIAL_KEYS.map(([k, sub]) => {
@@ -498,7 +498,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 type="button"
                 onClick={() => handleOpenConversa(phoneDraft, formatPhoneBR(phoneDraft))}
                 disabled={opening || onlyDigits(phoneDraft).length < 10}
-                className="flex items-center justify-center gap-2 rounded-full bg-[#00a884] py-2 text-[14px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                className="flex items-center justify-center gap-2 rounded-full bg-[#25d366] py-2 text-[14px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
               >
                 <MessageCirclePlus className="h-4 w-4" />
                 {opening ? 'Abrindo…' : 'Abrir conversa'}
@@ -507,7 +507,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 type="button"
                 onClick={handleOpenDetails}
                 disabled={loading || onlyDigits(phoneDraft).length < 10}
-                className="rounded-full border border-[#00a884] py-2 text-[14px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                className="rounded-full border border-[#25d366] py-2 text-[14px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
               >
                 Ver dados do contato
               </button>
@@ -551,7 +551,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                   value={draftNome}
                   onChange={(e) => setDraftNome(e.target.value)}
                   placeholder="Ex.: João Silva"
-                  className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[14px] text-[#111b21] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef]"
+                  className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[14px] text-[#111b21] focus:border-[#25d366] focus:outline-none focus:ring-1 focus:ring-[#25d366] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef]"
                 />
               </label>
               <label className="block">
@@ -560,7 +560,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                   value={draftEmpresa}
                   onChange={(e) => setDraftEmpresa(e.target.value)}
                   placeholder="Ex.: Acme LTDA"
-                  className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[14px] text-[#111b21] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef]"
+                  className="mt-1 w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[14px] text-[#111b21] focus:border-[#25d366] focus:outline-none focus:ring-1 focus:ring-[#25d366] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef]"
                 />
               </label>
             </div>
@@ -569,7 +569,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 type="button"
                 onClick={() => handleSaveContato(true)}
                 disabled={saving || opening}
-                className="rounded-full bg-[#00a884] py-2 text-[14px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
+                className="rounded-full bg-[#25d366] py-2 text-[14px] font-medium text-white hover:bg-[#1ebe57] disabled:opacity-50"
               >
                 {saving ? 'Salvando…' : opening ? 'Abrindo…' : 'Salvar e abrir conversa'}
               </button>
@@ -577,7 +577,7 @@ const NovaConversaDrawer: React.FC<NovaConversaDrawerProps> = ({
                 type="button"
                 onClick={() => handleSaveContato(false)}
                 disabled={saving}
-                className="rounded-full border border-[#00a884] py-2 text-[14px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                className="rounded-full border border-[#25d366] py-2 text-[14px] font-medium text-[#25d366] hover:bg-[#25d366]/10 disabled:opacity-50"
               >
                 {saving ? 'Salvando…' : 'Salvar contato'}
               </button>

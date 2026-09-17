@@ -197,7 +197,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   return (
     <div className="absolute inset-0 z-30 flex justify-end bg-black/40 backdrop-blur-[2px]">
       <div className="flex h-full w-full max-w-md flex-col border-l border-[#e9edef] bg-[#f0f2f5] shadow-2xl dark:border-[#2a3942] dark:bg-[#111b21]">
-        <div className="flex shrink-0 items-center justify-between bg-[#00a884] px-4 py-3 text-white">
+        <div className="flex shrink-0 items-center justify-between bg-[#25d366] px-4 py-3 text-white">
           <h3 className="text-[15px] font-semibold tracking-tight">Ações do contato</h3>
           <button
             type="button"
@@ -278,7 +278,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                 value={clienteSearch}
                 onChange={(e) => onClienteSearchChange(e.target.value)}
                 placeholder="Buscar cliente…"
-                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-8 text-[13px] text-[#111b21] outline-none transition focus:border-[#00a884] focus:bg-white focus:ring-1 focus:ring-[#00a884]/30 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:border-[#00a884] dark:focus:bg-[#111b21]"
+                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-8 text-[13px] text-[#111b21] outline-none transition focus:border-[#25d366] focus:bg-white focus:ring-1 focus:ring-[#25d366]/30 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:border-[#25d366] dark:focus:bg-[#111b21]"
               />
               {clienteSearchTrimmed ? (
                 <button
@@ -310,13 +310,13 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                           onClick={() => setSelectedClienteId(c.id)}
                           className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition ${
                             active
-                              ? 'bg-[#00a884]/12 dark:bg-[#00a884]/20'
+                              ? 'bg-[#25d366]/12 dark:bg-[#25d366]/20'
                               : 'hover:bg-white/80 dark:hover:bg-[#202c33]'
                           }`}
                         >
                           <span
                             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                              active ? 'bg-[#00a884] text-white' : 'bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#aebac1]'
+                              active ? 'bg-[#25d366] text-white' : 'bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#aebac1]'
                             }`}
                           >
                             {active ? <Check className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
@@ -339,7 +339,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
               type="button"
               disabled={!selectedClienteId || linkLoading}
               onClick={() => onLinkCliente(selectedClienteId)}
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#00a884] px-3 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#25d366] px-3 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#1ebe57] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Link2 className="h-4 w-4" />
               {linkLoading ? 'Vinculando…' : 'Vincular contato ao cliente'}
@@ -354,7 +354,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
               value={modeValue}
               onChange={(e) => onChangeMode(e.target.value as WhatsappOrcamentoStatusMode)}
               disabled={modeSaving}
-              className="mt-1.5 w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] px-3 py-2 text-[13px] text-[#111b21] outline-none focus:border-[#00a884] disabled:opacity-70 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+              className="mt-1.5 w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] px-3 py-2 text-[13px] text-[#111b21] outline-none focus:border-[#25d366] disabled:opacity-70 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
             >
               <option value="manual">Manual (como está hoje)</option>
               <option value="automatic" disabled={!autoModeAllowed}>
@@ -376,7 +376,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                 value={orcamentoSearch}
                 onChange={(e) => setOrcamentoSearch(e.target.value)}
                 placeholder="Número, título ou status…"
-                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-3 text-[13px] text-[#111b21] outline-none focus:border-[#00a884] focus:bg-white dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:bg-[#111b21]"
+                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-3 text-[13px] text-[#111b21] outline-none focus:border-[#25d366] focus:bg-white dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:bg-[#111b21]"
               />
             </div>
             <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-[#e9edef] bg-[#f0f2f5] dark:border-[#2a3942] dark:bg-[#111b21]">
@@ -396,7 +396,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                           type="button"
                           onClick={() => setSelectedOrcamentoId(o.id)}
                           className={`w-full px-3 py-2.5 text-left text-xs transition ${
-                            active ? 'bg-[#00a884]/12 dark:bg-[#00a884]/20' : 'hover:bg-white/80 dark:hover:bg-[#202c33]'
+                            active ? 'bg-[#25d366]/12 dark:bg-[#25d366]/20' : 'hover:bg-white/80 dark:hover:bg-[#202c33]'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -428,7 +428,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                     <div
                       key={`chip-${o.id}`}
                       className={`rounded-lg border px-2.5 py-2 text-left text-[11px] transition ${meta.chipClass} ${
-                        selected ? 'ring-2 ring-[#00a884]/40' : ''
+                        selected ? 'ring-2 ring-[#25d366]/40' : ''
                       }`}
                     >
                       <button
