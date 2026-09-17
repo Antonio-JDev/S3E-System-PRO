@@ -139,21 +139,10 @@ export const SidebarMenuButton = React.forwardRef<
       {...props}
     >
       {children}
-        {!collapsed && (
-        <span className="ml-auto text-gray-400 dark:text-dark-muted shrink-0">
-          <ChevronRightIcon className="h-4 w-4" />
-        </span>
-      )}
     </button>
   );
 });
 SidebarMenuButton.displayName = 'SidebarMenuButton';
-
-const ChevronRightIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="9 18 15 12 9 6" />
-  </svg>
-);
 
 export const SidebarFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
