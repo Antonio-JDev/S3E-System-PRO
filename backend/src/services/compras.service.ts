@@ -1189,24 +1189,40 @@ export class ComprasService {
                 orderBy: { dataVencimento: 'asc' }
             });
 
-            // Parsear duplicatas do xmlData
+            // Parsear duplicatas e metadados financeiros do xmlData
             let duplicatas: Array<{ numero: string; dataVencimento: string; valor: number }> = [];
+            let xmlMeta: Record<string, unknown> = {};
             if (compra.xmlData) {
                 try {
-                    const xmlMeta = JSON.parse(compra.xmlData);
+                    xmlMeta = JSON.parse(compra.xmlData) || {};
                     if (xmlMeta.duplicatas && Array.isArray(xmlMeta.duplicatas)) {
-                        duplicatas = xmlMeta.duplicatas;
+                        duplicatas = xmlMeta.duplicatas as Array<{
+                            numero: string;
+                            dataVencimento: string;
+                            valor: number;
+                        }>;
                     }
                 } catch (err) {
                     console.error('Erro ao parsear duplicatas do xmlData:', err);
                 }
             }
 
-            // Retornar compra com duplicatas e contas vinculadas
+            // Retornar compra com duplicatas, contas e totais do XML
             return {
                 ...compra,
                 duplicatas,
-                contasPagar
+                contasPagar,
+                valorICMS: xmlMeta.valorICMS ?? undefined,
+                valorIPI: xmlMeta.valorIPI ?? undefined,
+                valorTotalProdutos: xmlMeta.valorTotalProdutos ?? undefined,
+                valorTotalNota: xmlMeta.valorTotalNota ?? compra.valorTotal,
+                frete: compra.valorFrete,
+                outrasDespesas: compra.outrasDespesas,
+                valorDesconto: compra.valorDesconto,
+                statusImportacao: xmlMeta.statusImportacao ?? undefined,
+                condicoesPagamento: xmlMeta.condicoesPagamento ?? undefined,
+                parcelas: xmlMeta.parcelas ?? undefined,
+                dataPrimeiroVencimento: xmlMeta.dataPrimeiroVencimento ?? undefined,
             };
         } catch (error) {
             console.error('Erro ao buscar compra:', error);

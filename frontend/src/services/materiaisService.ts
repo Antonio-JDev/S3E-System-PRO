@@ -1,6 +1,17 @@
 import { axiosApiService } from './axiosApi';
 import { ENDPOINTS } from '../config/api';
 
+/** Alias NF-e (MaterialFornecedorAlias): EAN / cProd por fornecedor. */
+export interface MaterialFornecedorAliasResumo {
+  id: string;
+  ean?: string | null;
+  codigoFornecedor?: string | null;
+  nomeOriginal?: string | null;
+  fornecedorId?: string;
+  updatedAt?: string;
+  fornecedor?: { id: string; nome: string } | null;
+}
+
 export interface Material {
   id: string;
   nome: string; // Nome do material
@@ -24,6 +35,11 @@ export interface Material {
     id: string;
     nome: string;
   };
+  /** Presente no GET por ID (aliases de fornecedor com ean/cProd). */
+  aliasesFornecedor?: MaterialFornecedorAliasResumo[];
+  /** Enviados no PUT/POST para upsert em MaterialFornecedorAlias (não são colunas de Material). */
+  ean?: string | null;
+  codigoFornecedor?: string | null;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -261,12 +277,21 @@ class MateriaisService {
   /**
    * Atualizar material
    */
-  async updateMaterial(id: string, data: Partial<Material>) {
+  async updateMaterial(id: string, data: Partial<Material> & {
+    ean?: string | null;
+    codigoFornecedor?: string | null;
+    aliasesCodigos?: Array<{
+      id?: string | null;
+      fornecedorId: string;
+      ean?: string | null;
+      codigoFornecedor?: string | null;
+    }>;
+  }) {
     try {
       console.log('✏️ Atualizando material:', id);
-      
+
       const response = await axiosApiService.put<Material>(`${ENDPOINTS.MATERIAIS}/${id}`, data);
-      
+
       if (response.success && response.data) {
         console.log('✅ Material atualizado com sucesso:', response.data.descricao);
         return {
@@ -279,15 +304,18 @@ class MateriaisService {
         return {
           success: false,
           data: null,
-          message: 'Erro ao atualizar material'
+          message: response.error
+            || (response as { message?: string }).message
+            || 'Erro ao atualizar material'
         };
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Erro ao atualizar material:', error);
+      const err = error as { response?: { data?: { error?: string; message?: string } }; message?: string };
       return {
         success: false,
         data: null,
-        message: 'Erro ao atualizar material'
+        message: err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Erro ao atualizar material'
       };
     }
   }

@@ -3,6 +3,11 @@ import { prisma } from '../lib/prisma';
 import { XMLParser } from 'fast-xml-parser';
 import { ComprasService, CompraPayload, CompraNfDuplicadaError } from '../services/compras.service';
 import { matchMaterial, normalizarEan, normalizarCodigoFornecedor } from '../services/materialFornecedorAlias.service';
+import { vincularCompraItemAoMaterial } from '../services/vincularCompraItemMaterial.service';
+import {
+  ajustarCompraComXml,
+  AjustarCompraXmlError,
+} from '../services/ajustarCompraXml.service';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_'
@@ -515,6 +520,7 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
     const valorFrete = parseFloat(totais.vFrete || '0');
     const outrasDespesas = parseFloat(totais.vOutro || '0');
     const valorIPI = parseFloat(totais.vIPI || '0');
+    const valorICMS = parseFloat(totais.vICMS || '0');
     const valorTotalProdutos = parseFloat(totais.vProd || '0');
     const valorTotalNota = parseFloat(totais.vNF || '0');
 
@@ -549,6 +555,7 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         valorFrete,
         outrasDespesas,
         valorIPI,
+        valorICMS,
         valorTotalProdutos,
         valorTotalNota,
         parcelas
@@ -557,6 +564,55 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error('Erro ao fazer parse do XML:', error);
     res.status(500).json({ error: 'Erro ao processar XML. Verifique se o arquivo é válido.' });
+  }
+};
+
+/**
+ * Ajusta compra existente reimportando o XML da mesma NF (não cria nova compra).
+ * Body: { xml: string }
+ */
+export const ajustarCompraComXML = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const xmlContent = req.body?.xml;
+
+    if (!id) {
+      res.status(400).json({ success: false, error: 'ID da compra é obrigatório' });
+      return;
+    }
+    if (!xmlContent) {
+      res.status(400).json({ success: false, error: 'XML não fornecido' });
+      return;
+    }
+
+    const createdBy =
+      (req as any).user?.userId || (req as any).user?.id || (req as any).user?.email || null;
+
+    const resultado = await ajustarCompraComXml(id, String(xmlContent), createdBy);
+
+    res.json({
+      success: true,
+      message: `Compra ajustada: ${resultado.itensAtualizados} item(ns) atualizado(s), ${resultado.aliasesAtualizados} alias(es) sincronizado(s).`,
+      data: resultado.compra,
+      itensAtualizados: resultado.itensAtualizados,
+      aliasesAtualizados: resultado.aliasesAtualizados,
+      totais: resultado.totais,
+    });
+  } catch (error) {
+    if (error instanceof AjustarCompraXmlError) {
+      res.status(error.status).json({
+        success: false,
+        error: error.message,
+        message: error.message,
+      });
+      return;
+    }
+    console.error('Erro ao ajustar compra com XML:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao ajustar compra com XML',
+      message: error instanceof Error ? error.message : 'Erro desconhecido',
+    });
   }
 };
 
@@ -886,6 +942,60 @@ export const atualizarFracionamentoItem = async (req: Request, res: Response): P
     res.status(500).json({
       success: false,
       error: error.message || 'Erro ao atualizar fracionamento'
+    });
+  }
+};
+
+/**
+ * Vincula um item de compra a um material do estoque e grava EAN/cProd no alias do fornecedor.
+ * PUT /api/compras/:compraId/items/:itemId/vincular-material
+ * Body: { materialId, ean?, codigoFornecedor? }
+ */
+export const vincularItemAoMaterial = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { compraId, itemId } = req.params;
+    const { materialId, ean, codigoFornecedor } = req.body || {};
+    const userId = (req as any).user?.id || (req as any).userId || null;
+
+    if (!materialId || typeof materialId !== 'string') {
+      res.status(400).json({
+        success: false,
+        error: 'Informe materialId do estoque para vincular.',
+      });
+      return;
+    }
+
+    const result = await vincularCompraItemAoMaterial(prisma as any, {
+      compraId,
+      compraItemId: itemId,
+      materialId,
+      ...(ean !== undefined ? { ean } : {}),
+      ...(codigoFornecedor !== undefined ? { codigoFornecedor } : {}),
+      createdBy: userId,
+    });
+
+    if (!result.ok) {
+      res.status(result.status).json({
+        success: false,
+        error: result.message,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message:
+        'Item vinculado ao estoque. EAN/cProd gravados no alias do fornecedor para matching automático nas próximas compras.',
+      data: {
+        item: result.item,
+        alias: result.alias,
+      },
+    });
+  } catch (error: any) {
+    console.error('Erro ao vincular item da compra ao material:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Erro ao vincular item ao estoque',
     });
   }
 };

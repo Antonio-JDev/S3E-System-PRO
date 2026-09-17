@@ -4,6 +4,8 @@ import {
     codigoFornecedorEstavel,
     matchMaterial,
     upsertAlias,
+    upsertCodigosManuaisMaterial,
+    resolverEanCprod,
     AliasDb,
 } from './materialFornecedorAlias.service';
 
@@ -28,6 +30,7 @@ function criarDbMock(overrides: Partial<AliasDb> = {}): AliasDb {
             findMany: jest.fn().mockResolvedValue([]),
             upsert: jest.fn().mockResolvedValue({}),
             update: jest.fn().mockResolvedValue({}),
+            create: jest.fn().mockResolvedValue({}),
         },
         material: {
             findMany: jest.fn().mockResolvedValue([]),
@@ -189,5 +192,91 @@ describe('upsertAlias', () => {
 
         const call = (db.materialFornecedorAlias.upsert as jest.Mock).mock.calls[0][0];
         expect(call.create.codigoFornecedor).toBeNull();
+    });
+});
+
+describe('resolverEanCprod', () => {
+    it('prioriza alias do fornecedor do material', () => {
+        const aliases = [
+            { fornecedorId: 'f1', ean: '7891234567895', codigoFornecedor: 'A' },
+            { fornecedorId: 'f2', ean: '1111111111111', codigoFornecedor: 'B' },
+        ];
+        expect(resolverEanCprod(aliases, 'f2')).toEqual({
+            ean: '1111111111111',
+            codigoFornecedor: 'B',
+        });
+    });
+});
+
+describe('upsertCodigosManuaisMaterial', () => {
+    it('exige fornecedor', async () => {
+        const db = criarDbMock();
+        const r = await upsertCodigosManuaisMaterial(db, {
+            materialId: 'mat-1',
+            fornecedorId: '',
+            nomeMaterial: 'X',
+            ean: '7891234567895',
+        });
+        expect(r.ok).toBe(false);
+    });
+
+    it('rejeita EAN inválido', async () => {
+        const db = criarDbMock();
+        const r = await upsertCodigosManuaisMaterial(db, {
+            materialId: 'mat-1',
+            fornecedorId: 'forn-a',
+            nomeMaterial: 'X',
+            ean: '123',
+        });
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.message).toMatch(/EAN inválido/i);
+    });
+
+    it('atualiza alias existente do material+fornecedor', async () => {
+        const db = criarDbMock();
+        (db.materialFornecedorAlias.findFirst as jest.Mock).mockResolvedValue({ id: 'alias-1' });
+
+        const r = await upsertCodigosManuaisMaterial(db, {
+            materialId: 'mat-cabo',
+            fornecedorId: 'forn-a',
+            nomeMaterial: 'Cabo',
+            ean: '7891234567895',
+            codigoFornecedor: 'CAB-25',
+        });
+
+        expect(r.ok).toBe(true);
+        expect(db.materialFornecedorAlias.update).toHaveBeenCalledWith({
+            where: { id: 'alias-1' },
+            data: expect.objectContaining({
+                ean: '7891234567895',
+                codigoFornecedor: 'CAB-25',
+                origem: 'MANUAL',
+            }),
+        });
+    });
+
+    it('cria alias quando ainda não existe', async () => {
+        const db = criarDbMock();
+
+        const r = await upsertCodigosManuaisMaterial(db, {
+            materialId: 'mat-cabo',
+            fornecedorId: 'forn-a',
+            nomeMaterial: 'Cabo Flex',
+            ean: '7891234567895',
+            codigoFornecedor: '8821',
+        });
+
+        expect(r.ok).toBe(true);
+        expect(db.materialFornecedorAlias.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    materialId: 'mat-cabo',
+                    fornecedorId: 'forn-a',
+                    ean: '7891234567895',
+                    codigoFornecedor: '8821',
+                    origem: 'MANUAL',
+                }),
+            })
+        );
     });
 });

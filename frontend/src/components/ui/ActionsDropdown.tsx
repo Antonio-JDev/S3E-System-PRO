@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-interface ActionItem {
+export interface ActionItem {
   label: string;
   icon?: React.ReactNode;
   onClick: () => void;

@@ -109,6 +109,11 @@ class ComprasService {
           ncm: ncm, // ✅ Sempre usar NCM do material quando disponível
           sku: sku, // ✅ Sempre usar SKU do material quando disponível
           unidadeMedida: unidadeMedida, // ✅ Preservar unidade de medida
+          ean: it.ean || null,
+          codigoFornecedor: it.codigoFornecedor || null,
+          quantidadeFracionada: it.quantidadeFracionada,
+          tipoEmbalagem: it.tipoEmbalagem,
+          unidadeEmbalagem: it.unidadeEmbalagem,
           material: it.material, // ✅ Preservar objeto material completo para referência
           materialVinculado: it.materialVinculado || it.material, // ✅ Preservar materialVinculado (ou usar material como fallback)
           matchAutomatico: it.matchAutomatico // ✅ Preservar flag de match automático
@@ -130,6 +135,7 @@ class ComprasService {
       valorTotalProdutos: compraDTO.valorTotalProdutos,
       frete: compraDTO.frete,
       valorIPI: compraDTO.valorIPI,
+      valorICMS: compraDTO.valorICMS,
       outrasDespesas: compraDTO.outrasDespesas,
       valorDesconto: compraDTO.valorDesconto ?? 0,
       valorTotalNota: compraDTO.valorTotalNota,
@@ -252,6 +258,13 @@ class ComprasService {
   }
 
   /**
+   * Ajusta compra existente reimportando o XML da mesma NF (não cria nova).
+   */
+  async ajustarCompraComXML(compraId: string, xmlText: string) {
+    return axiosApiService.post<any>(`/api/compras/${compraId}/ajustar-xml`, { xml: xmlText });
+  }
+
+  /**
    * Cancelar compra
    */
   async cancelarCompra(id: string) {
@@ -281,6 +294,20 @@ class ComprasService {
         error: 'Erro de conexão ao cancelar compra'
       };
     }
+  }
+
+  /**
+   * Vincular item de compra existente a um material do estoque (grava alias EAN/cProd).
+   */
+  async vincularItemAoMaterial(
+    compraId: string,
+    itemId: string,
+    payload: { materialId: string; ean?: string | null; codigoFornecedor?: string | null }
+  ) {
+    return axiosApiService.put<any>(
+      `/api/compras/${compraId}/items/${itemId}/vincular-material`,
+      payload
+    );
   }
 
   /**

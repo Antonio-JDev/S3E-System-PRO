@@ -188,6 +188,18 @@ export interface MaterialItem {
     };
     supplierName?: string; // Alias para compatibilidade
     ativo?: boolean;
+    /** EAN / cProd via MaterialFornecedorAlias (não são colunas do Material). */
+    ean?: string | null;
+    codigoFornecedor?: string | null;
+    aliasesFornecedor?: Array<{
+        id: string;
+        ean?: string | null;
+        codigoFornecedor?: string | null;
+        nomeOriginal?: string | null;
+        fornecedorId?: string;
+        updatedAt?: string;
+        fornecedor?: { id: string; nome: string } | null;
+    }>;
 }
 
 // Materiais vinculados a projetos (BOM)

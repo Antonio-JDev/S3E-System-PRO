@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getCompras, getCompraById, createCompra, updateCompra, updateCompraStatus, receberRemessaParcial, receberComAssociacoes, parseXML, deleteCompra, cancelarCompra, atualizarFracionamentoItem } from '../controllers/comprasController';
+import { getCompras, getCompraById, createCompra, updateCompra, updateCompraStatus, receberRemessaParcial, receberComAssociacoes, parseXML, ajustarCompraComXML, deleteCompra, cancelarCompra, atualizarFracionamentoItem, vincularItemAoMaterial } from '../controllers/comprasController';
 import { FracionamentoEstoqueController } from '../controllers/fracionamentoEstoqueController';
 import { authenticate, authorize } from '../middlewares/auth';
 
@@ -17,12 +17,14 @@ router.put('/:id/receber-parcial', receberRemessaParcial);
 router.put('/:id/receber-com-associacoes', receberComAssociacoes); // Nova rota para receber com verificação de duplicatas
 router.put('/:id/cancelar', cancelarCompra); // Cancelar compra
 router.post('/parse-xml', parseXML);
+router.post('/:id/ajustar-xml', ajustarCompraComXML);
 router.delete('/:id', authorize('admin', 'desenvolvedor'), deleteCompra);
 
 // Rotas de fracionamento
 router.get('/fracionamento/pendentes', FracionamentoEstoqueController.buscarComprasPendentes);
 router.post('/fracionamento/processar', FracionamentoEstoqueController.processarAtualizacoes);
 router.put('/:compraId/items/:itemId/fracionamento', atualizarFracionamentoItem);
+router.put('/:compraId/items/:itemId/vincular-material', vincularItemAoMaterial);
 
 export default router;
 

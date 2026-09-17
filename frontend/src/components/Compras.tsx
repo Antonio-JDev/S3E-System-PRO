@@ -8,7 +8,9 @@ import { obrasService, type Obra } from '../services/obrasService';
 import { projetosService } from '../services/projetosService';
 import { formatDateBR, parseLocalDate } from '../utils/dateUtils';
 import ViewToggle from './ui/ViewToggle';
+import ActionsDropdown from './ui/ActionsDropdown';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { buildCrudActions } from '../utils/buildCrudActions';
 import { AuthContext } from '../contexts/AuthContext';
 import EditarFracionamentoModal from './EditarFracionamentoModal';
 import MaterialDetailsModal, { type MaterialDetailsItem } from './modals/MaterialDetailsModal';
@@ -95,10 +97,10 @@ interface ParsedXMLData {
 
 const getStatusClass = (status: PurchaseStatus) => {
     switch (status) {
-        case PurchaseStatus.Recebido: return 'bg-green-100 text-green-800 ring-1 ring-green-200';
-        case PurchaseStatus.Pendente: return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
-        case PurchaseStatus.Cancelado: return 'bg-red-100 text-red-800 ring-1 ring-red-200';
-        default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
+        case PurchaseStatus.Recebido: return 'bg-green-100 text-green-800 ring-1 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-800';
+        case PurchaseStatus.Pendente: return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:ring-yellow-800';
+        case PurchaseStatus.Cancelado: return 'bg-red-100 text-red-800 ring-1 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-800';
+        default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700';
     }
 };
 
@@ -253,6 +255,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         open: false,
         message: '',
     });
+    const [purchaseToAjustarXml, setPurchaseToAjustarXml] = useState<PurchaseOrder | null>(null);
+    const [showAjustarXmlModal, setShowAjustarXmlModal] = useState(false);
+    const [ajustarXmlFile, setAjustarXmlFile] = useState<File | null>(null);
+    const [ajustarXmlError, setAjustarXmlError] = useState<string | null>(null);
+    const [isAjustandoXml, setIsAjustandoXml] = useState(false);
     
     // Estados para recebimento de remessa
     const [isReceivingModalOpen, setIsReceivingModalOpen] = useState(false);
@@ -383,6 +390,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [materialVisualizando, setMaterialVisualizando] = useState<{ itemIndex: number; material: any } | null>(null);
     const [isMaterialDetailsModalOpen, setIsMaterialDetailsModalOpen] = useState(false);
     const [selectedMaterialItem, setSelectedMaterialItem] = useState<MaterialDetailsItem | null>(null);
+    /** Item da compra em visualização sendo vinculado ao estoque */
+    const [vincularItemIdDetalhe, setVincularItemIdDetalhe] = useState<string | null>(null);
+    const [buscaVincularDetalhe, setBuscaVincularDetalhe] = useState('');
+    const [vincularDetalheLoading, setVincularDetalheLoading] = useState(false);
 
     // Carregar materiais do estoque
     useEffect(() => {
@@ -413,6 +424,46 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             (m.sku || '').toLowerCase().includes(busca.toLowerCase()) ||
             (m.descricao || '').toLowerCase().includes(busca.toLowerCase())
         ).slice(0, 10);
+    };
+
+    const getMateriaisFiltradosDetalhe = (busca: string) => {
+        if (!busca.trim()) return [];
+        const q = busca.toLowerCase();
+        return materiais.filter(m =>
+            (m.nome || '').toLowerCase().includes(q) ||
+            (m.sku || '').toLowerCase().includes(q) ||
+            (m.descricao || '').toLowerCase().includes(q)
+        ).slice(0, 10);
+    };
+
+    const confirmarVinculoItemDetalhe = async (item: any, material: any) => {
+        if (!purchaseToView?.id || !item?.id) {
+            toast.error('Item da compra sem ID — recarregue a compra e tente de novo.');
+            return;
+        }
+        setVincularDetalheLoading(true);
+        try {
+            const resp = await comprasService.vincularItemAoMaterial(purchaseToView.id, item.id, {
+                materialId: material.id,
+                ...(item.ean ? { ean: item.ean } : {}),
+                ...(item.codigoFornecedor ? { codigoFornecedor: item.codigoFornecedor } : {}),
+            });
+            if ((resp as any)?.success === false) {
+                toast.error((resp as any)?.error || 'Não foi possível vincular o item');
+                return;
+            }
+            toast.success(
+                `Vinculado a "${material.nome}". Nas próximas NFs deste fornecedor com o mesmo EAN/cProd o match será automático.`
+            );
+            setVincularItemIdDetalhe(null);
+            setBuscaVincularDetalhe('');
+            const refreshed = await comprasService.getCompraById(purchaseToView.id);
+            setPurchaseToView(refreshed);
+        } catch (error: any) {
+            toast.error(error?.response?.data?.error || error?.message || 'Erro ao vincular ao estoque');
+        } finally {
+            setVincularDetalheLoading(false);
+        }
     };
 
     // Função para vincular material a um item
@@ -963,7 +1014,11 @@ const filteredPurchases = useMemo(() => {
         setIsReceivingModalOpen(false);
         setPurchaseToView(null);
     });
-    useEscapeKey(!!purchaseToView, () => setPurchaseToView(null));
+    useEscapeKey(!!purchaseToView, () => {
+        setPurchaseToView(null);
+        setVincularItemIdDetalhe(null);
+        setBuscaVincularDetalhe('');
+    });
     useEscapeKey(!!purchaseToDelete, () => setPurchaseToDelete(null));
 
     const limparFormularioAdicao = () => {
@@ -1598,8 +1653,141 @@ const filteredPurchases = useMemo(() => {
         setPurchaseToCancel(null);
     };
 
+    const handleConfirmarAjusteXml = async () => {
+        if (!purchaseToAjustarXml?.id || !ajustarXmlFile) {
+            setAjustarXmlError('Selecione o arquivo XML desta nota fiscal.');
+            return;
+        }
+        const compraIdAjuste = purchaseToAjustarXml.id;
+        setIsAjustandoXml(true);
+        setAjustarXmlError(null);
+        try {
+            const xmlContent = await readFileAsText(ajustarXmlFile);
+            const resp = await comprasService.ajustarCompraComXML(compraIdAjuste, xmlContent);
+            const ok = (resp as any)?.success !== false && !(resp as any)?.error;
+            if (!ok) {
+                const msg =
+                    (resp as any)?.error ||
+                    (resp as any)?.message ||
+                    'Não foi possível ajustar a compra com este XML.';
+                setAjustarXmlError(String(msg));
+                toast.error('XML rejeitado', { description: String(msg) });
+                return;
+            }
+            const itens = (resp as any)?.itensAtualizados ?? 0;
+            const aliases = (resp as any)?.aliasesAtualizados ?? 0;
+            toast.success('Informações da compra ajustadas', {
+                description: `${itens} item(ns) e ${aliases} alias(es) atualizados a partir do XML.`,
+            });
+            setShowAjustarXmlModal(false);
+            setPurchaseToAjustarXml(null);
+            setAjustarXmlFile(null);
+            await loadPurchaseOrders();
+            if (purchaseToView?.id === compraIdAjuste) {
+                const refreshed = await comprasService.getCompraById(compraIdAjuste);
+                setPurchaseToView(refreshed);
+            }
+        } catch (error: any) {
+            const msg =
+                error?.response?.data?.message ||
+                error?.response?.data?.error ||
+                error?.message ||
+                'Erro ao ajustar compra com XML.';
+            setAjustarXmlError(String(msg));
+            toast.error('Falha no ajuste', { description: String(msg) });
+        } finally {
+            setIsAjustandoXml(false);
+        }
+    };
+
+    const podeReceberOuCancelar = (purchase: PurchaseOrder) =>
+        purchase.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchase);
+
+    const getPurchaseRowActions = (purchase: PurchaseOrder) =>
+        buildCrudActions({
+            onView: () => {
+                void (async () => {
+                    try {
+                        setVincularItemIdDetalhe(null);
+                        setBuscaVincularDetalhe('');
+                        const compraCompleta = await comprasService.getCompraById(purchase.id);
+                        setPurchaseToView(compraCompleta);
+                    } catch (error) {
+                        console.error('Erro ao buscar compra completa:', error);
+                        toast.error('Erro ao carregar detalhes da compra');
+                        setPurchaseToView(purchase);
+                    }
+                })();
+            },
+            onEdit: () => {
+                void (async () => {
+                    try {
+                        const compraCompleta = await comprasService.getCompraById(purchase.id);
+                        handleOpenModal(compraCompleta);
+                    } catch (error) {
+                        console.error('Erro ao carregar compra para edição:', error);
+                        toast.error('Erro ao carregar compra para edição');
+                    }
+                })();
+            },
+            onDelete: () => {
+                setPurchaseToDelete(purchase);
+                setShowDeleteDialog(true);
+            },
+            showView: true,
+            showEdit: true,
+            showDelete: canDelete(user),
+            extras: [
+                {
+                    label: 'Ajustar info',
+                    variant: 'info',
+                    show: purchase.status !== PurchaseStatus.Cancelado,
+                    onClick: () => {
+                        setPurchaseToAjustarXml(purchase);
+                        setAjustarXmlFile(null);
+                        setAjustarXmlError(null);
+                        setShowAjustarXmlModal(true);
+                    },
+                    icon: (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                    ),
+                },
+                {
+                    label: 'Receber',
+                    variant: 'success',
+                    show: podeReceberOuCancelar(purchase),
+                    onClick: () => {
+                        setPurchaseToView(purchase);
+                        handleOpenReceivingModal();
+                    },
+                    icon: (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                    ),
+                },
+                {
+                    label: 'Cancelar',
+                    variant: 'danger',
+                    show: podeReceberOuCancelar(purchase),
+                    onClick: () => {
+                        setPurchaseToCancel(purchase);
+                        setShowCancelDialog(true);
+                    },
+                    icon: <XMarkIcon className="w-4 h-4" />,
+                },
+            ],
+        });
+
     return (
-        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
+        <div className="min-h-screen min-w-0 p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in min-w-0">
                 <div className="flex items-center gap-4 min-w-0">
@@ -1810,88 +1998,12 @@ const filteredPurchases = useMemo(() => {
                                 </div>
                             </div>
 
-                            {/* Botões de Ação */}
-                            <div className="flex gap-2 pt-4 border-t border-gray-100">
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            // ✅ FORÇAR recarregamento completo sempre que abrir o modal
-                                            console.log('🔄 Carregando detalhes completos da compra:', purchase.id);
-                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
-                                            console.log('✅ Compra carregada:', compraCompleta);
-                                            console.log('📦 Itens com dados:', compraCompleta.items?.map((it: any) => ({
-                                                nome: it.productName,
-                                                ncm: (it as any).material?.ncm || (it as any).ncm,
-                                                sku: (it as any).material?.sku || (it as any).sku
-                                            })));
-                                            setPurchaseToView(compraCompleta);
-                                        } catch (error) {
-                                            console.error('Erro ao buscar compra completa:', error);
-                                            toast.error('Erro ao carregar detalhes da compra');
-                                            setPurchaseToView(purchase);
-                                        }
-                                    }}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
-                                >
-                                    <EyeIcon className="w-4 h-4" />
-                                    Ver Detalhes
-                                </button>
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            console.log('✏️ Carregando compra para edição:', purchase.id);
-                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
-                                            handleOpenModal(compraCompleta);
-                                        } catch (error) {
-                                            console.error('Erro ao carregar compra para edição:', error);
-                                            toast.error('Erro ao carregar compra para edição');
-                                        }
-                                    }}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg transition-colors text-sm font-semibold"
-                                    title="Editar compra (parcelas e datas)"
-                                >
-                                    <PencilIcon className="w-4 h-4" />
-                                    Editar
-                                </button>
-                                {purchase.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchase) && (
-                                    <>
-                                        <button
-                                            onClick={() => {
-                                                setPurchaseToView(purchase);
-                                                handleOpenReceivingModal();
-                                            }}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                            Receber
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setPurchaseToCancel(purchase);
-                                                setShowCancelDialog(true);
-                                            }}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-sm font-semibold"
-                                        >
-                                            <XMarkIcon className="w-4 h-4" />
-                                            Cancelar
-                                        </button>
-                                    </>
-                                )}
-                                {canDelete(user) && (
-                                    <button
-                                        onClick={() => {
-                                            setPurchaseToDelete(purchase);
-                                            setShowDeleteDialog(true);
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                        title="Excluir compra (apenas Desenvolvedor/Administrador)"
-                                    >
-                                        <TrashIcon className="w-4 h-4" />
-                                        Excluir
-                                    </button>
-                                )}
+                            {/* Ações do card — dropdown único (design system) */}
+                            <div className="pt-4 border-t border-gray-100 flex justify-end">
+                                <ActionsDropdown
+                                    label="Ações"
+                                    actions={getPurchaseRowActions(purchase)}
+                                />
                             </div>
                             </div>
                         </div>
@@ -1899,29 +2011,32 @@ const filteredPurchases = useMemo(() => {
                     })}
                 </div>
             ) : (
-                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
-                    <div className="overflow-x-auto">
+                /* Visualização em Lista — colunas secundárias por breakpoint; sem min-w alto */
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border min-w-0">
+                    <div className="overflow-x-auto rounded-2xl">
                         <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-dark-border">
                                 <tr>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Compra nº</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Fornecedor</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Nº NF</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Data</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Valor Total</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Itens</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Ações</th>
+                                    <th className="px-2.5 sm:px-3 lg:px-4 py-3 text-left text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Compra nº</th>
+                                    <th className="px-2.5 sm:px-3 lg:px-4 py-3 text-left text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Fornecedor</th>
+                                    <th className="hidden lg:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-left text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Nº NF</th>
+                                    <th className="hidden md:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-left text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Data</th>
+                                    <th className="px-2.5 sm:px-3 lg:px-4 py-3 text-right text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Valor</th>
+                                    <th className="hidden xl:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-center text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Itens</th>
+                                    <th className="hidden sm:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-center text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Status</th>
+                                    <th className="sticky right-0 z-20 px-2 sm:px-3 py-3 text-center text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider bg-gray-100 dark:bg-gray-700 border-l border-gray-200 dark:border-dark-border shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                                        Ações
+                                    </th>
                                 </tr>
                             </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
+                            <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
                                 {filteredPurchases.map((purchase) => {
                                     const lateralRow = getCompraBadgeLateral(purchase);
                                     return (
-                                    <tr key={purchase.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className={`px-6 py-4 whitespace-nowrap ${getCompraRowBorderClass(purchase)}`}>
+                                    <tr key={purchase.id} className="group bg-white dark:bg-dark-bg hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
+                                        <td className={`px-2.5 sm:px-3 lg:px-4 py-3 whitespace-nowrap ${getCompraRowBorderClass(purchase)}`}>
                                             <div className="flex flex-col gap-0.5">
-                                                <span className="font-bold text-orange-700">
+                                                <span className="font-bold text-sm text-orange-700 dark:text-orange-400">
                                                     #{purchase.numeroSequencial || 'N/A'}
                                                 </span>
                                                 {lateralRow.tag && (
@@ -1929,110 +2044,51 @@ const filteredPurchases = useMemo(() => {
                                                         {lateralRow.tag}
                                                     </span>
                                                 )}
+                                                <span className="sm:hidden text-[10px] text-gray-500 dark:text-gray-400">
+                                                    {purchase.status}
+                                                </span>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="font-bold text-gray-900">{purchase.supplierName}</div>
+                                        <td className="px-2.5 sm:px-3 lg:px-4 py-3 max-w-[10rem] sm:max-w-[12rem] lg:max-w-[14rem] xl:max-w-[18rem]">
+                                            <div className="font-semibold text-sm text-gray-900 dark:text-white truncate" title={purchase.supplierName}>
+                                                {purchase.supplierName}
+                                            </div>
+                                            <div className="lg:hidden font-mono text-[10px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                                                NF {purchase.invoiceNumber || '—'}
+                                            </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="font-mono text-sm text-gray-600">{purchase.invoiceNumber}</span>
+                                        <td className="hidden lg:table-cell px-2.5 sm:px-3 lg:px-4 py-3 max-w-[7rem]">
+                                            <span className="font-mono text-xs text-gray-600 dark:text-gray-300 truncate block" title={purchase.invoiceNumber}>
+                                                {purchase.invoiceNumber}
+                                            </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-600">
+                                        <td className="hidden md:table-cell px-2.5 sm:px-3 lg:px-4 py-3 whitespace-nowrap">
+                                            <span className="text-xs text-gray-600 dark:text-gray-300">
                                                 {new Date(purchase.orderDate || purchase.data || new Date().toISOString()).toLocaleDateString('pt-BR')}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="font-bold text-orange-700">
+                                        <td className="px-2.5 sm:px-3 lg:px-4 py-3 text-right whitespace-nowrap">
+                                            <span className="font-bold text-sm text-orange-700 dark:text-orange-400">
                                                 R$ {(purchase.totalAmount ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-600">{purchase.items.length} item(s)</span>
+                                        <td className="hidden xl:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-center whitespace-nowrap">
+                                            <span className="text-xs text-gray-600 dark:text-gray-300">{purchase.items.length}</span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(purchase.status)}`}>
+                                        <td className="hidden sm:table-cell px-2.5 sm:px-3 lg:px-4 py-3 text-center whitespace-nowrap">
+                                            <span className={`inline-block px-2 py-1 text-[11px] font-bold rounded-md shadow-sm ${getStatusClass(purchase.status)}`}>
                                                 {purchase.status === PurchaseStatus.Pendente && '⏳ '}
                                                 {purchase.status === PurchaseStatus.Recebido && '✅ '}
                                                 {purchase.status === PurchaseStatus.Cancelado && '❌ '}
                                                 {purchase.status}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    onClick={async () => {
-                                                        try {
-                                                            // ✅ FORÇAR recarregamento completo sempre que abrir o modal
-                                                            console.log('🔄 Carregando detalhes completos da compra:', purchase.id);
-                                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
-                                                            console.log('✅ Compra carregada:', compraCompleta);
-                                                            setPurchaseToView(compraCompleta);
-                                                        } catch (error) {
-                                                            console.error('Erro ao buscar compra completa:', error);
-                                                            toast.error('Erro ao carregar detalhes da compra');
-                                                            setPurchaseToView(purchase);
-                                                        }
-                                                    }}
-                                                    className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
-                                                    title="Ver detalhes"
-                                                >
-                                                    <EyeIcon className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={async () => {
-                                                        try {
-                                                            console.log('✏️ Carregando compra para edição:', purchase.id);
-                                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
-                                                            handleOpenModal(compraCompleta);
-                                                        } catch (error) {
-                                                            console.error('Erro ao carregar compra para edição:', error);
-                                                            toast.error('Erro ao carregar compra para edição');
-                                                        }
-                                                    }}
-                                                    className="px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg transition-colors text-sm font-semibold"
-                                                    title="Editar compra (parcelas e datas)"
-                                                >
-                                                    <PencilIcon className="w-4 h-4" />
-                                                </button>
-                                                {canDelete(user) && (
-                                                    <button
-                                                        onClick={() => {
-                                                            setPurchaseToDelete(purchase);
-                                                            setShowDeleteDialog(true);
-                                                        }}
-                                                        className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                                        title="Excluir compra (apenas Desenvolvedor/Administrador)"
-                                                    >
-                                                        <TrashIcon className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                                {purchase.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchase) && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => {
-                                                                setPurchaseToView(purchase);
-                                                                handleOpenReceivingModal();
-                                                            }}
-                                                            className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
-                                                            title="Receber remessa"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                            </svg>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                setPurchaseToCancel(purchase);
-                                                                setShowCancelDialog(true);
-                                                            }}
-                                                            className="px-3 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-sm font-semibold"
-                                                            title="Cancelar compra"
-                                                        >
-                                                            <XMarkIcon className="w-4 h-4" />
-                                                        </button>
-                                                    </>
-                                                )}
+                                        <td className="sticky right-0 z-10 px-2 sm:px-3 py-3 bg-white dark:bg-dark-bg group-hover:bg-gray-50 dark:group-hover:bg-dark-card border-l border-gray-200 dark:border-dark-border shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                                            <div className="flex items-center justify-center">
+                                                <ActionsDropdown
+                                                    label="Ações"
+                                                    actions={getPurchaseRowActions(purchase)}
+                                                />
                                             </div>
                                         </td>
                                     </tr>
@@ -3380,6 +3436,90 @@ const filteredPurchases = useMemo(() => {
                 </div>
             )}
 
+            {/* MODAL AJUSTAR INFO DA COMPRA (reimportar XML) */}
+            {showAjustarXmlModal && purchaseToAjustarXml && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-lg w-full border border-transparent dark:border-dark-border">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/50 dark:to-cyan-950/40">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Ajustar info da compra</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                                    Reimporte o XML da NF {purchaseToAjustarXml.invoiceNumber}
+                                    {(purchaseToAjustarXml as any).serieNF
+                                        ? ` (série ${(purchaseToAjustarXml as any).serieNF})`
+                                        : ''}{' '}
+                                    para atualizar ICMS, EAN e cProd sem criar nova compra.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowAjustarXmlModal(false);
+                                    setPurchaseToAjustarXml(null);
+                                    setAjustarXmlFile(null);
+                                    setAjustarXmlError(null);
+                                }}
+                                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-white/80 dark:hover:bg-white/10 rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4 bg-white dark:bg-dark-card">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Arquivo XML desta NF-e
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".xml,text/xml,application/xml"
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0] || null;
+                                        setAjustarXmlFile(file);
+                                        setAjustarXmlError(null);
+                                    }}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-100 file:text-blue-700 dark:file:bg-blue-900/40 dark:file:text-blue-300 file:font-semibold file:cursor-pointer"
+                                />
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    O XML deve ser o da mesma nota (número + fornecedor). XML de outra NF será rejeitado.
+                                </p>
+                            </div>
+                            {ajustarXmlFile && (
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                    Selecionado: <strong>{ajustarXmlFile.name}</strong>
+                                </p>
+                            )}
+                            {ajustarXmlError && (
+                                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                                    <p className="text-red-800 dark:text-red-300 font-medium">{ajustarXmlError}</p>
+                                </div>
+                            )}
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowAjustarXmlModal(false);
+                                        setPurchaseToAjustarXml(null);
+                                        setAjustarXmlFile(null);
+                                        setAjustarXmlError(null);
+                                    }}
+                                    className="px-5 py-2.5 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-dark-hover rounded-xl hover:bg-gray-200 dark:hover:bg-dark-border font-semibold"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void handleConfirmarAjusteXml()}
+                                    disabled={!ajustarXmlFile || isAjustandoXml}
+                                    className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isAjustandoXml ? 'Ajustando…' : 'Importar e ajustar'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL DE VISUALIZAÇÃO */}
             {purchaseToView && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -3397,17 +3537,17 @@ const filteredPurchases = useMemo(() => {
                         <div className="p-6 space-y-6">
                             {/* Informações Básicas */}
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📋</span>
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                    <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 dark:text-blue-300">📋</span>
                                     Informações Básicas
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Fornecedor</h4>
-                                        <p className="text-gray-900 font-medium">{purchaseToView.supplierName}</p>
+                                    <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Fornecedor</h4>
+                                        <p className="text-gray-900 dark:text-white font-medium">{purchaseToView.supplierName}</p>
                                     </div>
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Status</h4>
+                                    <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Status</h4>
                                         <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${getStatusClass(purchaseToView.status)}`}>
                                             {purchaseToView.status === PurchaseStatus.Pendente && '⏳ '}
                                             {purchaseToView.status === PurchaseStatus.Recebido && '✅ '}
@@ -3415,24 +3555,24 @@ const filteredPurchases = useMemo(() => {
                                             {purchaseToView.status}
                                         </span>
                                     </div>
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Nota Fiscal</h4>
-                                        <p className="text-gray-900 font-medium">
+                                    <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Nota Fiscal</h4>
+                                        <p className="text-gray-900 dark:text-white font-medium">
                                             {purchaseToView.invoiceNumber}
                                             {(purchaseToView as any).serieNF && (
-                                                <span className="text-gray-500 ml-2">Série {(purchaseToView as any).serieNF}</span>
+                                                <span className="text-gray-500 dark:text-gray-400 ml-2">Série {(purchaseToView as any).serieNF}</span>
                                             )}
                                         </p>
                                     </div>
                                     {(purchaseToView as any).serieNF && (
-                                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Série da NF</h4>
-                                            <p className="text-gray-900 font-medium">{(purchaseToView as any).serieNF}</p>
+                                        <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Série da NF</h4>
+                                            <p className="text-gray-900 dark:text-white font-medium">{(purchaseToView as any).serieNF}</p>
                                         </div>
                                     )}
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data da Compra</h4>
-                                        <p className="text-gray-900 font-medium">
+                                    <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Data da Compra</h4>
+                                        <p className="text-gray-900 dark:text-white font-medium">
                                             {(() => {
                                                 const dataStr = purchaseToView.orderDate || (purchaseToView as any).dataCompra || (purchaseToView as any).data;
                                                 if (!dataStr) return '—';
@@ -3450,9 +3590,9 @@ const filteredPurchases = useMemo(() => {
                                             })()}
                                         </p>
                                     </div>
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data de Emissão da NF</h4>
-                                        <p className="text-gray-900 font-medium">
+                                    <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Data de Emissão da NF</h4>
+                                        <p className="text-gray-900 dark:text-white font-medium">
                                             {(() => {
                                                 const dataStr = (purchaseToView as any).dataEmissaoNF;
                                                 if (!dataStr) return '—';
@@ -3473,15 +3613,15 @@ const filteredPurchases = useMemo(() => {
                                     <div
                                         className={`p-4 rounded-xl border ${
                                             (purchaseToView as any).dataRecebimento
-                                                ? 'bg-green-50 border-green-200'
-                                                : 'bg-gray-50 border-gray-200'
+                                                ? 'bg-green-50 border-green-200 dark:bg-green-900/25 dark:border-green-800'
+                                                : 'bg-gray-50 border-gray-200 dark:bg-dark-bg dark:border-dark-border'
                                         }`}
                                     >
                                         <h4
                                             className={`text-xs font-semibold uppercase mb-1 flex items-center gap-1 ${
                                                 (purchaseToView as any).dataRecebimento
-                                                    ? 'text-green-600'
-                                                    : 'text-gray-500'
+                                                    ? 'text-green-600 dark:text-green-400'
+                                                    : 'text-gray-500 dark:text-gray-400'
                                             }`}
                                         >
                                             <span>✅</span> Data de Recebimento
@@ -3489,8 +3629,8 @@ const filteredPurchases = useMemo(() => {
                                         <p
                                             className={
                                                 (purchaseToView as any).dataRecebimento
-                                                    ? 'text-green-900 font-bold'
-                                                    : 'text-gray-600 font-medium'
+                                                    ? 'text-green-900 dark:text-green-200 font-bold'
+                                                    : 'text-gray-600 dark:text-gray-400 font-medium'
                                             }
                                         >
                                             {(purchaseToView as any).dataRecebimento
@@ -3520,48 +3660,48 @@ const filteredPurchases = useMemo(() => {
                                         </p>
                                     </div>
                                     {(purchaseToView as any).destinatarioCNPJ && (
-                                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">CNPJ Destinatário</h4>
-                                            <p className="text-gray-900 font-medium">{(purchaseToView as any).destinatarioCNPJ}</p>
+                                        <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">CNPJ Destinatário</h4>
+                                            <p className="text-gray-900 dark:text-white font-medium">{(purchaseToView as any).destinatarioCNPJ}</p>
                                         </div>
                                     )}
                                     {/* Empresa Compradora - sempre visível para identificar qual CNPJ efetuou a compra */}
-                                    <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
-                                        <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1 flex items-center gap-1">
+                                    <div className="bg-blue-50 dark:bg-blue-900/25 p-4 rounded-xl border-2 border-blue-200 dark:border-blue-800">
+                                        <h4 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase mb-1 flex items-center gap-1">
                                             🏢 Empresa que comprou
                                         </h4>
                                         {(purchaseToView as any).empresaCompradoraNome || (purchaseToView as any).empresaCompradoraCNPJ ? (
                                             <>
                                                 {(purchaseToView as any).empresaCompradoraNome && (
-                                                    <p className="text-blue-900 font-bold text-base">{(purchaseToView as any).empresaCompradoraNome}</p>
+                                                    <p className="text-blue-900 dark:text-blue-100 font-bold text-base">{(purchaseToView as any).empresaCompradoraNome}</p>
                                                 )}
                                                 {(purchaseToView as any).empresaCompradoraCNPJ && (
-                                                    <p className="text-blue-700 font-medium text-sm mt-1">CNPJ: {(purchaseToView as any).empresaCompradoraCNPJ}</p>
+                                                    <p className="text-blue-700 dark:text-blue-300 font-medium text-sm mt-1">CNPJ: {(purchaseToView as any).empresaCompradoraCNPJ}</p>
                                                 )}
                                             </>
                                         ) : (
-                                            <p className="text-blue-600/80 text-sm">Não informada</p>
+                                            <p className="text-blue-600/80 dark:text-blue-400/80 text-sm">Não informada</p>
                                         )}
                                     </div>
                                     {(purchaseToView as any).statusImportacao && (
-                                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Tipo de Importação</h4>
+                                        <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Tipo de Importação</h4>
                                             <span className={`inline-block px-3 py-1 text-xs font-semibold rounded-lg ${
                                                 (purchaseToView as any).statusImportacao === 'XML' 
-                                                    ? 'bg-green-100 text-green-700' 
-                                                    : 'bg-gray-200 text-gray-700'
+                                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' 
+                                                    : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                                             }`}>
                                                 {(purchaseToView as any).statusImportacao === 'XML' ? '📄 XML' : '✏️ Manual'}
                                             </span>
                                         </div>
                                     )}
                                     {(purchaseToView as any).obra && (
-                                        <div className="bg-purple-50 p-4 rounded-xl border-2 border-purple-200">
-                                            <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1 flex items-center gap-1">
+                                        <div className="bg-purple-50 dark:bg-purple-900/25 p-4 rounded-xl border-2 border-purple-200 dark:border-purple-800">
+                                            <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1 flex items-center gap-1">
                                                 🏗️ Obra Vinculada
                                             </h4>
-                                            <p className="text-purple-900 font-bold">{(purchaseToView as any).obra?.nomeObra || ''}</p>
-                                            <p className="text-xs text-purple-600 mt-1">Status: {(purchaseToView as any).obra?.status || ''}</p>
+                                            <p className="text-purple-900 dark:text-purple-100 font-bold">{(purchaseToView as any).obra?.nomeObra || ''}</p>
+                                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">Status: {(purchaseToView as any).obra?.status || ''}</p>
                                         </div>
                                     )}
                                 </div>
@@ -3593,9 +3733,17 @@ const filteredPurchases = useMemo(() => {
                                                     {purchaseToView.items.map((item, index) => {
                                                         const materialVinculado = (item as any).materialVinculado || (item as any).material;
                                                         const imagemUrl = materialVinculado?.imagemUrl;
+                                                        const itemId = (item as any).id as string | undefined;
+                                                        const estaVinculando = Boolean(itemId && vincularItemIdDetalhe === itemId);
+                                                        const materiaisDetalhe = estaVinculando
+                                                            ? getMateriaisFiltradosDetalhe(buscaVincularDetalhe)
+                                                            : [];
+                                                        const eanLinha = (item as any).ean as string | null | undefined;
+                                                        const cprodLinha = (item as any).codigoFornecedor as string | null | undefined;
                                                         
                                                         return (
-                                                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                        <React.Fragment key={itemId || index}>
+                                                        <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                             <td className="px-6 py-4">
                                                                 <div className="flex items-center gap-3">
                                                                     {/* Imagem do produto */}
@@ -3615,6 +3763,13 @@ const filteredPurchases = useMemo(() => {
                                                                     )}
                                                                     <div className="flex-1">
                                                                         <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                                        {(eanLinha || cprodLinha) && (
+                                                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono">
+                                                                                {eanLinha ? `EAN: ${eanLinha}` : ''}
+                                                                                {eanLinha && cprodLinha ? ' · ' : ''}
+                                                                                {cprodLinha ? `cProd: ${cprodLinha}` : ''}
+                                                                            </p>
+                                                                        )}
                                                                         {(item as any).quantidadeFracionada && item.quantity && (
                                                                             <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
                                                                                 📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
@@ -3662,12 +3817,11 @@ const filteredPurchases = useMemo(() => {
                                                                 <div className="flex flex-col items-center gap-2">
                                                                     {/* Badge de vinculação */}
                                                                     {(item as any).materialId && (item as any).material ? (
-                                                                        // Item vinculado a material existente (pode ser match automático ou manual)
                                                                         <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-semibold whitespace-nowrap">
                                                                             ✅ Vinculado
+                                                                            {(item as any).material?.nome ? `: ${(item as any).material.nome}` : ''}
                                                                         </span>
                                                                     ) : (item as any).matchAutomatico && (item as any).materialVinculado ? (
-                                                                        // Match automático (apenas durante criação, antes de salvar)
                                                                         <span className="px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded text-xs font-semibold whitespace-nowrap">
                                                                             ⚠️ Match automático
                                                                         </span>
@@ -3678,7 +3832,25 @@ const filteredPurchases = useMemo(() => {
                                                                     )}
                                                                     
                                                                     {/* Botões de ação */}
-                                                                    <div className="flex items-center gap-2">
+                                                                    <div className="flex items-center gap-2 flex-wrap justify-center">
+                                                                        {itemId && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    if (estaVinculando) {
+                                                                                        setVincularItemIdDetalhe(null);
+                                                                                        setBuscaVincularDetalhe('');
+                                                                                    } else {
+                                                                                        setVincularItemIdDetalhe(itemId);
+                                                                                        setBuscaVincularDetalhe('');
+                                                                                    }
+                                                                                }}
+                                                                                className="px-2 py-1 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 transition-colors"
+                                                                                title="Vincular este item a um produto do estoque e gravar EAN/cProd no fornecedor"
+                                                                            >
+                                                                                {(item as any).materialId ? 'Alterar vínculo' : 'Vincular ao estoque'}
+                                                                            </button>
+                                                                        )}
                                                                         {/* Ver Detalhes do Material */}
                                                                         <button
                                                                             type="button"
@@ -3725,6 +3897,65 @@ const filteredPurchases = useMemo(() => {
                                                                 </div>
                                                             </td>
                                                         </tr>
+                                                        {estaVinculando && (
+                                                            <tr className="bg-emerald-50/80 dark:bg-emerald-950/20">
+                                                                <td colSpan={8} className="px-6 py-4 border-t border-emerald-200 dark:border-emerald-900/40">
+                                                                    <div className="space-y-3 max-w-xl">
+                                                                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                                                                            Selecione o material do estoque. O EAN/cProd desta linha serão gravados no alias do fornecedor para matching automático nas próximas compras.
+                                                                        </p>
+                                                                        {(eanLinha || cprodLinha) ? (
+                                                                            <p className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                                                                                {eanLinha ? `EAN: ${eanLinha}` : 'EAN: —'}
+                                                                                {' · '}
+                                                                                {cprodLinha ? `cProd: ${cprodLinha}` : 'cProd: —'}
+                                                                            </p>
+                                                                        ) : (
+                                                                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                                                                                Esta linha não tem EAN/cProd. O vínculo por nome ainda será aprendido; se souber os códigos, edite o XML/item antes.
+                                                                            </p>
+                                                                        )}
+                                                                        <div className="relative">
+                                                                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                                                            <input
+                                                                                type="text"
+                                                                                value={buscaVincularDetalhe}
+                                                                                onChange={(e) => setBuscaVincularDetalhe(e.target.value)}
+                                                                                disabled={vincularDetalheLoading}
+                                                                                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-emerald-500 dark:bg-dark-bg dark:text-white text-sm"
+                                                                                placeholder="Buscar material do estoque por nome ou SKU..."
+                                                                                autoFocus
+                                                                            />
+                                                                        </div>
+                                                                        {materiaisDetalhe.length > 0 && (
+                                                                            <div className="max-h-40 overflow-y-auto border border-gray-200 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg">
+                                                                                {materiaisDetalhe.map((material) => (
+                                                                                    <button
+                                                                                        key={material.id}
+                                                                                        type="button"
+                                                                                        disabled={vincularDetalheLoading}
+                                                                                        onClick={() => confirmarVinculoItemDetalhe(item, material)}
+                                                                                        className="w-full text-left px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors disabled:opacity-50"
+                                                                                    >
+                                                                                        <p className="font-medium text-sm text-gray-900 dark:text-white">{material.nome}</p>
+                                                                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                                                            SKU: {material.sku} · Estoque: {material.estoque} {material.unidadeMedida}
+                                                                                        </p>
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                        {buscaVincularDetalhe.trim() && materiaisDetalhe.length === 0 && (
+                                                                            <p className="text-xs text-gray-500 dark:text-gray-400">Nenhum material encontrado.</p>
+                                                                        )}
+                                                                        {vincularDetalheLoading && (
+                                                                            <p className="text-xs text-emerald-700 dark:text-emerald-400">Salvando vínculo…</p>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                        </React.Fragment>
                                                         );
                                                     })}
                                                 </tbody>
@@ -3736,47 +3967,55 @@ const filteredPurchases = useMemo(() => {
 
                             {/* Detalhes Fiscais e Totais */}
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center text-yellow-600">💰</span>
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                    <span className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center text-yellow-600 dark:text-yellow-400">💰</span>
                                     Detalhes Fiscais e Totais
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {(purchaseToView as any).valorTotalProdutos !== undefined && (
-                                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                            <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1">Total Produtos</h4>
-                                            <p className="text-xl font-bold text-blue-900">
+                                        <div className="bg-blue-50 dark:bg-blue-900/25 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase mb-1">Total Produtos</h4>
+                                            <p className="text-xl font-bold text-blue-900 dark:text-blue-100">
                                                 R$ {parseFloat((purchaseToView as any).valorTotalProdutos || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     )}
                                     {(purchaseToView as any).frete !== undefined && parseFloat((purchaseToView as any).frete || '0') > 0 && (
-                                        <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
-                                            <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Frete</h4>
-                                            <p className="text-xl font-bold text-purple-900">
+                                        <div className="bg-purple-50 dark:bg-purple-900/25 border border-purple-200 dark:border-purple-800 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Frete</h4>
+                                            <p className="text-xl font-bold text-purple-900 dark:text-purple-100">
                                                 R$ {parseFloat((purchaseToView as any).frete || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     )}
                                     {(purchaseToView as any).valorIPI !== undefined && parseFloat((purchaseToView as any).valorIPI || '0') > 0 && (
-                                        <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
-                                            <h4 className="text-xs font-semibold text-indigo-700 uppercase mb-1">Valor IPI</h4>
-                                            <p className="text-xl font-bold text-indigo-900">
+                                        <div className="bg-indigo-50 dark:bg-indigo-900/25 border border-indigo-200 dark:border-indigo-800 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase mb-1">Valor IPI</h4>
+                                            <p className="text-xl font-bold text-indigo-900 dark:text-indigo-100">
                                                 R$ {parseFloat((purchaseToView as any).valorIPI || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     )}
+                                    {(purchaseToView as any).valorICMS !== undefined && parseFloat((purchaseToView as any).valorICMS || '0') > 0 && (
+                                        <div className="bg-cyan-50 dark:bg-cyan-900/25 border border-cyan-200 dark:border-cyan-800 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 uppercase mb-1">Valor ICMS</h4>
+                                            <p className="text-xl font-bold text-cyan-900 dark:text-cyan-100">
+                                                R$ {parseFloat((purchaseToView as any).valorICMS || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                    )}
                                     {(purchaseToView as any).outrasDespesas !== undefined && parseFloat((purchaseToView as any).outrasDespesas || '0') > 0 && (
-                                        <div className="bg-gray-100 border border-gray-300 p-4 rounded-xl">
-                                            <h4 className="text-xs font-semibold text-gray-700 uppercase mb-1">Outras Despesas</h4>
-                                            <p className="text-xl font-bold text-gray-900">
+                                        <div className="bg-gray-100 dark:bg-dark-bg border border-gray-300 dark:border-dark-border p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-1">Outras Despesas</h4>
+                                            <p className="text-xl font-bold text-gray-900 dark:text-white">
                                                 R$ {parseFloat((purchaseToView as any).outrasDespesas || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     )}
                                     {(purchaseToView as any).valorDesconto !== undefined && parseFloat((purchaseToView as any).valorDesconto || '0') > 0 && (
-                                        <div className="bg-red-50 border border-red-200 p-4 rounded-xl">
-                                            <h4 className="text-xs font-semibold text-red-700 uppercase mb-1">Descontos</h4>
-                                            <p className="text-xl font-bold text-red-900">
+                                        <div className="bg-red-50 dark:bg-red-900/25 border border-red-200 dark:border-red-800 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase mb-1">Descontos</h4>
+                                            <p className="text-xl font-bold text-red-900 dark:text-red-100">
                                                 − R$ {parseFloat((purchaseToView as any).valorDesconto || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
@@ -3784,17 +4023,17 @@ const filteredPurchases = useMemo(() => {
                                 </div>
                                 
                                 {/* Total Geral */}
-                                <div className="bg-gradient-to-r from-orange-50 to-yellow-50 border-2 border-orange-300 p-6 rounded-xl mt-4">
+                                <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/30 dark:to-yellow-900/20 border-2 border-orange-300 dark:border-orange-700 p-6 rounded-xl mt-4">
                                     <div className="flex justify-between items-center">
                                         <div>
-                                            <h4 className="text-sm font-semibold text-orange-700 uppercase mb-1">Total Geral da Nota</h4>
-                                            <p className="text-xs text-gray-600">
+                                            <h4 className="text-sm font-semibold text-orange-700 dark:text-orange-300 uppercase mb-1">Total Geral da Nota</h4>
+                                            <p className="text-xs text-gray-600 dark:text-gray-400">
                                                 {(purchaseToView as any).valorTotalNota !== undefined 
                                                     ? 'Valor total da NF-e' 
                                                     : 'Valor total da compra'}
                                             </p>
                                         </div>
-                                        <p className="text-4xl font-bold text-orange-700">
+                                        <p className="text-4xl font-bold text-orange-700 dark:text-orange-300">
                                             R$ {(
                                                 (purchaseToView as any).valorTotalNota !== undefined 
                                                     ? parseFloat((purchaseToView as any).valorTotalNota || '0') 
@@ -3810,32 +4049,32 @@ const filteredPurchases = useMemo(() => {
                               (purchaseToView as any).duplicatas?.length > 0 || 
                               (purchaseToView as any).contasPagar?.length > 0) && (
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                        <span className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center text-green-600">💳</span>
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">💳</span>
                                         Condições de Pagamento e Parcelas
                                     </h3>
-                                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                    <div className="bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                             {(purchaseToView as any).condicoesPagamento && (
-                                                <div className="bg-gray-50 p-3 rounded-lg">
-                                                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Condição</h4>
-                                                    <p className="text-sm font-medium text-gray-900">
+                                                <div className="bg-gray-50 dark:bg-dark-card p-3 rounded-lg border border-transparent dark:border-dark-border">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Condição</h4>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
                                                         {(purchaseToView as any).condicoesPagamento === 'AVISTA' ? '💵 À Vista' : '📅 Parcelado'}
                                                     </p>
                                                 </div>
                                             )}
                                             {(purchaseToView as any).parcelas && (
-                                                <div className="bg-gray-50 p-3 rounded-lg">
-                                                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Parcelas</h4>
-                                                    <p className="text-sm font-medium text-gray-900">
+                                                <div className="bg-gray-50 dark:bg-dark-card p-3 rounded-lg border border-transparent dark:border-dark-border">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Parcelas</h4>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
                                                         {(purchaseToView as any).parcelas}x
                                                     </p>
                                                 </div>
                                             )}
                                             {(purchaseToView as any).dataPrimeiroVencimento && (
-                                                <div className="bg-gray-50 p-3 rounded-lg">
-                                                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Primeiro Vencimento</h4>
-                                                    <p className="text-sm font-medium text-gray-900">
+                                                <div className="bg-gray-50 dark:bg-dark-card p-3 rounded-lg border border-transparent dark:border-dark-border">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Primeiro Vencimento</h4>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
                                                         {new Date((purchaseToView as any).dataPrimeiroVencimento).toLocaleDateString('pt-BR')}
                                                     </p>
                                                 </div>
@@ -3845,23 +4084,23 @@ const filteredPurchases = useMemo(() => {
                                         {/* Duplicatas */}
                                         {((purchaseToView as any).duplicatas && (purchaseToView as any).duplicatas.length > 0) && (
                                             <div className="mt-4">
-                                                <h4 className="text-sm font-semibold text-gray-700 mb-3">📋 Duplicatas/Parcelas do Boleto</h4>
+                                                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">📋 Duplicatas/Parcelas do Boleto</h4>
                                                 <div className="space-y-2">
                                                     {(purchaseToView as any).duplicatas.map((dup: any, idx: number) => (
-                                                        <div key={idx} className="flex justify-between items-center bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border-2 border-green-200 shadow-sm">
+                                                        <div key={idx} className="flex justify-between items-center bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/20 p-4 rounded-lg border-2 border-green-200 dark:border-green-800 shadow-sm">
                                                             <div className="flex items-center gap-3">
                                                                 <span className="w-8 h-8 rounded-full bg-green-500 text-white text-sm font-bold flex items-center justify-center shadow-md">
                                                                     {idx + 1}
                                                                 </span>
                                                                 <div>
-                                                                    <p className="text-xs font-semibold text-gray-600 uppercase">Duplicata {dup.numero || (idx + 1).toString().padStart(3, '0')}</p>
-                                                                    <p className="text-sm font-medium text-gray-900 mt-1">
+                                                                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Duplicata {dup.numero || (idx + 1).toString().padStart(3, '0')}</p>
+                                                                    <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">
                                                                         📅 Vencimento: {formatDateBR(dup.dataVencimento)}
                                                                     </p>
                                                                 </div>
                                                             </div>
                                                             <div className="text-right">
-                                                                <p className="text-lg font-bold text-green-700">
+                                                                <p className="text-lg font-bold text-green-700 dark:text-green-300">
                                                                     R$ {parseFloat(dup.valor || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </p>
                                                             </div>
@@ -3877,39 +4116,39 @@ const filteredPurchases = useMemo(() => {
                             {/* Contas a Pagar Vinculadas */}
                             {(purchaseToView as any).contasPagar && (purchaseToView as any).contasPagar.length > 0 && (
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                        <span className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">💳</span>
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">💳</span>
                                         Contas a Pagar Vinculadas ({(purchaseToView as any).contasPagar.length})
                                     </h3>
-                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                    <div className="border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden">
                                         <div className="overflow-x-auto">
                                             <table className="w-full">
-                                                <thead className="bg-purple-50 border-b border-gray-200">
+                                                <thead className="bg-purple-50 dark:bg-purple-900/30 border-b border-gray-200 dark:border-dark-border">
                                                     <tr>
-                                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Parcela</th>
-                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Vencimento</th>
-                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Agendamento</th>
-                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Pagamento</th>
-                                                        <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Valor</th>
-                                                        <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Parcela</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Vencimento</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Agendamento</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Pagamento</th>
+                                                        <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Valor</th>
+                                                        <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody className="bg-white divide-y divide-gray-200">
+                                                <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
                                                     {(purchaseToView as any).contasPagar.map((conta: any, idx: number) => (
-                                                        <tr key={conta.id || idx} className="hover:bg-gray-50 transition-colors">
+                                                        <tr key={conta.id || idx} className="hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
                                                             <td className="px-6 py-4">
-                                                                <span className="font-semibold text-gray-900">
+                                                                <span className="font-semibold text-gray-900 dark:text-white">
                                                                     {conta.numeroParcela || idx + 1}/{conta.totalParcelas || (purchaseToView as any).contasPagar.length}
                                                                 </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
-                                                                <span className="text-sm text-gray-700">
+                                                                <span className="text-sm text-gray-700 dark:text-gray-300">
                                                                     {formatDateBR(conta.dataVencimento)}
                                                                 </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 {conta.dataAgendamento ? (
-                                                                    <span className="text-sm text-blue-600 font-medium">
+                                                                    <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">
                                                                         📅 {formatDateBR(conta.dataAgendamento)}
                                                                     </span>
                                                                 ) : (
@@ -3918,7 +4157,7 @@ const filteredPurchases = useMemo(() => {
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 {conta.dataPagamento ? (
-                                                                    <span className="text-sm text-green-600 font-medium">
+                                                                    <span className="text-sm text-green-600 dark:text-green-400 font-medium">
                                                                         ✅ {formatDateBR(conta.dataPagamento)}
                                                                     </span>
                                                                 ) : (
@@ -3926,16 +4165,16 @@ const filteredPurchases = useMemo(() => {
                                                                 )}
                                                             </td>
                                                             <td className="px-4 py-4 text-right">
-                                                                <span className="font-bold text-gray-900">
+                                                                <span className="font-bold text-gray-900 dark:text-white">
                                                                     R$ {parseFloat(conta.valorParcela || conta.valor || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-4 text-center">
                                                                 <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${
-                                                                    conta.status === 'Pago' ? 'bg-green-100 text-green-800' :
-                                                                    conta.status === 'Atrasado' ? 'bg-red-100 text-red-800' :
-                                                                    conta.dataAgendamento ? 'bg-blue-100 text-blue-800' :
-                                                                    'bg-yellow-100 text-yellow-800'
+                                                                    conta.status === 'Pago' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
+                                                                    conta.status === 'Atrasado' ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' :
+                                                                    conta.dataAgendamento ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' :
+                                                                    'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300'
                                                                 }`}>
                                                                     {conta.status === 'Pago' && '✅ '}
                                                                     {conta.status === 'Atrasado' && '⚠️ '}
@@ -3957,7 +4196,7 @@ const filteredPurchases = useMemo(() => {
                                                                                 window.dispatchEvent(new CustomEvent('s3e-open-conta-pagar', { detail: { contaId: conta.id } }));
                                                                                 navigate('/');
                                                                             }}
-                                                                            className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm font-semibold"
+                                                                            className="px-3 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 text-sm font-semibold border border-transparent dark:border-blue-800"
                                                                         >
                                                                             Ver / Pagar
                                                                         </button>
@@ -3973,11 +4212,11 @@ const filteredPurchases = useMemo(() => {
 
                             {/* Observações (edição rápida; mesmo dado do formulário / API) */}
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📝</span>
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-2 flex items-center gap-2">
+                                    <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">📝</span>
                                     Observações
                                 </h3>
-                                <p className="text-sm text-gray-500 mb-3">
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
                                     Texto livre sobre esta compra. Altere abaixo e clique em salvar; também é possível editar em &quot;Editar compra&quot;.
                                 </p>
                                 <textarea
@@ -3986,7 +4225,7 @@ const filteredPurchases = useMemo(() => {
                                     rows={5}
                                     maxLength={8000}
                                     placeholder="Nenhuma observação ainda. Digite aqui e salve."
-                                    className="w-full px-4 py-3 border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-gray-800 resize-y min-h-[120px] bg-white"
+                                    className="w-full px-4 py-3 border border-blue-200 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-white resize-y min-h-[120px] bg-white dark:bg-dark-bg placeholder:text-gray-400 dark:placeholder:text-gray-500"
                                 />
                                 <div className="mt-3 flex justify-end">
                                     <button
@@ -4002,7 +4241,7 @@ const filteredPurchases = useMemo(() => {
                         </div>
 
                         {/* Rodapé com Ações */}
-                        <div className="p-6 bg-gray-50 border-t border-gray-200">
+                        <div className="p-6 bg-gray-50 dark:bg-dark-bg border-t border-gray-200 dark:border-dark-border">
                             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                                 {/* Status Atual */}
                                 <div className="flex items-center gap-3">
@@ -4012,12 +4251,12 @@ const filteredPurchases = useMemo(() => {
                                             purchaseToView.status === PurchaseStatus.Pendente ? 'bg-yellow-500' :
                                             'bg-red-500'
                                         }`}></div>
-                                        <span className="text-sm font-medium text-gray-700">
-                                            Status: <strong>{purchaseToView.status}</strong>
+                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Status: <strong className="dark:text-white">{purchaseToView.status}</strong>
                                         </span>
                                     </div>
                                     {(purchaseToView as any).dataRecebimento && (
-                                        <div className="text-sm text-gray-600 bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+                                        <div className="text-sm text-gray-600 dark:text-gray-300 bg-white dark:bg-dark-card px-3 py-1.5 rounded-lg border border-gray-200 dark:border-dark-border">
                                             📅 Recebido em: {(() => {
                                                 const dataStr = (purchaseToView as any).dataRecebimento;
                                                 if (!dataStr) return 'N/A';
@@ -4043,7 +4282,24 @@ const filteredPurchases = useMemo(() => {
                                 </div>
 
                                 {/* Botões de Ação */}
-                                <div className="flex gap-3">
+                                <div className="flex gap-3 flex-wrap justify-end">
+                                    {purchaseToView.status !== PurchaseStatus.Cancelado && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setPurchaseToAjustarXml(purchaseToView);
+                                                setAjustarXmlFile(null);
+                                                setAjustarXmlError(null);
+                                                setShowAjustarXmlModal(true);
+                                            }}
+                                            className="flex items-center gap-2 px-5 py-3 bg-white dark:bg-dark-card border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all font-semibold"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                            </svg>
+                                            Ajustar info (XML)
+                                        </button>
+                                    )}
                                     {purchaseToView.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchaseToView) && (
                                         <button
                                             onClick={handleOpenReceivingModal}
@@ -4056,7 +4312,7 @@ const filteredPurchases = useMemo(() => {
                                         </button>
                                     )}
                                     {purchaseToView.status === PurchaseStatus.Recebido && (
-                                        <div className="flex items-center gap-2 px-6 py-3 bg-green-100 text-green-800 rounded-xl font-semibold">
+                                        <div className="flex items-center gap-2 px-6 py-3 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-xl font-semibold">
                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
@@ -4067,7 +4323,7 @@ const filteredPurchases = useMemo(() => {
                                     )}
                                     <button
                                         onClick={() => setPurchaseToView(null)}
-                                        className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-all font-semibold"
+                                        className="px-6 py-3 bg-gray-200 dark:bg-dark-card text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-300 dark:hover:bg-dark-border transition-all font-semibold border border-transparent dark:border-dark-border"
                                     >
                                         Fechar
                                     </button>

@@ -13,6 +13,7 @@ import { getBackendUrl, getUploadUrl } from '../config/api';
 import SupplierCombobox from './ui/SupplierCombobox';
 import ViewToggle from './ui/ViewToggle';
 import ActionsDropdown from './ui/ActionsDropdown';
+import { buildCrudActions } from '../utils/buildCrudActions';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { AuthContext } from '../contexts/AuthContext';
@@ -41,6 +42,13 @@ import {
 import { CabosPrecoBitolaModal } from './modals/CabosPrecoBitolaModal';
 import { ModalDetailHeader } from './ui/ModalDetailHeader';
 import { modalOverlayPaddingClasses } from '../utils/responsiveNav';
+import {
+    aliasesCodigosDistintos,
+    listarCprodsDistintos,
+    listarEansDistintos,
+    resolverEanCprod,
+    textoOuNaoInformado,
+} from '../utils/materialAliasCodigos.util';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -70,11 +78,6 @@ const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
     </svg>
 );
-const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.124-2.038-2.124H9.038c-1.128 0-2.038.944-2.038 2.124v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-    </svg>
-);
 const ExclamationTriangleIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -85,13 +88,6 @@ const CubeIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
     </svg>
 );
-const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-);
-
 interface MateriaisProps {
     toggleSidebar: () => void;
 }
@@ -119,6 +115,18 @@ interface MaterialFormState {
     percentualImposto: string; // Alíquota % sobre valor de venda (DAS), default 8
     markupAplicado: string; // Markup (Fabricante 1.55 ou Revendedor 1.10)
     ncm: string; // NCM (8 dígitos; busca auxiliar via Brasil API)
+    /** EAN / GTIN (MaterialFornecedorAlias) — legado / atalho do 1º vínculo */
+    ean: string;
+    /** cProd — código do fornecedor (MaterialFornecedorAlias) */
+    codigoFornecedor: string;
+    /** Lista editável de EAN/cProd (múltiplos aliases). */
+    aliasesCodigos: Array<{
+        key: string;
+        id?: string;
+        fornecedorId: string;
+        ean: string;
+        codigoFornecedor: string;
+    }>;
 }
 
 const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
@@ -156,6 +164,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [atualizandoSKUs, setAtualizandoSKUs] = useState(false);
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [materialParaVisualizar, setMaterialParaVisualizar] = useState<MaterialItem | null>(null);
+    const [loadingAliasesVisualizacao, setLoadingAliasesVisualizacao] = useState(false);
     const [historicoModalOpen, setHistoricoModalOpen] = useState(false);
     const [materialSelecionado, setMaterialSelecionado] = useState<MaterialItem | null>(null);
     const [historicoCompras, setHistoricoCompras] = useState<any[]>([]);
@@ -211,9 +220,12 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         porcentagemLucro: '', // Porcentagem de lucro
         percentualImposto: '8', // Alíquota % sobre valor de venda (DAS), default 8
         markupAplicado: '1.55', // Markup (Fabricante 1.55 ou Revendedor 1.10)
-        ncm: ''
+        ncm: '',
+        ean: '',
+        codigoFornecedor: '',
+        aliasesCodigos: [],
     });
-
+    const [loadingAliasesEdicao, setLoadingAliasesEdicao] = useState(false);
 
     const loadMaterials = async () => {
         try {
@@ -400,6 +412,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         setNcmSearchResults([]);
         setNcmDescricaoPreview(null);
         setNcmSearchLoading(false);
+        setLoadingAliasesEdicao(false);
 
         if (item) {
             // ✅ Removida lógica automática que forçava unidade baseada no nome
@@ -435,8 +448,60 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     if (classificacao === 'Representante_Vendedor') return String(markupRev);
                     return String(markupFab);
                 })(),
-                ncm: item.ncm ? String(item.ncm).replace(/\D/g, '').slice(0, 8) : ''
+                ncm: item.ncm ? String(item.ncm).replace(/\D/g, '').slice(0, 8) : '',
+                ean: item.ean?.trim() || '',
+                codigoFornecedor: item.codigoFornecedor?.trim() || '',
+                aliasesCodigos: [],
             });
+            setIsModalOpen(true);
+            void (async () => {
+                setLoadingAliasesEdicao(true);
+                try {
+                    const response = await materiaisService.getMaterialById(item.id);
+                    const detalhe = response.data;
+                    if (!response.success || !detalhe) return;
+                    const aliases = detalhe.aliasesFornecedor ?? [];
+                    const fornecedorId =
+                        detalhe.fornecedorId || detalhe.fornecedor?.id || item.supplier?.id;
+                    const { ean, codigoFornecedor } = resolverEanCprod(aliases, fornecedorId);
+                    const aliasesCodigos = aliases
+                        .filter((a) => Boolean(a.ean?.trim()) || Boolean(a.codigoFornecedor?.trim()))
+                        .map((a) => ({
+                            key: a.id,
+                            id: a.id,
+                            fornecedorId: a.fornecedorId || fornecedorId || '',
+                            ean: a.ean?.trim() || '',
+                            codigoFornecedor: a.codigoFornecedor?.trim() || '',
+                        }));
+                    setFormState((prev) => ({
+                        ...prev,
+                        ean: ean || '',
+                        codigoFornecedor: codigoFornecedor || '',
+                        aliasesCodigos:
+                            aliasesCodigos.length > 0
+                                ? aliasesCodigos
+                                : ean || codigoFornecedor
+                                  ? [
+                                        {
+                                            key: `tmp-${Date.now()}`,
+                                            fornecedorId: fornecedorId || prev.supplierId || '',
+                                            ean: ean || '',
+                                            codigoFornecedor: codigoFornecedor || '',
+                                        },
+                                    ]
+                                  : [],
+                        supplierId: fornecedorId || prev.supplierId,
+                        supplierName: detalhe.fornecedor?.nome || prev.supplierName,
+                        ncm: detalhe.ncm
+                            ? String(detalhe.ncm).replace(/\D/g, '').slice(0, 8)
+                            : prev.ncm,
+                    }));
+                } catch (error) {
+                    console.error('Erro ao carregar EAN/cProd do material:', error);
+                } finally {
+                    setLoadingAliasesEdicao(false);
+                }
+            })();
         } else {
             setItemToEdit(null);
             setFormState({
@@ -461,10 +526,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 porcentagemLucro: '',
                 percentualImposto: '8',
                 markupAplicado: '1.55',
-                ncm: ''
+                ncm: '',
+                ean: '',
+                codigoFornecedor: '',
+                aliasesCodigos: [],
             });
+            setIsModalOpen(true);
         }
-        setIsModalOpen(true);
     };
 
     const handleCloseModal = () => {
@@ -475,6 +543,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         setNcmSearchResults([]);
         setNcmDescricaoPreview(null);
         setNcmSearchLoading(false);
+        setLoadingAliasesEdicao(false);
     };
 
     const handleBuscarNcm = async () => {
@@ -551,6 +620,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     useEscapeKey(viewModalOpen, () => {
         setViewModalOpen(false);
         setMaterialParaVisualizar(null);
+        setLoadingAliasesVisualizacao(false);
     });
     useEscapeKey(historicoModalOpen, handleFecharHistorico);
     useEscapeKey(showDeleteDialog, () => {
@@ -613,6 +683,37 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 return;
             }
 
+            const aliasesPayload = formState.aliasesCodigos
+                .map((row) => ({
+                    id: row.id,
+                    fornecedorId: row.fornecedorId || fornecedorIdFinal || '',
+                    ean: row.ean.trim(),
+                    codigoFornecedor: row.codigoFornecedor.trim(),
+                }))
+                .filter((row) => row.ean || row.codigoFornecedor);
+
+            for (const row of aliasesPayload) {
+                if (!row.fornecedorId) {
+                    toast.error('Fornecedor obrigatório', {
+                        description: 'Cada EAN/cProd precisa de um fornecedor selecionado na linha.',
+                    });
+                    return;
+                }
+                if (row.ean) {
+                    const eanDigits = row.ean.replace(/\D/g, '');
+                    if (eanDigits.length < 8 || eanDigits.length > 14) {
+                        toast.error('EAN inválido', {
+                            description: 'Informe um código de barras com 8 a 14 dígitos, ou deixe vazio.',
+                        });
+                        return;
+                    }
+                }
+            }
+
+            const primeiro = aliasesPayload[0];
+            const eanTrim = primeiro?.ean || '';
+            const cprodTrim = primeiro?.codigoFornecedor || '';
+
             const descricaoFinal =
                 (formState.description && formState.description.trim().length > 0)
                     ? formState.description.trim()
@@ -636,7 +737,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 categoria: formState.type,
                 tipo: formState.type, // ✅ Incluir tipo também
                 fornecedorId: fornecedorIdFinal || undefined,
-                ncm: ncmGravar
+                ncm: ncmGravar,
+                ...(itemToEdit
+                    ? { aliasesCodigos: aliasesPayload }
+                    : {
+                          ean: eanTrim || undefined,
+                          codigoFornecedor: cprodTrim || undefined,
+                      }),
             };
 
             let materialId: string;
@@ -648,7 +755,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     materialId = itemToEdit.id;
                     toast.success('✅ Material atualizado com sucesso!');
                 } else {
-                    toast.error('❌ Erro ao atualizar material');
+                    toast.error('❌ Erro ao atualizar material', {
+                        description: response.message || 'Não foi possível salvar as alterações.',
+                    });
                     return;
                 }
             } else {
@@ -668,11 +777,18 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     estoqueMinimo: parseFloat(formState.minStock),
                     categoria: formState.type,
                     fornecedorId: fornecedorIdFinal || undefined,
-                    ncm: ncmGravar || undefined
+                    ncm: ncmGravar || undefined,
+                    ean: eanTrim || undefined,
+                    codigoFornecedor: cprodTrim || undefined,
                 };
                 const response = await materiaisService.createMaterial(createPayload);
                 if (response.success && response.data) {
                     materialId = response.data.id;
+                    if (aliasesPayload.length > 1) {
+                        await materiaisService.updateMaterial(materialId, {
+                            aliasesCodigos: aliasesPayload,
+                        } as any);
+                    }
                     toast.success('✅ Material criado com sucesso!');
                 } else {
                     toast.error('❌ Erro ao criar material');
@@ -852,6 +968,79 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             setMaterialIdRecalculando(null);
         }
     };
+
+    const handleAbrirVisualizacao = async (material: MaterialItem) => {
+        setMaterialParaVisualizar(material);
+        setViewModalOpen(true);
+        setLoadingAliasesVisualizacao(true);
+        try {
+            const response = await materiaisService.getMaterialById(material.id);
+            const detalhe = response.data;
+            if (!response.success || !detalhe) return;
+
+            const aliases = detalhe.aliasesFornecedor ?? [];
+            const fornecedorId = detalhe.fornecedorId || detalhe.fornecedor?.id || material.supplier?.id;
+            const { ean, codigoFornecedor } = resolverEanCprod(aliases, fornecedorId);
+
+            setMaterialParaVisualizar((atual) => {
+                if (!atual || atual.id !== material.id) return atual;
+                return {
+                    ...atual,
+                    aliasesFornecedor: aliases,
+                    ean,
+                    codigoFornecedor,
+                    ncm: detalhe.ncm ?? atual.ncm,
+                };
+            });
+        } catch (error) {
+            console.error('Erro ao carregar aliases do material:', error);
+        } finally {
+            setLoadingAliasesVisualizacao(false);
+        }
+    };
+
+    const getMaterialRowActions = (material: MaterialItem) =>
+        buildCrudActions({
+            onView: () => {
+                void handleAbrirVisualizacao(material);
+            },
+            onEdit: () => handleOpenModal(material),
+            onDelete: () => {
+                void handleOpenDeleteDialog(material);
+            },
+            showView: true,
+            showEdit: true,
+            showDelete: true,
+            deleteLabel: isAdminOrDev ? 'Excluir' : 'Desativar',
+            extras: [
+                {
+                    label: 'Histórico',
+                    variant: 'info',
+                    onClick: () => {
+                        void handleAbrirHistorico(material);
+                    },
+                    icon: (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                    ),
+                },
+                {
+                    label: materialIdRecalculando === material.id ? 'Recalculando...' : 'Recalcular Custo',
+                    variant: 'primary',
+                    disabled: materialIdRecalculando === material.id,
+                    loading: materialIdRecalculando === material.id,
+                    onClick: () => {
+                        void handleRecalcularCustoUnitario(material);
+                    },
+                    icon: (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                    ),
+                },
+            ],
+        });
 
     const handleProcessarFracionamento = async () => {
         try {
@@ -1758,187 +1947,127 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
 
-                                {/* Botões de Ação - Compactos */}
-                                <div className="grid grid-cols-2 gap-1.5 pt-2 border-t border-gray-100 dark:border-dark-border">
-                                    <button
-                                        onClick={() => {
-                                            setMaterialParaVisualizar(material);
-                                            setViewModalOpen(true);
-                                        }}
-                                        className="flex items-center justify-center gap-1 px-2 py-1.5 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-colors text-[11px] font-semibold"
-                                        title="Visualizar detalhes"
-                                    >
-                                        <EyeIcon className="w-3 h-3" />
-                                        Ver
-                                    </button>
-                                    <button
-                                        onClick={() => handleOpenModal(material)}
-                                        className="flex items-center justify-center gap-1 px-2 py-1.5 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors text-[11px] font-semibold"
-                                        title="Editar"
-                                    >
-                                        <PencilIcon className="w-3 h-3" />
-                                        Editar
-                                    </button>
+                                {/* Ações do card — dropdown único (design system) */}
+                                <div className="pt-2 border-t border-gray-100 dark:border-dark-border flex justify-end">
+                                    <ActionsDropdown
+                                        label="Ações"
+                                        actions={getMaterialRowActions(material)}
+                                    />
                                 </div>
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (
-                /* Visualização em Lista */
-                <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-2xl overflow-hidden shadow-soft">
-                    <table className="w-full">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-dark-border">
-                            <tr>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Foto</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Material</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
-                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque</th>
-                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Preço Compra</th>
-                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor Venda</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Fornecedor</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
-                            {filteredMaterials.map((material) => (
-                                <tr key={material.id} className="bg-white dark:bg-dark-bg hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
-                                    <td className="px-6 py-4 text-center">
-                                        {material.imagemUrl ? (
-                                            <img
-                                                src={getUploadUrl(material.imagemUrl)}
-                                                alt={material.name || 'Material'}
-                                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 dark:border-dark-border mx-auto"
-                                                onError={(e) => {
-                                                    (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
-                                                }}
-                                            />
-                                        ) : (
-                                            <div className="w-12 h-12 bg-gray-100 dark:bg-dark-card rounded-lg flex items-center justify-center mx-auto">
-                                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                </svg>
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="font-semibold text-gray-900 dark:text-white">
-
-                                            {(material.name || '').includes('Produto importado via XML') 
-                                                ? material.description || material.name || 'Sem nome'
-                                                : material.name || 'Sem nome'}
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">{material.type || 'Sem tipo'}</p>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300 rounded font-mono">
-                                            {material.sku || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <p className="font-bold text-gray-900 dark:text-white">
-                                            {material.stock ?? 0} <span className="text-xs text-gray-500 dark:text-gray-400">{material.unitOfMeasure}</span>
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {material.minStock ?? 0}</p>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <p className="text-lg font-bold text-blue-700 dark:text-blue-400">
-                                            R$ {(material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </p>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        {(() => {
-                                            const valorVenda = getValorVendaExibicao(material);
-                                            return (
-                                                <>
-                                                    <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
-                                                        R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        {valorVenda.unidade === 'm' && <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">/m</span>}
-                                                    </p>
-                                                    {valorVenda.secundario && valorVenda.secundario > 0 && (
-                                                        <p className="text-sm font-medium text-green-600 dark:text-green-400">
-                                                            R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
-                                                        </p>
-                                                    )}
-                                                    {!valorVenda.temValor && (
-                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Sem valor de venda</p>
-                                                    )}
-                                                </>
-                                            );
-                                        })()}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
-                                            {material.supplier?.name || '-'}
-                                        </p>
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStockStatusClass(material)}`}>
-                                            {getStockStatusText(material)}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center justify-center gap-2">
-                                            <button
-                                                onClick={() => {
-                                                    setMaterialParaVisualizar(material);
-                                                    setViewModalOpen(true);
-                                                }}
-                                                className="p-2 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 transition-colors"
-                                                title="Visualizar"
-                                            >
-                                                <EyeIcon className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleAbrirHistorico(material)}
-                                                className="p-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 transition-colors"
-                                                title="Histórico"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                                </svg>
-                                            </button>
-                                            <button
-                                                onClick={() => handleRecalcularCustoUnitario(material)}
-                                                disabled={materialIdRecalculando === material.id}
-                                                className="p-2 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
-                                                title="Recalcular Custo Unitário (KM→M)"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                                                </svg>
-                                            </button>
-                                            <button
-                                                onClick={() => handleOpenModal(material)}
-                                                className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 transition-colors"
-                                                title="Editar"
-                                            >
-                                                <PencilIcon className="w-4 h-4" />
-                                            </button>
-                                            {isAdminOrDev ? (
-                                                <button
-                                                    onClick={() => handleOpenDeleteDialog(material)}
-                                                    className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
-                                                    title="Excluir material permanentemente (apenas admin/desenvolvedor)"
-                                                >
-                                                    <TrashIcon className="w-4 h-4" />
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => handleOpenDeleteDialog(material)}
-                                                    className="p-2 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-200 transition-colors"
-                                                    title="Desativar material"
-                                                >
-                                                    <TrashIcon className="w-4 h-4" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
+                /* Visualização em Lista — overflow-x + Ações sticky para notebooks com sidebar */
+                <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-2xl shadow-soft">
+                    <div className="overflow-x-auto rounded-2xl">
+                        <table className="w-full min-w-[640px]">
+                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-dark-border">
+                                <tr>
+                                    <th className="hidden lg:table-cell px-4 xl:px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Foto</th>
+                                    <th className="px-4 xl:px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Material</th>
+                                    <th className="px-4 xl:px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
+                                    <th className="px-4 xl:px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque</th>
+                                    <th className="hidden lg:table-cell px-4 xl:px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Preço Compra</th>
+                                    <th className="px-4 xl:px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor Venda</th>
+                                    <th className="hidden xl:table-cell px-4 xl:px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Fornecedor</th>
+                                    <th className="hidden md:table-cell px-4 xl:px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                                    <th className="sticky right-0 z-20 px-3 sm:px-4 xl:px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase bg-gray-100 dark:bg-gray-700 border-l border-gray-200 dark:border-dark-border shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                                        Ações
+                                    </th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
+                                {filteredMaterials.map((material) => (
+                                    <tr key={material.id} className="group bg-white dark:bg-dark-bg hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
+                                        <td className="hidden lg:table-cell px-4 xl:px-6 py-4 text-center">
+                                            {material.imagemUrl ? (
+                                                <img
+                                                    src={getUploadUrl(material.imagemUrl)}
+                                                    alt={material.name || 'Material'}
+                                                    className="w-12 h-12 object-cover rounded-lg border border-gray-200 dark:border-dark-border mx-auto"
+                                                    onError={(e) => {
+                                                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="w-12 h-12 bg-gray-100 dark:bg-dark-card rounded-lg flex items-center justify-center mx-auto">
+                                                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                    </svg>
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-4 xl:px-6 py-4 min-w-[140px]">
+                                            <p className="font-semibold text-gray-900 dark:text-white">
+
+                                                {(material.name || '').includes('Produto importado via XML') 
+                                                    ? material.description || material.name || 'Sem nome'
+                                                    : material.name || 'Sem nome'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">{material.type || 'Sem tipo'}</p>
+                                        </td>
+                                        <td className="px-4 xl:px-6 py-4 whitespace-nowrap">
+                                            <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300 rounded font-mono">
+                                                {material.sku || 'N/A'}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 xl:px-6 py-4 text-right whitespace-nowrap">
+                                            <p className="font-bold text-gray-900 dark:text-white">
+                                                {material.stock ?? 0} <span className="text-xs text-gray-500 dark:text-gray-400">{material.unitOfMeasure}</span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {material.minStock ?? 0}</p>
+                                        </td>
+                                        <td className="hidden lg:table-cell px-4 xl:px-6 py-4 text-right whitespace-nowrap">
+                                            <p className="text-lg font-bold text-blue-700 dark:text-blue-400">
+                                                R$ {(material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </td>
+                                        <td className="px-4 xl:px-6 py-4 text-right whitespace-nowrap">
+                                            {(() => {
+                                                const valorVenda = getValorVendaExibicao(material);
+                                                return (
+                                                    <>
+                                                        <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
+                                                            R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            {valorVenda.unidade === 'm' && <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">/m</span>}
+                                                        </p>
+                                                        {valorVenda.secundario && valorVenda.secundario > 0 && (
+                                                            <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                                                                R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
+                                                            </p>
+                                                        )}
+                                                        {!valorVenda.temValor && (
+                                                            <p className="text-xs text-gray-500 dark:text-gray-400">Sem valor de venda</p>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
+                                        </td>
+                                        <td className="hidden xl:table-cell px-4 xl:px-6 py-4 max-w-[160px]">
+                                            <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                                                {material.supplier?.name || '-'}
+                                            </p>
+                                        </td>
+                                        <td className="hidden md:table-cell px-4 xl:px-6 py-4 text-center whitespace-nowrap">
+                                            <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStockStatusClass(material)}`}>
+                                                {getStockStatusText(material)}
+                                            </span>
+                                        </td>
+                                        <td className="sticky right-0 z-10 px-3 sm:px-4 xl:px-6 py-4 bg-white dark:bg-dark-bg group-hover:bg-gray-50 dark:group-hover:bg-dark-card border-l border-gray-200 dark:border-dark-border shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                                            <div className="flex items-center justify-center">
+                                                <ActionsDropdown
+                                                    label="Ações"
+                                                    actions={getMaterialRowActions(material)}
+                                                />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
 
@@ -1986,6 +2115,137 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         className="input-field"
                                         placeholder="Ex: CAB-2.5-FLEX"
                                     />
+                                </div>
+
+                                <div className="md:col-span-2 space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text">
+                                            EAN(s) e cProd(s)
+                                            {loadingAliasesEdicao && (
+                                                <span className="ml-2 text-xs font-normal text-gray-400">carregando…</span>
+                                            )}
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setFormState((prev) => ({
+                                                    ...prev,
+                                                    aliasesCodigos: [
+                                                        ...prev.aliasesCodigos,
+                                                        {
+                                                            key: `tmp-${Date.now()}`,
+                                                            fornecedorId: prev.supplierId || '',
+                                                            ean: '',
+                                                            codigoFornecedor: '',
+                                                        },
+                                                    ],
+                                                }))
+                                            }
+                                            className="text-sm font-semibold text-teal-700 hover:text-teal-800 dark:text-teal-300"
+                                        >
+                                            + Adicionar
+                                        </button>
+                                    </div>
+                                    {formState.aliasesCodigos.length === 0 ? (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Nenhum EAN/cProd cadastrado. Adicione códigos de barras e códigos do fornecedor (NF-e).
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {formState.aliasesCodigos.map((row, idx) => (
+                                                <div
+                                                    key={row.key}
+                                                    className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50/80 dark:bg-dark-card/40"
+                                                >
+                                                    <div className="md:col-span-4">
+                                                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                                            Fornecedor
+                                                        </label>
+                                                        <select
+                                                            value={row.fornecedorId}
+                                                            onChange={(e) => {
+                                                                const fornecedorId = e.target.value;
+                                                                setFormState((prev) => {
+                                                                    const next = [...prev.aliasesCodigos];
+                                                                    next[idx] = { ...next[idx], fornecedorId };
+                                                                    return { ...prev, aliasesCodigos: next };
+                                                                });
+                                                            }}
+                                                            className="input-field text-sm"
+                                                        >
+                                                            <option value="">Selecione…</option>
+                                                            {fornecedores.map((f) => (
+                                                                <option key={f.id} value={f.id}>
+                                                                    {f.nome}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="md:col-span-3">
+                                                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                                            EAN
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="numeric"
+                                                            autoComplete="off"
+                                                            value={row.ean}
+                                                            onChange={(e) => {
+                                                                const ean = e.target.value;
+                                                                setFormState((prev) => {
+                                                                    const next = [...prev.aliasesCodigos];
+                                                                    next[idx] = { ...next[idx], ean };
+                                                                    return { ...prev, aliasesCodigos: next };
+                                                                });
+                                                            }}
+                                                            className="input-field font-mono text-sm"
+                                                            placeholder="789…"
+                                                        />
+                                                    </div>
+                                                    <div className="md:col-span-4">
+                                                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                                            cProd
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            autoComplete="off"
+                                                            value={row.codigoFornecedor}
+                                                            onChange={(e) => {
+                                                                const codigoFornecedor = e.target.value;
+                                                                setFormState((prev) => {
+                                                                    const next = [...prev.aliasesCodigos];
+                                                                    next[idx] = { ...next[idx], codigoFornecedor };
+                                                                    return { ...prev, aliasesCodigos: next };
+                                                                });
+                                                            }}
+                                                            className="input-field font-mono text-sm"
+                                                            placeholder="Código fornecedor"
+                                                        />
+                                                    </div>
+                                                    <div className="md:col-span-1 flex items-end justify-end">
+                                                        <button
+                                                            type="button"
+                                                            title="Remover"
+                                                            onClick={() =>
+                                                                setFormState((prev) => ({
+                                                                    ...prev,
+                                                                    aliasesCodigos: prev.aliasesCodigos.filter(
+                                                                        (_, i) => i !== idx
+                                                                    ),
+                                                                }))
+                                                            }
+                                                            className="px-2 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg text-sm font-semibold"
+                                                        >
+                                                            Remover
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        É possível cadastrar vários EAN e cProd (por fornecedor). Usados no Inventário e no matching de compras.
+                                    </p>
                                 </div>
 
                                 <div className="md:col-span-2">
@@ -2839,6 +3099,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                             onClose={() => {
                                 setViewModalOpen(false);
                                 setMaterialParaVisualizar(null);
+                                setLoadingAliasesVisualizacao(false);
                             }}
                             title="Detalhes do Material"
                             subtitle="Informações completas do item"
@@ -2878,6 +3139,82 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">SKU</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">{materialParaVisualizar.sku}</p>
                                 </div>
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl md:col-span-2">
+                                    <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">EAN(s)</h3>
+                                    {loadingAliasesVisualizacao &&
+                                    materialParaVisualizar.ean == null &&
+                                    !materialParaVisualizar.aliasesFornecedor ? (
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Carregando…</p>
+                                    ) : (
+                                        (() => {
+                                            const eans = listarEansDistintos(materialParaVisualizar.aliasesFornecedor);
+                                            const fallback = materialParaVisualizar.ean?.trim();
+                                            const lista = eans.length > 0 ? eans : fallback ? [fallback] : [];
+                                            if (lista.length === 0) {
+                                                return (
+                                                    <p className="text-gray-900 dark:text-white font-mono font-medium">
+                                                        Não informado
+                                                    </p>
+                                                );
+                                            }
+                                            return (
+                                                <ul className="space-y-1">
+                                                    {lista.map((e) => (
+                                                        <li
+                                                            key={e}
+                                                            className="text-gray-900 dark:text-white font-mono font-medium"
+                                                        >
+                                                            {e}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            );
+                                        })()
+                                    )}
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        GTIN / códigos de barras vinculados ao material
+                                    </p>
+                                </div>
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl md:col-span-2">
+                                    <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">
+                                        Código(s) do fornecedor (cProd)
+                                    </h3>
+                                    {loadingAliasesVisualizacao &&
+                                    materialParaVisualizar.codigoFornecedor == null &&
+                                    !materialParaVisualizar.aliasesFornecedor ? (
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Carregando…</p>
+                                    ) : (
+                                        (() => {
+                                            const cprods = listarCprodsDistintos(
+                                                materialParaVisualizar.aliasesFornecedor
+                                            );
+                                            const fallback = materialParaVisualizar.codigoFornecedor?.trim();
+                                            const lista = cprods.length > 0 ? cprods : fallback ? [fallback] : [];
+                                            if (lista.length === 0) {
+                                                return (
+                                                    <p className="text-gray-900 dark:text-white font-mono font-medium">
+                                                        Não informado
+                                                    </p>
+                                                );
+                                            }
+                                            return (
+                                                <ul className="space-y-1">
+                                                    {lista.map((c) => (
+                                                        <li
+                                                            key={c}
+                                                            className="text-gray-900 dark:text-white font-mono font-medium"
+                                                        >
+                                                            {c}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            );
+                                        })()
+                                    )}
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        cProd da NF-e vinculados ao material
+                                    </p>
+                                </div>
                                 <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">NCM</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">
@@ -2898,6 +3235,30 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <p className="text-gray-900 dark:text-white font-medium">{materialParaVisualizar.type || 'N/A'}</p>
                                 </div>
                             </div>
+
+                            {(() => {
+                                const unicos = aliasesCodigosDistintos(
+                                    materialParaVisualizar.aliasesFornecedor,
+                                    materialParaVisualizar.ean,
+                                    materialParaVisualizar.codigoFornecedor
+                                );
+                                if (unicos.length === 0) return null;
+                                return (
+                                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 rounded-xl">
+                                        <h3 className="font-semibold text-amber-900 dark:text-amber-200 mb-2">Outros vínculos (EAN / cProd)</h3>
+                                        <ul className="space-y-2 text-sm">
+                                            {unicos.map((a) => (
+                                                <li key={a.id} className="text-gray-800 dark:text-gray-200 font-mono">
+                                                    <span className="text-gray-600 dark:text-gray-400 font-sans">
+                                                        {a.fornecedor?.nome || 'Fornecedor'} —{' '}
+                                                    </span>
+                                                    EAN: {textoOuNaoInformado(a.ean)} · cProd: {textoOuNaoInformado(a.codigoFornecedor)}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                );
+                            })()}
 
                             {/* Descrição */}
                             {materialParaVisualizar.description && (

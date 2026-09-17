@@ -13,6 +13,7 @@ import {
   isCableFamilia,
   type CableFamilia
 } from '../utils/cableBitolaMatcher';
+import { upsertCodigosManuaisMaterial, sincronizarAliasesCodigosMaterial } from '../services/materialFornecedorAlias.service';
 
 
 /** Arredonda para 2 casas decimais (valores monetários). */
@@ -118,6 +119,18 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
       where: { id },
       include: {
         fornecedor: true,
+        aliasesFornecedor: {
+          select: {
+            id: true,
+            ean: true,
+            codigoFornecedor: true,
+            nomeOriginal: true,
+            fornecedorId: true,
+            updatedAt: true,
+            fornecedor: { select: { id: true, nome: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        },
         movimentacoes: {
           orderBy: { data: 'desc' },
           take: 10
@@ -141,7 +154,22 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
 export const createMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
     // codigo e unidade vêm do front mas não existem no modelo Material (Prisma); não incluir em rest
-    let { categoria, nome, sku, ncm, unidadeMedida, tipo, codigo, unidade, ...rest } = req.body;
+    // ean / codigoFornecedor (cProd) vivem em MaterialFornecedorAlias
+    let {
+      categoria,
+      nome,
+      sku,
+      ncm,
+      unidadeMedida,
+      tipo,
+      codigo,
+      unidade,
+      ean,
+      codigoFornecedor,
+      cProd,
+      ...rest
+    } = req.body;
+    const cProdBody = codigoFornecedor ?? cProd;
     
     // Schema exige "nome" e "tipo": usar fallbacks quando o front não envia (ex: formulário com descricao/codigo)
     const nomeFinal = (nome && String(nome).trim()) || rest.descricao || codigo || 'Material sem nome';
@@ -203,9 +231,35 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
       dataCreate.custoAgregado = precificacao.custoAgregado;
     }
 
+    const temCodigos =
+      (ean !== undefined && String(ean).trim() !== '') ||
+      (cProdBody !== undefined && String(cProdBody).trim() !== '');
+    if (temCodigos && !(rest.fornecedorId)) {
+      res.status(400).json({
+        error: 'Para gravar EAN/cProd selecione um fornecedor no material.',
+      });
+      return;
+    }
+
     const material = await prisma.material.create({
       data: dataCreate
     });
+
+    if (temCodigos && material.fornecedorId) {
+      const aliasResult = await upsertCodigosManuaisMaterial(prisma, {
+        materialId: material.id,
+        fornecedorId: material.fornecedorId,
+        nomeMaterial: material.nome,
+        ean: ean !== undefined ? ean : undefined,
+        codigoFornecedor: cProdBody !== undefined ? cProdBody : undefined,
+        ncm: material.ncm,
+        createdBy: (req as any).user?.userId || (req as any).user?.id || null,
+      });
+      if (!aliasResult.ok) {
+        res.status(400).json({ error: aliasResult.message, material });
+        return;
+      }
+    }
 
     res.status(201).json(material);
   } catch (error) {
@@ -218,7 +272,22 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
 export const updateMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    let { categoria, nome, unidadeMedida, ...rest } = req.body;
+    let {
+      categoria,
+      nome,
+      unidadeMedida,
+      ean,
+      codigoFornecedor,
+      cProd,
+      aliasesCodigos,
+      ...rest
+    } = req.body;
+    const cProdBody = codigoFornecedor ?? cProd;
+    const eanInformado = Object.prototype.hasOwnProperty.call(req.body, 'ean');
+    const cprodInformado =
+      Object.prototype.hasOwnProperty.call(req.body, 'codigoFornecedor') ||
+      Object.prototype.hasOwnProperty.call(req.body, 'cProd');
+    const aliasesCodigosInformado = Object.prototype.hasOwnProperty.call(req.body, 'aliasesCodigos');
 
     // Normalizar categoria se fornecida
     if (categoria) {
@@ -296,6 +365,48 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
       where: { id },
       data: dataUpdate
     });
+
+    if (aliasesCodigosInformado) {
+      const sync = await sincronizarAliasesCodigosMaterial(prisma as any, {
+        materialId: material.id,
+        nomeMaterial: material.nome,
+        ncm: material.ncm,
+        aliases: Array.isArray(aliasesCodigos) ? aliasesCodigos : [],
+        createdBy: (req as any).user?.userId || (req as any).user?.id || null,
+      });
+      if (!sync.ok) {
+        res.status(400).json({ error: sync.message });
+        return;
+      }
+    } else if (eanInformado || cprodInformado) {
+      const fornecedorIdAlias = material.fornecedorId || fornecedorId;
+      const temValor =
+        (eanInformado && ean != null && String(ean).trim() !== '') ||
+        (cprodInformado && cProdBody != null && String(cProdBody).trim() !== '');
+
+      if (!fornecedorIdAlias && temValor) {
+        res.status(400).json({
+          error: 'Para gravar EAN/cProd selecione um fornecedor no material.',
+        });
+        return;
+      }
+
+      if (fornecedorIdAlias) {
+        const aliasResult = await upsertCodigosManuaisMaterial(prisma, {
+          materialId: material.id,
+          fornecedorId: fornecedorIdAlias,
+          nomeMaterial: material.nome,
+          ean: eanInformado ? ean : undefined,
+          codigoFornecedor: cprodInformado ? cProdBody : undefined,
+          ncm: material.ncm,
+          createdBy: (req as any).user?.userId || (req as any).user?.id || null,
+        });
+        if (!aliasResult.ok) {
+          res.status(400).json({ error: aliasResult.message });
+          return;
+        }
+      }
+    }
 
     res.json(material);
   } catch (error) {
