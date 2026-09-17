@@ -59,6 +59,15 @@ export const MovementIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+// Ícone de Inventário / Contagem física (Clipboard checklist)
+export const InventoryIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+        <rect x="9" y="3" width="6" height="4" rx="1" />
+        <path d="M9 14l2 2 4-4" />
+    </svg>
+);
+
 // Ícone de Logs (Terminal/Console)
 export const LogsIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -358,6 +367,7 @@ export const navLinks: NavLink[] = [
     { name: 'Compras', icon: ShoppingBagIcon, requiredPermission: 'view_projetos' },
     { name: 'Estoque', icon: CubeIcon, requiredPermission: 'view_catalogo' },
     { name: 'Movimentações', icon: MovementIcon, requiredPermission: 'view_movimentacoes' },
+    { name: 'Inventário', icon: InventoryIcon, requiredPermission: 'view_movimentacoes' },
     { name: 'Catálogo', icon: CatalogIcon, requiredPermission: 'view_catalogo' },
     
     // ========== OPERACIONAL / TAREFAS INTERNAS + ORDEM DE SERVIÇOS ==========

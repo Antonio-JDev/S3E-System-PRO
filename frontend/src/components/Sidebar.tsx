@@ -28,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { cn } from '../lib/utils';
-import { Bell, Settings, LogOut, ChevronsUpDown, Sun, Moon, ChevronDown } from 'lucide-react';
+import { Bell, Settings, LogOut, ChevronsUpDown, ChevronDown, Sun, Moon } from 'lucide-react';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { NotificationBell } from './NotificationBell';
 import { APP_SIDEBAR_TAGLINE, DEFAULT_SIDEBAR_APP_NAME } from '../config/branding';
@@ -129,7 +129,7 @@ const NavSection: React.FC<{
         type="button"
         onClick={onToggle}
         className={cn(
-          'mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors',
+          'mb-1 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
           'hover:bg-gray-100 dark:hover:bg-gray-800/60',
           hasActive && 'text-gray-900 dark:text-white'
         )}
@@ -140,9 +140,10 @@ const NavSection: React.FC<{
         </span>
         <ChevronDown
           className={cn(
-            'h-3.5 w-3.5 text-gray-400 transition-transform duration-200',
+            'h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200',
             open && 'rotate-180'
           )}
+          aria-hidden
         />
       </button>
       <div
@@ -308,7 +309,7 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
 
   const geral = useMemo(() => filteredNavLinks.filter((l) => l.name === 'Dashboard'), [filteredNavLinks]);
   const comercial = useMemo(() => filteredNavLinks.filter((l) => ['Funil de Atendimento', 'Chat WhatsApp', 'Contatos S3E', 'Clientes', 'Orçamentos', 'Vendas', 'Serviços'].includes(l.name)), [filteredNavLinks]);
-  const suprimentos = useMemo(() => filteredNavLinks.filter((l) => ['Fornecedores', 'Estoque', 'Movimentações', 'Catálogo'].includes(l.name)), [filteredNavLinks]);
+  const suprimentos = useMemo(() => filteredNavLinks.filter((l) => ['Fornecedores', 'Estoque', 'Movimentações', 'Inventário', 'Catálogo'].includes(l.name)), [filteredNavLinks]);
   const operacional = useMemo(() => filteredNavLinks.filter((l) => ['Tarefas Internas', 'Ordem De Serviços', 'Calendário', 'Gestão de Frota', 'Ferramentas'].includes(l.name)), [filteredNavLinks]);
   const financeiro = useMemo(() => filteredNavLinks.filter((l) => ['Financeiro', 'Compras', 'Emissão NF-e', 'Logs'].includes(l.name)), [filteredNavLinks]);
   const gestaoEmpresarial = useMemo(

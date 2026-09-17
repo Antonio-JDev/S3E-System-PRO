@@ -77,6 +77,7 @@ const getTypeClass = (type: MovementType) => {
     switch (type) {
         case MovementType.Entrada: return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800';
         case MovementType.Saida: return 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 ring-1 ring-orange-200 dark:ring-orange-800';
+        case MovementType.Ajuste: return 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300 ring-1 ring-indigo-200 dark:ring-indigo-800';
         default: return 'bg-gray-100 dark:bg-dark-card text-gray-800 dark:text-dark-text ring-1 ring-gray-200 dark:ring-dark-border';
     }
 };
@@ -85,7 +86,17 @@ const getTypeIcon = (type: MovementType) => {
     switch (type) {
         case MovementType.Entrada: return '📥';
         case MovementType.Saida: return '📤';
+        case MovementType.Ajuste: return '📋';
         default: return '📦';
+    }
+};
+
+const getTypeLabel = (type: MovementType) => {
+    switch (type) {
+        case MovementType.Entrada: return 'Entrada';
+        case MovementType.Saida: return 'Saída';
+        case MovementType.Ajuste: return 'Ajuste';
+        default: return String(type);
     }
 };
 
@@ -149,7 +160,11 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                         id: mov.id || `mov-${Date.now()}`,
                         materialId: mov.materialId || '',
                         materialName: mov.material?.nome || 'Material não encontrado',
-                        type: mov.tipo === 'ENTRADA' ? MovementType.Entrada : MovementType.Saida,
+                        type: mov.tipo === 'ENTRADA'
+                            ? MovementType.Entrada
+                            : mov.tipo === 'AJUSTE'
+                              ? MovementType.Ajuste
+                              : MovementType.Saida,
                         quantity: mov.quantidade || 0,
                         reason: mov.motivo || 'Não informado',
                         responsible: 'Sistema',
@@ -513,6 +528,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                             <option value="Todos">Todos os Tipos</option>
                             <option value={MovementType.Entrada}>Entradas</option>
                             <option value={MovementType.Saida}>Saídas</option>
+                            <option value={MovementType.Ajuste}>Ajustes</option>
                         </select>
                     </div>
 
@@ -586,7 +602,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                         <div className="flex items-center gap-3 mb-2">
                                             <h3 className="font-bold text-lg text-gray-900 dark:text-dark-text">{movement.materialName || 'Material'}</h3>
                                             <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getTypeClass(movement.type)}`}>
-                                                {getTypeIcon(movement.type)} {movement.type === MovementType.Entrada ? 'Entrada' : 'Saída'}
+                                                {getTypeIcon(movement.type)} {getTypeLabel(movement.type)}
                                             </span>
                                         </div>
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-gray-600 dark:text-dark-text-secondary">
@@ -649,7 +665,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                 <strong>Material:</strong> {movimentacaoToDelete.materialName}
                             </p>
                             <p className="text-sm text-gray-800 dark:text-dark-text">
-                                <strong>Tipo:</strong> {movimentacaoToDelete.type === MovementType.Entrada ? 'Entrada' : 'Saída'}
+                                <strong>Tipo:</strong> {getTypeLabel(movimentacaoToDelete.type)}
                             </p>
                             <p className="text-sm text-gray-800 dark:text-dark-text">
                                 <strong>Quantidade:</strong> {movimentacaoToDelete.quantity}

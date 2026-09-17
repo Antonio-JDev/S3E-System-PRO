@@ -30,6 +30,7 @@ const DashboardAPI = lazy(() => import('./components/DashboardAPI'));
 const Orcamentos = lazy(() => import('./components/Orcamentos'));
 const Catalogo = lazy(() => import('./components/Catalogo'));
 const Movimentacoes = lazy(() => import('./components/Movimentacoes'));
+const Inventario = lazy(() => import('./components/Inventario'));
 const Logs = lazy(() => import('./components/Logs'));
 const Compras = lazy(() => import('./components/Compras'));
 const Materiais = lazy(() => import('./components/Materiais'));
@@ -316,6 +317,8 @@ const MainApp: React.FC = () => {
         return <Catalogo toggleSidebar={toggleSidebar} />;
       case 'Movimentações':
         return <Movimentacoes toggleSidebar={toggleSidebar} />;
+      case 'Inventário':
+        return <Inventario toggleSidebar={toggleSidebar} />;
       case 'Logs':
       case 'Histórico': // Compatibilidade
         return <Logs toggleSidebar={toggleSidebar} />;
@@ -471,6 +474,7 @@ const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: 
       'Orçamentos': '/',
       'Catálogo': '/',
       'Movimentações': '/',
+      'Inventário': '/',
       'Logs': '/',
       'Compras': '/compras',
       'Materiais': '/',

@@ -39,6 +39,7 @@ import cotacoesRoutes from './routes/cotacoes.routes';
 import pessoasRoutes from './routes/pessoa.routes';
 import servicosRoutes from './routes/servicos';
 import movimentacoesRoutes from './routes/movimentacoes';
+import inventarioRoutes from './routes/inventario.routes';
 import historicoRoutes from './routes/historico';
 import nfeRoutes from './routes/nfe';
 import { authenticate } from './middlewares/auth';
@@ -466,6 +467,7 @@ app.use('/api/eventos-calendario', eventosCalendarioRoutes);
 app.use('/api/cotacoes', cotacoesRoutes);
 app.use('/api/servicos', servicosRoutes);
 app.use('/api/movimentacoes', movimentacoesRoutes);
+app.use('/api/inventario', inventarioRoutes);
 app.use('/api/historico', historicoRoutes);
 
 // Rotas compatíveis utilizadas pelo frontend (eventos / reprocessar / enviar-email / xml por nota)

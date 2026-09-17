@@ -115,6 +115,7 @@ export const ENDPOINTS = {
   PROJETOS: '/api/projetos',
   SERVICOS: '/api/servicos',
   MOVIMENTACOES: '/api/movimentacoes',
+  INVENTARIO: '/api/inventario',
   HISTORICO: '/api/historico',
   NFE: '/api/nfe',
   EMPRESAS: '/api/empresas',
