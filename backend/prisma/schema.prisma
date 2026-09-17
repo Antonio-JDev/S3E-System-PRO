@@ -402,6 +402,12 @@ model ChatMessage {
   fileSize      Int?     @map("file_size")
   /** Id de mídia informado pelo provedor no webhook (se distinto do id da mensagem). */
   providerMediaId   String?  @map("provider_media_id")
+  /** Resposta a outra mensagem: id do provedor da mensagem citada. */
+  quotedProviderMessageId String? @map("quoted_provider_message_id")
+  /** Trecho / rótulo da mensagem citada (texto, "Imagem", etc.). */
+  quotedContent     String?  @map("quoted_content") @db.Text
+  quotedFromMe      Boolean? @map("quoted_from_me")
+  quotedAuthorName  String?  @map("quoted_author_name")
   clienteId     String?  @map("cliente_id")
   contatoLeadId String?  @map("contato_lead_id")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -844,6 +850,8 @@ model Projeto {
   exigeVistoriaCelesc      Boolean               @default(false)
   statusVistoria           StatusVistoriaCelesc?
   dataProtocoloVistoria    DateTime?
+  /// Checklist entrega/romaneio (OS Quadros e Painéis) — JSON tipado em osEntregaQuadro.util
+  entregaQuadro            Json?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
@@ -877,7 +885,10 @@ model HistoricoReprovacaoVistoria {
   projetoId       String
   dataReprovacao  DateTime
   motivos         String   @db.Text
-  itensReprovados Json // string[]
+  /// Legado: string[] com labels dos itens que não passaram
+  itensReprovados Json
+  /// Avaliação por item: { codigo, label, passou, justificativa }[]
+  itensAvaliacao  Json?
   criadoEm        DateTime @default(now())
   criadoPorId     String?
 
