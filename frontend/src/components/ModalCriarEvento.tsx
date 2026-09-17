@@ -130,26 +130,24 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
   const [sugestoesOs, setSugestoesOs] = useState<Array<{ id: string; titulo: string; numeroOs?: string | null; cliente?: { nome: string } | null }>>([]);
   const [dropdownOsAberto, setDropdownOsAberto] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
-  const [custoVeiculo, setCustoVeiculo] = useState('0');
+  const [custoVeiculo, setCustoVeiculo] = useState('');
   const [pessoasSelecionadas, setPessoasSelecionadas] = useState<FuncionarioEquipeResumo[]>([]);
   const [modoAlocacaoObra, setModoAlocacaoObra] = useState<ModoAlocacaoObra>('equipe');
-  const [buscaPessoa, setBuscaPessoa] = useState('');
   const [buscaEquipe, setBuscaEquipe] = useState('');
-  const [sugestoesPessoas, setSugestoesPessoas] = useState<FuncionarioEquipeResumo[]>([]);
   const [sugestoesEquipes, setSugestoesEquipes] = useState<EquipePreMontadaResumo[]>([]);
-  const [buscandoPessoas, setBuscandoPessoas] = useState(false);
   const [buscandoEquipes, setBuscandoEquipes] = useState(false);
-  const [dropdownPessoaAberto, setDropdownPessoaAberto] = useState(false);
   const [dropdownEquipeAberto, setDropdownEquipeAberto] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   const [periodoOsHint, setPeriodoOsHint] = useState<string | null>(null);
   const [alocarPeriodoOs, setAlocarPeriodoOs] = useState(false);
+  const [funcionariosDisponiveis, setFuncionariosDisponiveis] = useState<FuncionarioEquipeResumo[]>([]);
+  const [carregandoFuncionarios, setCarregandoFuncionarios] = useState(false);
+  const [filtroFuncionario, setFiltroFuncionario] = useState('');
   const [veiculosDisponiveis, setVeiculosDisponiveis] = useState<VeiculoEventoResumo[]>([]);
   const [veiculosSelecionados, setVeiculosSelecionados] = useState<VeiculoEventoResumo[]>([]);
-  const [buscaVeiculo, setBuscaVeiculo] = useState('');
+  const [filtroVeiculo, setFiltroVeiculo] = useState('');
   const buscaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pessoaContainerRef = useRef<HTMLDivElement>(null);
   const equipePreMontadaRef = useRef<HTMLDivElement>(null);
 
   const isObra = tipo === 'OBRA';
@@ -171,33 +169,55 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
         : [];
       setVeiculosDisponiveis(ativos);
     }).catch(() => setVeiculosDisponiveis([]));
+
+    setCarregandoFuncionarios(true);
+    eventosCalendarioService
+      .listarFuncionariosAlocacao()
+      .then((res) => {
+        const lista = res.success && Array.isArray(res.data) ? res.data : [];
+        setFuncionariosDisponiveis(
+          lista.map((f) => ({
+            id: f.id,
+            nome: f.nome,
+            cargo: f.cargo,
+            email: f.email,
+            valorHora: f.valorHora,
+            valorDiaria: f.valorDiaria,
+            status: f.status,
+          }))
+        );
+      })
+      .catch(() => setFuncionariosDisponiveis([]))
+      .finally(() => setCarregandoFuncionarios(false));
   }, [isOpen]);
 
+  const idsPessoasSet = useMemo(() => new Set(idsPessoasSelecionadas), [idsPessoasSelecionadas]);
+  const idsVeiculosSet = useMemo(
+    () => new Set(veiculosSelecionados.map((v) => v.id)),
+    [veiculosSelecionados]
+  );
+
+  const funcionariosFiltrados = useMemo(() => {
+    const termo = filtroFuncionario.trim().toLowerCase();
+    if (!termo) return funcionariosDisponiveis;
+    return funcionariosDisponiveis.filter(
+      (f) =>
+        f.nome.toLowerCase().includes(termo) ||
+        (f.cargo || '').toLowerCase().includes(termo) ||
+        (f.email || '').toLowerCase().includes(termo)
+    );
+  }, [funcionariosDisponiveis, filtroFuncionario]);
+
   const veiculosFiltrados = useMemo(() => {
-    const termo = buscaVeiculo.trim().toLowerCase();
-    const ids = new Set(veiculosSelecionados.map((v) => v.id));
-    return veiculosDisponiveis.filter((v) => {
-      if (ids.has(v.id)) return false;
-      if (!termo) return true;
-      return (
+    const termo = filtroVeiculo.trim().toLowerCase();
+    if (!termo) return veiculosDisponiveis;
+    return veiculosDisponiveis.filter(
+      (v) =>
         v.modelo.toLowerCase().includes(termo) ||
         v.placa.toLowerCase().includes(termo) ||
         (v.tipo || '').toLowerCase().includes(termo)
-      );
-    });
-  }, [veiculosDisponiveis, veiculosSelecionados, buscaVeiculo]);
-
-  const carregarSugestoesPessoas = async (termo: string) => {
-    setBuscandoPessoas(true);
-    try {
-      const res = await eventosCalendarioService.buscarFuncionarios(termo, idsPessoasSelecionadas);
-      setSugestoesPessoas(res.success && Array.isArray(res.data) ? res.data : []);
-    } catch {
-      setSugestoesPessoas([]);
-    } finally {
-      setBuscandoPessoas(false);
-    }
-  };
+    );
+  }, [veiculosDisponiveis, filtroVeiculo]);
 
   const carregarSugestoesEquipes = async (termo: string) => {
     setBuscandoEquipes(true);
@@ -210,21 +230,6 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       setBuscandoEquipes(false);
     }
   };
-
-  useEffect(() => {
-    if (!isOpen || !dropdownPessoaAberto) return;
-    if (!isObra && !isReuniaoOuVisita) return;
-    if (isObra && modoAlocacaoObra !== 'funcionario') return;
-
-    if (buscaDebounceRef.current) clearTimeout(buscaDebounceRef.current);
-    buscaDebounceRef.current = setTimeout(() => {
-      carregarSugestoesPessoas(buscaPessoa);
-    }, 250);
-
-    return () => {
-      if (buscaDebounceRef.current) clearTimeout(buscaDebounceRef.current);
-    };
-  }, [isOpen, dropdownPessoaAberto, buscaPessoa, idsPessoasSelecionadas.join(','), isObra, isReuniaoOuVisita, modoAlocacaoObra]);
 
   useEffect(() => {
     if (!isOpen || !dropdownEquipeAberto || !isObra || modoAlocacaoObra !== 'equipe') return;
@@ -243,9 +248,6 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (pessoaContainerRef.current && !pessoaContainerRef.current.contains(target)) {
-        setDropdownPessoaAberto(false);
-      }
       if (equipePreMontadaRef.current && !equipePreMontadaRef.current.contains(target)) {
         setDropdownEquipeAberto(false);
       }
@@ -272,10 +274,16 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           ? `${n ? `OS-${n}` : eventoInicial.projeto.titulo}${eventoInicial.projeto.cliente?.nome ? ` · ${eventoInicial.projeto.cliente.nome}` : ''}`
           : ''
       );
-      setCustoVeiculo(String(eventoInicial.custoVeiculo ?? 0));
+      setCustoVeiculo(
+        eventoInicial.custoVeiculo != null && Number(eventoInicial.custoVeiculo) !== 0
+          ? String(eventoInicial.custoVeiculo)
+          : ''
+      );
       setPessoasSelecionadas(eventoInicial.equipe || []);
       setVeiculosSelecionados(eventoInicial.veiculos || []);
       setModoAlocacaoObra('funcionario');
+      setFiltroFuncionario('');
+      setFiltroVeiculo('');
       setPeriodoOsHint(null);
       setAlocarPeriodoOs(false);
       return;
@@ -295,16 +303,14 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       setBuscaOs('');
       setSugestoesOs([]);
       setOrcamentoId(null);
-      setCustoVeiculo('0');
+      setCustoVeiculo('');
       setPessoasSelecionadas([]);
       setVeiculosSelecionados([]);
       setModoAlocacaoObra('funcionario');
-      setBuscaPessoa('');
       setBuscaEquipe('');
-      setBuscaVeiculo('');
-      setSugestoesPessoas([]);
+      setFiltroFuncionario('');
+      setFiltroVeiculo('');
       setSugestoesEquipes([]);
-      setDropdownPessoaAberto(false);
       setDropdownEquipeAberto(false);
       setPeriodoOsHint(
         'Datas definidas no calendário (planejamento de execução). Distinto do prazo estimado na página da OS.',
@@ -338,15 +344,14 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     setOsLabel('');
     setBuscaOs('');
     setSugestoesOs([]);
-    setCustoVeiculo('0');
+    setCustoVeiculo('');
     setPessoasSelecionadas([]);
     setVeiculosSelecionados([]);
     setModoAlocacaoObra('equipe');
-    setBuscaPessoa('');
     setBuscaEquipe('');
-    setSugestoesPessoas([]);
+    setFiltroFuncionario('');
+    setFiltroVeiculo('');
     setSugestoesEquipes([]);
-    setDropdownPessoaAberto(false);
     setDropdownEquipeAberto(false);
     setPeriodoOsHint(null);
     setAlocarPeriodoOs(false);
@@ -376,10 +381,13 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     }
   }, [isPrivileged, dataInicio, dataFim, pessoasSelecionadas, custoVeiculo]);
 
-  const adicionarPessoa = (pessoa: FuncionarioEquipeResumo) => {
-    setPessoasSelecionadas((prev) => [...prev, pessoa]);
-    setBuscaPessoa('');
-    setDropdownPessoaAberto(false);
+  const togglePessoa = (pessoa: FuncionarioEquipeResumo) => {
+    setPessoasSelecionadas((prev) => {
+      if (prev.some((p) => p.id === pessoa.id)) {
+        return prev.filter((p) => p.id !== pessoa.id);
+      }
+      return [...prev, pessoa];
+    });
   };
 
   const adicionarEquipePreMontada = async (equipe: EquipePreMontadaResumo) => {
@@ -422,13 +430,13 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     setPessoasSelecionadas((prev) => prev.filter((m) => m.id !== id));
   };
 
-  const removerVeiculo = (id: string) => {
-    setVeiculosSelecionados((prev) => prev.filter((v) => v.id !== id));
-  };
-
-  const adicionarVeiculo = (veiculo: VeiculoEventoResumo) => {
-    setVeiculosSelecionados((prev) => [...prev, veiculo]);
-    setBuscaVeiculo('');
+  const toggleVeiculo = (veiculo: VeiculoEventoResumo) => {
+    setVeiculosSelecionados((prev) => {
+      if (prev.some((v) => v.id === veiculo.id)) {
+        return prev.filter((v) => v.id !== veiculo.id);
+      }
+      return [...prev, veiculo];
+    });
   };
 
   const handleExcluir = async () => {
@@ -557,7 +565,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-lg sm:max-w-2xl min-[1092px]:w-[90vw] min-[1092px]:max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-blue-500/30 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold">
@@ -763,7 +771,6 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
                   type="button"
                   onClick={() => {
                     setModoAlocacaoObra('equipe');
-                    setDropdownPessoaAberto(false);
                   }}
                   className={`flex-1 sm:flex-none px-4 py-2 font-medium transition-colors ${
                     modoAlocacaoObra === 'equipe'
@@ -834,53 +841,59 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
             )}
 
             {(isReuniaoOuVisita || (isObra && modoAlocacaoObra === 'funcionario')) && (
-              <div ref={pessoaContainerRef} className="relative z-20">
-                <input
-                  type="text"
-                  value={buscaPessoa}
-                  onChange={(e) => {
-                    setBuscaPessoa(e.target.value);
-                    setDropdownPessoaAberto(true);
-                  }}
-                  onFocus={() => setDropdownPessoaAberto(true)}
-                  placeholder={
-                    isObra
-                      ? 'Buscar funcionário por nome, cargo ou e-mail...'
-                      : 'Buscar participante por nome, cargo ou e-mail...'
-                  }
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg focus:ring-2 focus:ring-blue-500 outline-none"
-                  autoComplete="off"
-                />
-                {dropdownPessoaAberto && (
-                  <ul className="absolute left-0 right-0 mt-1 max-h-52 overflow-y-auto border border-gray-200 dark:border-dark-border rounded-xl shadow-xl bg-white dark:bg-dark-card z-50">
-                    {buscandoPessoas ? (
-                      <li className="px-4 py-3 text-sm text-gray-500">Buscando...</li>
-                    ) : sugestoesPessoas.length > 0 ? (
-                      sugestoesPessoas.map((f) => (
-                        <li key={f.id}>
-                          <button
-                            type="button"
-                            onClick={() => adicionarPessoa(f)}
-                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-dark-bg text-sm border-b border-gray-100 dark:border-dark-border last:border-0"
-                          >
-                            <span className="font-medium text-gray-900 dark:text-dark-text">{f.nome}</span>
-                            <span className="text-gray-500 dark:text-dark-text-secondary ml-2">{f.cargo}</span>
-                          </button>
-                        </li>
-                      ))
-                    ) : (
-                      <li className="px-4 py-3 text-sm text-gray-500">
-                        {buscaPessoa.trim()
-                          ? 'Nenhuma pessoa encontrada'
-                          : 'Digite para buscar funcionários ativos'}
-                      </li>
-                    )}
-                  </ul>
+              <div className="space-y-2">
+                {funcionariosDisponiveis.length > 12 && (
+                  <input
+                    type="search"
+                    value={filtroFuncionario}
+                    onChange={(e) => setFiltroFuncionario(e.target.value)}
+                    placeholder="Filtrar por nome ou cargo (opcional)..."
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    autoComplete="off"
+                  />
+                )}
+                {carregandoFuncionarios ? (
+                  <p className="text-sm text-gray-500 dark:text-dark-text-secondary py-2">
+                    Carregando funcionários...
+                  </p>
+                ) : funcionariosFiltrados.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-dark-text-secondary py-2">
+                    {filtroFuncionario.trim()
+                      ? 'Nenhum funcionário corresponde ao filtro'
+                      : 'Nenhum funcionário ativo cadastrado'}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto p-0.5">
+                    {funcionariosFiltrados.map((f) => {
+                      const selecionado = idsPessoasSet.has(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => togglePessoa(f)}
+                          aria-pressed={selecionado}
+                          title={f.cargo || f.nome}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                            selecionado
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                              : 'bg-transparent border-gray-300 dark:border-dark-border text-gray-700 dark:text-dark-text hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-300'
+                          }`}
+                        >
+                          {f.nome}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {pessoasSelecionadas.length > 0 && (
+                  <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                    {pessoasSelecionadas.length} selecionado(s)
+                  </p>
                 )}
               </div>
             )}
 
-            {pessoasSelecionadas.length > 0 && (
+            {isObra && modoAlocacaoObra === 'equipe' && pessoasSelecionadas.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {pessoasSelecionadas.map((m) => (
                   <span
@@ -903,52 +916,52 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           </div>
 
           {isObra && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-dark-text">
                 Veículos da frota
               </label>
-              <input
-                type="search"
-                value={buscaVeiculo}
-                onChange={(e) => setBuscaVeiculo(e.target.value)}
-                placeholder="Buscar veículo por modelo ou placa..."
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              {buscaVeiculo.trim() && veiculosFiltrados.length > 0 && (
-                <ul className="max-h-40 overflow-y-auto border border-gray-200 dark:border-dark-border rounded-xl bg-white dark:bg-dark-card">
-                  {veiculosFiltrados.slice(0, 8).map((v) => (
-                    <li key={v.id}>
+              {veiculosDisponiveis.length > 12 && (
+                <input
+                  type="search"
+                  value={filtroVeiculo}
+                  onChange={(e) => setFiltroVeiculo(e.target.value)}
+                  placeholder="Filtrar por modelo ou placa (opcional)..."
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  autoComplete="off"
+                />
+              )}
+              {veiculosFiltrados.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-dark-text-secondary py-2">
+                  {filtroVeiculo.trim()
+                    ? 'Nenhum veículo corresponde ao filtro'
+                    : 'Nenhum veículo ativo na frota'}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2 max-h-44 overflow-y-auto p-0.5">
+                  {veiculosFiltrados.map((v) => {
+                    const selecionado = idsVeiculosSet.has(v.id);
+                    return (
                       <button
+                        key={v.id}
                         type="button"
-                        onClick={() => adicionarVeiculo(v)}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-bg"
+                        onClick={() => toggleVeiculo(v)}
+                        aria-pressed={selecionado}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                          selecionado
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                            : 'bg-transparent border-gray-300 dark:border-dark-border text-gray-700 dark:text-dark-text hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300'
+                        }`}
                       >
-                        <span className="font-medium">{v.modelo}</span>
-                        <span className="text-gray-500 ml-2">{v.placa}</span>
+                        {v.modelo} · {v.placa}
                       </button>
-                    </li>
-                  ))}
-                </ul>
+                    );
+                  })}
+                </div>
               )}
               {veiculosSelecionados.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {veiculosSelecionados.map((v) => (
-                    <span
-                      key={v.id}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 text-sm border border-emerald-200 dark:border-emerald-800"
-                    >
-                      🚗 {v.modelo} · {v.placa}
-                      <button
-                        type="button"
-                        onClick={() => removerVeiculo(v.id)}
-                        className="hover:text-red-600"
-                        aria-label={`Remover ${v.modelo}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
+                <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                  {veiculosSelecionados.length} veículo(s) selecionado(s)
+                </p>
               )}
             </div>
           )}
@@ -972,7 +985,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               </h3>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
-                  Custo do veículo (R$)
+                  Custo do veículo (R$) <span className="font-normal text-gray-500 dark:text-dark-text-secondary">(opcional)</span>
                 </label>
                 <input
                   type="number"
@@ -980,6 +993,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
                   step="0.01"
                   value={custoVeiculo}
                   onChange={(e) => setCustoVeiculo(e.target.value)}
+                  placeholder="Deixe em branco se não aplicar"
                   className="w-full sm:w-48 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>

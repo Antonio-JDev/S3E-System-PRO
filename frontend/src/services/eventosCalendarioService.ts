@@ -8,6 +8,7 @@ export interface FuncionarioEquipeResumo {
   id: string;
   nome: string;
   cargo: string;
+  email?: string | null;
   valorHora?: number | string | null;
   valorDiaria?: number | string | null;
   status?: string;

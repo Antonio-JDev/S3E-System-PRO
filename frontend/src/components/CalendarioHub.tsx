@@ -315,6 +315,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   const [usuarios, setUsuarios] = useState<UsuarioResumo[]>([]);
   const [alocacaoDetalhe, setAlocacaoDetalhe] = useState<AlocacaoCalendarioDTO | null>(null);
   const [painelOcupacaoAberto, setPainelOcupacaoAberto] = useState(false);
+  const [definicoesAbertas, setDefinicoesAbertas] = useState(false);
 
   useEffect(() => {
     orcamentosService.listar().then((res) => {
@@ -745,28 +746,34 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           color: #ecfdf5 !important;
         }
         .calendario-hub .fc-daygrid-event-dot { display: none !important; }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
       `}</style>
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-white dark:bg-dark-sidebar border-r border-gray-200 dark:border-dark-border-subtle p-5 gap-6">
-          <div>
+        <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-white dark:bg-dark-sidebar border-r border-gray-200 dark:border-dark-border-subtle p-5 gap-4 min-h-0">
+          <div className="shrink-0">
             <h1 className="text-lg font-bold text-gray-900 dark:text-dark-text">Calendário</h1>
             <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
               Arraste a ordem de serviço para definir quando será executada. Sempre cria em Previsão.
             </p>
           </div>
 
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Ordens de serviço</h2>
+          <div className="flex flex-col flex-1 min-h-0 gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary shrink-0">
+              Ordens de serviço
+            </h2>
             <input
               type="search"
               value={buscaOsSidebar}
               onChange={(e) => setBuscaOsSidebar(e.target.value)}
               placeholder="Buscar OS, cliente..."
-              className="w-full mb-2 px-3 py-1.5 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm"
+              className="w-full shrink-0 px-3 py-1.5 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm"
             />
-            <div ref={osListaRef} className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+            <div ref={osListaRef} className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
               {ordensServicoFiltradas.map((p) => {
                 const estilo = osSidebarCardClasses(p.status);
                 return (
@@ -790,7 +797,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               );
               })}
               {ordensServicoFiltradas.length === 0 && (
-                <p className="text-xs text-gray-500 py-2">Nenhuma OS disponível</p>
+                <p className="text-xs text-gray-500 dark:text-dark-text-secondary py-2">Nenhuma OS disponível</p>
               )}
             </div>
           </div>
@@ -798,117 +805,166 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           <button
             type="button"
             onClick={abrirCriar}
-            className="w-full py-2.5 px-4 rounded-xl bg-dark-accent hover:bg-[#3B82F6] text-white font-semibold text-sm transition-colors"
+            className="w-full shrink-0 py-2.5 px-4 rounded-xl bg-dark-accent hover:bg-[#3B82F6] text-white font-semibold text-sm transition-colors"
           >
             + Criar Evento
           </button>
 
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Tipo</h2>
-            <ul className="space-y-2">
-              {TIPOS_FILTRO.map((t) => (
-                <li key={t.id}>
-                  <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
-                    <input
-                      type="checkbox"
-                      checked={tiposAtivos.has(t.id)}
-                      onChange={() => toggleTipo(t.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className={`w-2.5 h-2.5 rounded-full ${t.dot}`} />
-                    {t.label}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Status</h2>
-            <ul className="space-y-2">
-              {STATUS_FILTRO.map((s) => (
-                <li key={s.id}>
-                  <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
-                    <input
-                      type="checkbox"
-                      checked={statusAtivos.has(s.id)}
-                      onChange={() => toggleStatus(s.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className={`w-2.5 h-2.5 rounded-full ring-2 ${s.ring} ${s.dot}`} />
-                    {s.label}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">OS — Gerente</h2>
-            <select
-              className="select-field w-full text-sm"
-              value={filtroGerenteId}
-              onChange={(e) => setFiltroGerenteId(e.target.value)}
-            >
-              <option value="">Todos os gerentes</option>
-              {usuarios.map((u) => (
-                <option key={u.id} value={u.id}>{u.nome}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">OS — Status</h2>
-            <ul className="space-y-2">
-              {STATUS_OS_FILTRO.map((s) => (
-                <li key={s.id}>
-                  <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
-                    <input
-                      type="checkbox"
-                      checked={statusOsAtivos.has(s.id)}
-                      onChange={() => {
-                        setStatusOsAtivos((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(s.id)) next.delete(s.id);
-                          else next.add(s.id);
-                          return next;
-                        });
-                      }}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    {s.label}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Alocações de OS</h2>
-            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
-              <input
-                type="checkbox"
-                checked={mostrarAlocacoesOs}
-                onChange={(e) => setMostrarAlocacoesOs(e.target.checked)}
-                className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              Mostrar alocações de OS
-            </label>
-            <p className="text-[10px] text-gray-500 mt-1 ml-6">Equipes e eletricistas (somente leitura)</p>
-          </div>
-
-          {capacidadeDiaria > 0 && (
-            <div className="text-xs text-gray-600 dark:text-dark-text-secondary p-3 rounded-xl bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border">
-              <div className="font-semibold text-gray-800 dark:text-dark-text">Capacidade/dia</div>
-              <div>{capacidadeDiaria}h homem-hora (8h × equipe ativa)</div>
-              {diasComGargalo.length > 0 && (
-                <div className="mt-2 text-red-700 font-semibold">
-                  {diasComGargalo.length} dia(s) com gargalo no período
+          <div className="relative shrink-0">
+            {!definicoesAbertas ? (
+              <button
+                type="button"
+                onClick={() => setDefinicoesAbertas(true)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-sm font-semibold text-gray-800 dark:text-dark-text hover:bg-gray-100 dark:hover:bg-dark-elevated transition-colors"
+                aria-expanded={false}
+                aria-controls="calendario-definicoes-painel"
+              >
+                <svg className="w-4 h-4 text-gray-500 dark:text-dark-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Definições
+              </button>
+            ) : (
+              <div
+                id="calendario-definicoes-painel"
+                className="absolute bottom-0 left-0 right-0 z-20 max-h-[min(70vh,28rem)] overflow-y-auto rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-sidebar shadow-xl p-4 space-y-4 animate-[slideUp_180ms_ease-out]"
+                role="region"
+                aria-label="Definições do calendário"
+              >
+                <div className="flex items-center justify-between gap-2 sticky top-0 bg-white dark:bg-dark-sidebar pb-1 z-10">
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-dark-text">Definições</h2>
+                  <button
+                    type="button"
+                    onClick={() => setDefinicoesAbertas(false)}
+                    className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-dark-text-secondary dark:hover:text-dark-text dark:hover:bg-dark-elevated transition-colors"
+                    aria-label="Fechar definições"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-              )}
-            </div>
-          )}
+
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary mb-3">Tipo</h3>
+                  <ul className="space-y-2">
+                    {TIPOS_FILTRO.map((t) => (
+                      <li key={t.id}>
+                        <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
+                          <input
+                            type="checkbox"
+                            checked={tiposAtivos.has(t.id)}
+                            onChange={() => toggleTipo(t.id)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className={`w-2.5 h-2.5 rounded-full ${t.dot}`} />
+                          {t.label}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary mb-3">Status</h3>
+                  <ul className="space-y-2">
+                    {STATUS_FILTRO.map((s) => (
+                      <li key={s.id}>
+                        <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
+                          <input
+                            type="checkbox"
+                            checked={statusAtivos.has(s.id)}
+                            onChange={() => toggleStatus(s.id)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className={`w-2.5 h-2.5 rounded-full ring-2 ${s.ring} ${s.dot}`} />
+                          {s.label}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary mb-3">OS — Gerente</h3>
+                  <select
+                    className="select-field w-full text-sm"
+                    value={filtroGerenteId}
+                    onChange={(e) => setFiltroGerenteId(e.target.value)}
+                  >
+                    <option value="">Todos os gerentes</option>
+                    {usuarios.map((u) => (
+                      <option key={u.id} value={u.id}>{u.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary mb-3">OS — Status</h3>
+                  <ul className="space-y-2">
+                    {STATUS_OS_FILTRO.map((s) => (
+                      <li key={s.id}>
+                        <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
+                          <input
+                            type="checkbox"
+                            checked={statusOsAtivos.has(s.id)}
+                            onChange={() => {
+                              setStatusOsAtivos((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(s.id)) next.delete(s.id);
+                                else next.add(s.id);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          {s.label}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary mb-3">Alocações de OS</h3>
+                  <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
+                    <input
+                      type="checkbox"
+                      checked={mostrarAlocacoesOs}
+                      onChange={(e) => setMostrarAlocacoesOs(e.target.checked)}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    Mostrar alocações de OS
+                  </label>
+                  <p className="text-[10px] text-gray-500 dark:text-dark-text-secondary mt-1 ml-6">
+                    Equipes e eletricistas (somente leitura)
+                  </p>
+                </div>
+
+                {capacidadeDiaria > 0 && (
+                  <div className="text-xs text-gray-600 dark:text-dark-text-secondary p-3 rounded-xl bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border">
+                    <div className="font-semibold text-gray-800 dark:text-dark-text">Capacidade/dia</div>
+                    <div>{capacidadeDiaria}h homem-hora (8h × equipe ativa)</div>
+                    {diasComGargalo.length > 0 && (
+                      <div className="mt-2 text-red-700 dark:text-red-400 font-semibold">
+                        {diasComGargalo.length} dia(s) com gargalo no período
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setDefinicoesAbertas(false)}
+                  className="w-full py-2 px-3 rounded-lg text-sm font-semibold text-gray-700 dark:text-dark-text border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors"
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+          </div>
         </aside>
 
         {/* Main */}
