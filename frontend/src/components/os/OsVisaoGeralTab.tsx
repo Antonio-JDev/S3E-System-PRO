@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { formatDateDisplay, formatDatePtBrInSaoPaulo } from '../../utils/date';
 import { formatMoeda, formatQuantidade, type ResultadoOsCalculado } from '../../utils/apropriacaoOs';
 import {
@@ -8,8 +8,13 @@ import {
   OS_TIPOS,
   OS_WORKFLOW_TEMPLATES,
 } from '../../utils/osWorkflow.util';
+import { montarResumoProdutividadeOs } from '../../utils/osPrazoProgresso.util';
 import type { ProjetoDetalhe } from '../ModalVizualizacaoProjeto';
 import OsExecucaoCalendarioPanel from './OsExecucaoCalendarioPanel';
+import OsPrazoEstimadoCard from './OsPrazoEstimadoCard';
+import OsPrazoProgressoBar from './OsPrazoProgressoBar';
+import type { OsEditFormDraft } from '../../hooks/useOsEditForm';
+import { listarUsuariosResponsavelOs } from '../../utils/usuariosResponsavelOs.util';
 
 export interface DocumentoOs {
   id: string;
@@ -97,6 +102,17 @@ export interface OsVisaoGeralTabProps {
   podeAlterarTipoOs?: boolean;
   alterandoTipoOs?: boolean;
   onAlterarTipoOs?: (tipo: string) => void | Promise<void>;
+  podeEditarPrazo?: boolean;
+  onPrazoEstimadoSaved?: () => void | Promise<void>;
+  /** Modo edição unificado no cockpit (Fase 2) */
+  isEditing?: boolean;
+  editDraft?: OsEditFormDraft;
+  onEditDraftChange?: (partial: Partial<OsEditFormDraft>) => void;
+  editSaving?: boolean;
+  onSaveEdit?: () => void | Promise<void>;
+  onCancelEdit?: () => void;
+  clientesOptions?: Array<{ id: string; nome: string; documento?: string }>;
+  usuariosOptions?: Array<{ id: string; nome: string; role?: string }>;
 }
 
 const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
@@ -133,18 +149,70 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
   podeAlterarTipoOs,
   alterandoTipoOs,
   onAlterarTipoOs,
+  podeEditarPrazo = false,
+  onPrazoEstimadoSaved,
+  isEditing = false,
+  editDraft,
+  onEditDraftChange,
+  editSaving = false,
+  onSaveEdit,
+  onCancelEdit,
+  clientesOptions = [],
+  usuariosOptions = [],
 }) => {
+  const [buscaCliente, setBuscaCliente] = useState('');
+  const [openDropdownCliente, setOpenDropdownCliente] = useState(false);
+
+  const clientesFiltrados = useMemo(() => {
+    const q = buscaCliente.trim().toLowerCase();
+    if (!q) return clientesOptions.slice(0, 40);
+    return clientesOptions
+      .filter(
+        (c) =>
+          c.nome.toLowerCase().includes(q) ||
+          (c.documento || '').toLowerCase().includes(q),
+      )
+      .slice(0, 40);
+  }, [clientesOptions, buscaCliente]);
+
+  const usuariosResponsavel = useMemo(
+    () =>
+      listarUsuariosResponsavelOs(usuariosOptions, {
+        responsavelId: editDraft?.responsavelId || projeto.responsavelId,
+        responsavel: projeto.responsavel,
+      }),
+    [usuariosOptions, editDraft?.responsavelId, projeto.responsavelId, projeto.responsavel],
+  );
+
   const horasOrcadas = Number(projeto.horasEngenhariaOrcadas) || 0;
   const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
   const horasReal = resumo?.horasEngenhariaRealizadas ?? 0;
   const diariasReal = resumo?.diariasEquipeRealizadas ?? 0;
   const valorOrcado =
-    projeto.orcamento?.precoVenda ?? projeto.valorTotal ?? resumo?.receitaOrcada ?? 0;
+    projeto.orcamento?.precoVenda ?? projeto.valorTotal ?? resumo?.valorFechado ?? 0;
 
   const prazoLimite = formatDateDisplay(projeto.dataPrevisao || projeto.dataFim || '') || '—';
   const dataCriacao = projeto.createdAt
     ? formatDatePtBrInSaoPaulo(projeto.createdAt)
     : '—';
+
+  const produtividade = useMemo(
+    () =>
+      montarResumoProdutividadeOs({
+        dataInicio: projeto.dataInicio,
+        dataConclusao: projeto.dataConclusao,
+        dataFim: projeto.dataFim,
+        status: projeto.status,
+        resumo,
+      }),
+    [
+      projeto.dataInicio,
+      projeto.dataConclusao,
+      projeto.dataFim,
+      projeto.status,
+      resumo,
+    ]
+  );
 
   const equipe: Array<{ nome: string; papel: string; status?: string }> = [];
   if (projeto.responsavel?.nome) {
@@ -163,8 +231,34 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {isEditing && editDraft && onEditDraftChange && (
+        <div className="sticky top-0 z-10 -mx-1 px-1 py-2 bg-white/95 dark:bg-dark-card/95 backdrop-blur border-b border-blue-100 dark:border-blue-900/40 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">
+            Editando dados gerais da OS
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              disabled={editSaving}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 dark:bg-dark-bg text-gray-700 dark:text-gray-200 hover:bg-gray-200 disabled:opacity-50"
+            >
+              Cancelar edição
+            </button>
+            <button
+              type="button"
+              onClick={() => void onSaveEdit?.()}
+              disabled={editSaving}
+              className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {editSaving ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Alertas contextuais compactos */}
-      {(podeAprovar || podeGerarObra || podeVoltarParaAprovada || (engenhariaAtribuicao && !engenhariaAtribuicao.atribuido && onAtribuirEngenharia)) && (
+      {!isEditing && (podeAprovar || podeGerarObra || podeVoltarParaAprovada || (engenhariaAtribuicao && !engenhariaAtribuicao.atribuido && onAtribuirEngenharia)) && (
         <div className="flex flex-wrap gap-2">
           {podeAprovar && onAprovar && (
             <button
@@ -271,27 +365,244 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
         </section>
       )}
 
-      {/* Barra de progresso */}
-      <div className="rounded-xl bg-gray-50 dark:bg-dark-bg/60 px-5 py-4 shadow-sm">
-        <div className="flex items-center justify-between gap-4 mb-2">
-          <span className="text-sm font-semibold text-gray-800 dark:text-white">Progresso geral</span>
-          <span className="text-sm font-bold text-blue-600 dark:text-blue-400 tabular-nums">
-            {progresso.percentual}%
-          </span>
-        </div>
-        <div className="h-1.5 w-full bg-gray-200/80 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-blue-500 to-sky-500 rounded-full transition-all duration-500"
-            style={{ width: `${progresso.percentual}%` }}
+      {/* Progresso de execução (azul) + consumo do prazo (amarelo/laranja/vermelho) */}
+      <div className="rounded-xl bg-gray-50 dark:bg-dark-bg/60 px-5 py-4 shadow-sm space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="flex items-center justify-between gap-4 mb-2">
+              <span className="text-sm font-semibold text-gray-800 dark:text-white">
+                Progresso de execução
+              </span>
+              <span className="text-sm font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+                {progresso.percentual}%
+              </span>
+            </div>
+            <div className="h-2.5 w-full bg-gray-200/80 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500 to-sky-500 rounded-full transition-all duration-500"
+                style={{ width: `${progresso.percentual}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Tarefas {progresso.tasksConcluidas}/{progresso.tasksTotal}
+              {!projeto.semObra && (
+                <> · Obras {progresso.obrasConcluidas}/{progresso.obrasTotal}</>
+              )}
+            </p>
+          </div>
+          <OsPrazoProgressoBar
+            variant="full"
+            dataInicio={projeto.dataInicio}
+            dataPrevisao={projeto.dataPrevisao}
+            dataConclusao={projeto.dataConclusao}
+            dataFim={projeto.dataFim}
+            status={projeto.status}
+            diariasOrcadas={diariasOrcadas}
+            diariasRealizadas={diariasReal}
           />
         </div>
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Tarefas {progresso.tasksConcluidas}/{progresso.tasksTotal}
-          {!projeto.semObra && (
-            <> · Obras {progresso.obrasConcluidas}/{progresso.obrasTotal}</>
-          )}
-        </p>
+
+        {/* Produtividade × apontamentos (MVP) */}
+        <div className="pt-3 border-t border-gray-200/80 dark:border-dark-border">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+            Produtividade e esforço
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Duração</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">
+                {produtividade.duracaoDias} dia{produtividade.duracaoDias !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Colaboradores</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">
+                {produtividade.colaboradoresDistintos != null
+                  ? produtividade.colaboradoresDistintos
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Horas eng.</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">
+                {horasOrcadas > 0 || horasReal > 0
+                  ? `${formatQuantidade(horasReal, 'h')} / ${formatQuantidade(horasOrcadas, 'h')}`
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Diárias</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">
+                {diariasOrcadas > 0 || diariasReal > 0
+                  ? `${formatQuantidade(diariasReal, 'd')} / ${formatQuantidade(diariasOrcadas, 'd')}`
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Custo tempo</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums leading-tight">
+                {produtividade.custoOrcado > 0 || produtividade.custoRealizado > 0
+                  ? `${formatMoeda(produtividade.custoRealizado)} / ${formatMoeda(produtividade.custoOrcado)}`
+                  : '—'}
+              </p>
+              {produtividade.rendimentoLabel && produtividade.rendimentoValor != null && (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {produtividade.rendimentoLabel}: {formatMoeda(produtividade.rendimentoValor)}/h
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      <OsPrazoEstimadoCard
+        projetoId={projeto.id}
+        projeto={projeto}
+        resumo={resumo}
+        canEdit={Boolean(podeEditarPrazo) && !isEditing}
+        onSaved={() => {
+          void onPrazoEstimadoSaved?.();
+        }}
+      />
+
+      {isEditing && editDraft && onEditDraftChange && (
+        <section className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/60 dark:bg-blue-900/10 p-4 space-y-4">
+          <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+            Dados editáveis
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Título *
+              </label>
+              <input
+                type="text"
+                value={editDraft.titulo}
+                onChange={(e) => onEditDraftChange({ titulo: e.target.value })}
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Descrição
+              </label>
+              <textarea
+                value={editDraft.descricao}
+                onChange={(e) => onEditDraftChange({ descricao: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              />
+            </div>
+            <div className="relative">
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Cliente
+              </label>
+              <input
+                type="text"
+                value={
+                  editDraft.clienteId
+                    ? (clientesOptions.find((c) => c.id === editDraft.clienteId)?.nome ??
+                      projeto.cliente?.nome ??
+                      '')
+                    : buscaCliente
+                }
+                onChange={(e) => {
+                  setBuscaCliente(e.target.value);
+                  if (editDraft.clienteId) onEditDraftChange({ clienteId: '' });
+                  setOpenDropdownCliente(true);
+                }}
+                onFocus={() => setOpenDropdownCliente(true)}
+                onBlur={() => setTimeout(() => setOpenDropdownCliente(false), 200)}
+                placeholder="Digite para buscar o cliente..."
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              />
+              {openDropdownCliente && (
+                <ul className="absolute z-20 mt-1 w-full max-h-48 overflow-auto bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg py-1">
+                  {clientesFiltrados.length === 0 ? (
+                    <li className="px-4 py-3 text-gray-500 text-sm">Nenhum cliente encontrado</li>
+                  ) : (
+                    clientesFiltrados.map((cliente) => (
+                      <li
+                        key={cliente.id}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onEditDraftChange({ clienteId: cliente.id });
+                          setBuscaCliente('');
+                          setOpenDropdownCliente(false);
+                        }}
+                        className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-dark-hover cursor-pointer text-sm"
+                      >
+                        {cliente.nome}
+                        {cliente.documento ? ` — ${cliente.documento}` : ''}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Gerente do projeto *
+              </label>
+              <select
+                value={editDraft.responsavelId}
+                onChange={(e) => onEditDraftChange({ responsavelId: e.target.value })}
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              >
+                <option value="">Selecione o responsável</option>
+                {usuariosResponsavel.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome}
+                    {u.role ? ` — ${u.role}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Data de início
+              </label>
+              <input
+                type="date"
+                value={editDraft.dataInicio}
+                onChange={(e) => onEditDraftChange({ dataInicio: e.target.value })}
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                Data limite / previsão
+              </label>
+              <input
+                type="date"
+                value={editDraft.dataPrevisao}
+                onChange={(e) => onEditDraftChange({ dataPrevisao: e.target.value })}
+                className="w-full px-3 py-2.5 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-sm"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800/40 bg-cyan-50 dark:bg-dark-elevated cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editDraft.exigeVistoriaCelesc}
+                  onChange={(e) =>
+                    onEditDraftChange({ exigeVistoriaCelesc: e.target.checked })
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-cyan-900 dark:text-cyan-300">
+                    Exige Vistoria CELESC
+                  </span>
+                  <span className="block text-xs text-cyan-700 dark:text-cyan-400 mt-0.5">
+                    Após a aprovação da OS, o projeto entra na fila da aba Vistorias.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -301,7 +612,10 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
             <span className="text-sm leading-snug">
               {dataCriacao}
               <span className="block text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
-                Limite {prazoLimite}
+                Limite{' '}
+                {isEditing && editDraft?.dataPrevisao
+                  ? formatDateDisplay(editDraft.dataPrevisao) || prazoLimite
+                  : prazoLimite}
               </span>
             </span>
           }
@@ -336,7 +650,16 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
               Informações do projeto & local
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-              <CampoInfo label="Cliente" valor={projeto.cliente?.nome || '—'} />
+              <CampoInfo
+                label="Cliente"
+                valor={
+                  isEditing && editDraft?.clienteId
+                    ? clientesOptions.find((c) => c.id === editDraft.clienteId)?.nome ||
+                      projeto.cliente?.nome ||
+                      '—'
+                    : projeto.cliente?.nome || '—'
+                }
+              />
               <CampoInfo label="Cidade / Estado" valor={cidadeEstado || '—'} />
               <CampoInfo
                 label="Endereço da obra"
@@ -344,7 +667,7 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
               />
               <CampoInfo label="Responsável na obra" valor={responsavelObra} />
             </div>
-            {projeto.descricao && (
+            {!isEditing && projeto.descricao && (
               <p className="mt-4 text-sm text-gray-600 dark:text-gray-300 leading-relaxed border-t border-gray-100 dark:border-dark-border pt-4">
                 {projeto.descricao}
               </p>

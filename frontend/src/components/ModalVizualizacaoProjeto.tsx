@@ -21,9 +21,8 @@ import ScrollableRow from './ui/ScrollableRow';
 import { ModalDetailHeader } from './ui/ModalDetailHeader';
 import { scrollableNavItemClasses, compactNavTabClasses, modalOverlayPaddingClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
 import { apropriacaoOsService } from '../services/apropriacaoOsService';
+import type { ApontamentoOs } from '../services/apropriacaoOsService';
 import {
-  formatMoeda,
-  formatQuantidade,
   type ResultadoOsCalculado,
 } from '../utils/apropriacaoOs';
 import { projetosService } from '../services/projetosService';
@@ -35,10 +34,16 @@ import {
   entregaQuadroVazia,
   exigeFormularioEntregaQuadro,
   extrairEntregaQuadro,
+  isOsTipoQuadrosPainels,
+  podeConcluirOsQuadros,
   validarEntregaQuadroForm,
+  type EntregaQuadroMetadados,
 } from '../utils/osWorkflow.util';
+import OsEntregaQuadroForm from './os/OsEntregaQuadroForm';
 import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util';
 import OsCronogramaAlocacaoTab from './os/OsCronogramaAlocacaoTab';
+import OsResultadoTab from './os/OsResultadoTab';
+import { useOsEditForm } from '../hooks/useOsEditForm';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -127,6 +132,9 @@ export interface ProjetoDetalhe {
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
   justificativaSemObra?: string | null;
+  clienteId?: string;
+  exigeVistoriaCelesc?: boolean;
+  entregaQuadro?: EntregaQuadroMetadados | null;
 }
 
 type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Cronograma & Alocação' | 'Resultado';
@@ -169,7 +177,6 @@ interface ModalVizualizacaoProjetoProps {
     statusEngenharia?: string | null;
   };
   onAtribuirEngenharia?: () => void;
-  onEditOs?: () => void;
 }
 
 const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Cronograma & Alocação', 'Resultado'];
@@ -182,12 +189,14 @@ function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisId
   return nomes.length ? nomes.join(', ') : 'Não atribuído';
 }
 
-const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate, engenhariaAtribuicao, onAtribuirEngenharia, onEditOs }) => {
+const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate, engenhariaAtribuicao, onAtribuirEngenharia }) => {
   const { user } = useContext(AuthContext) || {};
   const [activeTab, setActiveTab] = useState<Aba>(initialTab);
   const [loadingAcao, setLoadingAcao] = useState(false);
   const [apontamentoOpen, setApontamentoOpen] = useState(false);
   const [resumoApropriacao, setResumoApropriacao] = useState<ResultadoOsCalculado | null>(null);
+  const [apontamentosResultado, setApontamentosResultado] = useState<ApontamentoOs[]>([]);
+  const [loadingApontamentosResultado, setLoadingApontamentosResultado] = useState(false);
   const [estoqueEscapeOpen, setEstoqueEscapeOpen] = useState(false);
   const [materiaisFaltantesEstoque, setMateriaisFaltantesEstoque] = useState<
     Array<{ nome: string; necessario: number; disponivel: number; falta: number; bancoFrio?: boolean }>
@@ -266,6 +275,15 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const [aprovacaoNegadaOpen, setAprovacaoNegadaOpen] = useState(false);
   const [aprovacaoNegadaDetalhe, setAprovacaoNegadaDetalhe] = useState<string | null>(null);
 
+  const osEdit = useOsEditForm({
+    projeto: projeto as any,
+    onRefresh,
+  });
+
+  const handleRequestClose = () => {
+    osEdit.tryClose(onClose);
+  };
+
   function abrirModalAprovacaoNegada(detalhe?: string) {
     setAprovacaoNegadaDetalhe(detalhe || null);
     setAprovacaoNegadaOpen(true);
@@ -337,6 +355,9 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status !== 'CANCELADO')) {
       void carregarResumoApropriacao();
     }
+    if (isOpen && projeto?.id && activeTab === 'Resultado') {
+      void carregarApontamentosResultado();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, activeTab, projeto?.id]);
 
@@ -347,6 +368,21 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       if (res.success && res.data) setResumoApropriacao(res.data);
     } catch {
       /* silencioso */
+    }
+  }
+
+  async function carregarApontamentosResultado() {
+    if (!projeto?.id) return;
+    try {
+      setLoadingApontamentosResultado(true);
+      const res = await apropriacaoOsService.listar(projeto.id, 100);
+      if (res.success && Array.isArray(res.data)) {
+        setApontamentosResultado(res.data);
+      }
+    } catch {
+      setApontamentosResultado([]);
+    } finally {
+      setLoadingApontamentosResultado(false);
     }
   }
 
@@ -1409,6 +1445,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   useEscapeKey(taskModalOpen, () => setTaskModalOpen(false));
   useEscapeKey(uploadModalOpen, () => setUploadModalOpen(false));
   useEscapeKey(clienteModalOpen, () => setClienteModalOpen(false));
+  useEscapeKey(
+    isOpen && !taskModalOpen && !uploadModalOpen && !clienteModalOpen && !osEdit.dirtyDialogOpen,
+    handleRequestClose,
+  );
 
   async function handleAlterarTipoOs(novoTipo: string) {
     if (projeto.status === 'CONCLUIDO' || novoTipo === projeto.tipo) return;
@@ -1439,11 +1479,54 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   }
 
   // Funções de Tasks
-  function handleAbrirModalTask(task?: Task) {
+  async function carregarEntregaQuadroSalva(): Promise<EntregaQuadroMetadados | null> {
+    try {
+      const res = await axiosApiService.get(`/api/projetos/${projeto.id}/entrega-quadro`);
+      if (res.success && res.data?.entrega) {
+        return {
+          ...entregaQuadroVazia(),
+          ...res.data.entrega,
+          romaneio: {
+            ...entregaQuadroVazia().romaneio,
+            ...(res.data.entrega.romaneio || {}),
+          },
+        };
+      }
+    } catch {
+      /* fallback */
+    }
+    if (projeto.entregaQuadro) {
+      return {
+        ...entregaQuadroVazia(),
+        ...projeto.entregaQuadro,
+        romaneio: {
+          ...entregaQuadroVazia().romaneio,
+          ...(projeto.entregaQuadro.romaneio || {}),
+        },
+      };
+    }
+    return null;
+  }
+
+  async function handleAbrirModalTask(task?: Task) {
     if (task) {
       setTaskEditando(task);
       const ids = (task.responsaveisIds && task.responsaveisIds.length) ? task.responsaveisIds : (task.responsavelId ? [task.responsavelId] : []);
-      const entregaSalva = extrairEntregaQuadro(task.metadados);
+      let entregaForm = entregaQuadroVazia();
+      if (exigeFormularioEntregaQuadro(projeto.tipo, task.titulo)) {
+        const daTask = extrairEntregaQuadro(task.metadados);
+        const salva = await carregarEntregaQuadroSalva();
+        entregaForm = {
+          ...entregaQuadroVazia(),
+          ...(daTask || {}),
+          ...(salva || {}),
+          romaneio: {
+            ...entregaQuadroVazia().romaneio,
+            ...(daTask?.romaneio || {}),
+            ...(salva?.romaneio || {}),
+          },
+        };
+      }
       setTaskForm({
         titulo: task.titulo,
         descricao: task.descricao,
@@ -1454,9 +1537,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         responsavelId: ids[0] || '',
         responsavelIds: ids,
         status: task.status,
-        entregaQuadro: entregaSalva
-          ? { ...entregaQuadroVazia(), ...entregaSalva }
-          : entregaQuadroVazia(),
+        entregaQuadro: entregaForm,
       });
     } else {
       setTaskEditando(null);
@@ -1504,6 +1585,14 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     };
     if (exigeEntrega) {
       payloadBase.metadados = { entregaQuadro: taskForm.entregaQuadro };
+      try {
+        await axiosApiService.put(`/api/projetos/${projeto.id}/entrega-quadro`, {
+          entrega: taskForm.entregaQuadro,
+        });
+      } catch (err: any) {
+        toast.error(err?.message || 'Erro ao salvar dados de entrega do quadro');
+        return;
+      }
     }
 
     try {
@@ -1554,15 +1643,35 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
 
     if (
       novoStatus === 'Concluído' &&
-      exigeFormularioEntregaQuadro(projeto.tipo, task.titulo) &&
-      validarEntregaQuadroForm(
-        extrairEntregaQuadro(task.metadados) ?? entregaQuadroVazia(),
-      )
+      exigeFormularioEntregaQuadro(projeto.tipo, task.titulo)
     ) {
-      handleAbrirModalTask(task);
-      setTaskForm((prev) => ({ ...prev, status: 'Concluído' }));
-      toast.info('Preencha os dados de entrega do quadro antes de concluir.');
-      return;
+      const salva = await carregarEntregaQuadroSalva();
+      const daTask = extrairEntregaQuadro(task.metadados);
+      const entrega = {
+        ...entregaQuadroVazia(),
+        ...(daTask || {}),
+        ...(salva || {}),
+      };
+      const erro = validarEntregaQuadroForm(entrega);
+      if (erro) {
+        toast.info('Complete o checklist de entrega do quadro antes de concluir a tarefa.');
+        setTaskEditando(task);
+        const ids = (task.responsaveisIds && task.responsaveisIds.length) ? task.responsaveisIds : (task.responsavelId ? [task.responsavelId] : []);
+        setTaskForm({
+          titulo: task.titulo,
+          descricao: task.descricao,
+          prazo:
+            task.prazo ||
+            addDaysToYmd(localYmdFromDate(new Date(task.createdAt || new Date().toISOString())), 1),
+          dataInicio: task.dataInicio || localYmdFromDate(new Date()),
+          responsavelId: ids[0] || '',
+          responsavelIds: ids,
+          status: 'Concluído',
+          entregaQuadro: entrega,
+        });
+        setTaskModalOpen(true);
+        return;
+      }
     }
 
     // Mapear status do frontend para o backend
@@ -1712,6 +1821,27 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       console.error('Erro ao confirmar sem obra:', error);
       toast.error(error?.response?.data?.error || 'Erro ao atualizar projeto');
     }
+  }
+
+  async function tentarAbrirConcluirOs() {
+    if (isOsTipoQuadrosPainels(projeto.tipo)) {
+      try {
+        const res = await axiosApiService.get(`/api/projetos/${projeto.id}/entrega-quadro`);
+        const entrega = res.data?.entrega ?? projeto.entregaQuadro;
+        const check = podeConcluirOsQuadros(projeto.tipo, entrega);
+        if (!check.ok) {
+          toast.error(
+            `Não é possível concluir: ${check.pendencias.join('; ')}. Abra a tarefa "Entrega" no Kanban e complete o checklist.`,
+            { duration: 12000 },
+          );
+          return;
+        }
+      } catch {
+        toast.error('Não foi possível validar o checklist de entrega do quadro.');
+        return;
+      }
+    }
+    setConcluirModalOpen(true);
   }
 
   async function handleConcluirOS() {
@@ -1899,10 +2029,18 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   };
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm ${modalOverlayPaddingClasses} animate-fade-in`}>
-      <div className="w-full max-w-[90rem] bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden max-h-[95dvh] sm:max-h-[95vh] flex flex-col">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm ${modalOverlayPaddingClasses} animate-fade-in`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleRequestClose();
+      }}
+    >
+      <div
+        className="w-full max-w-[90rem] bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden max-h-[95dvh] sm:max-h-[95vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <ModalDetailHeader
-          title={<>{numeroOs != null ? `OS #${numeroOs} — ` : ''}{projeto.titulo}</>}
+          title={<>{numeroOs != null ? `OS #${numeroOs} — ` : ''}{osEdit.isEditing ? osEdit.draft.titulo || projeto.titulo : projeto.titulo}</>}
           subtitle={
             <>
               Cliente: {projeto.cliente?.nome}
@@ -1915,7 +2053,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               )}
             </>
           }
-          onClose={onClose}
+          onClose={handleRequestClose}
           icon={
             <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
               <svg className="w-6 h-6 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1928,15 +2066,38 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               <span className={`inline-flex items-center px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wide ${statusBadgeClass(projeto.status)}`}>
                 {statusLabel(projeto.status)}
               </span>
-              {onEditOs && (
+              {osEdit.canEdit && !osEdit.isEditing && (
                 <button
                   type="button"
-                  onClick={onEditOs}
+                  onClick={() => {
+                    setActiveTab('Visão Geral');
+                    osEdit.startEditing();
+                  }}
                   className="inline-flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
                 >
                   <span aria-hidden>✏️</span>
                   <span className="hidden sm:inline">Editar OS</span>
                 </button>
+              )}
+              {osEdit.isEditing && (
+                <>
+                  <button
+                    type="button"
+                    onClick={osEdit.cancelEditing}
+                    disabled={osEdit.saving}
+                    className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-gray-100 dark:bg-dark-bg text-gray-700 dark:text-gray-200 text-xs sm:text-sm font-semibold hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void osEdit.saveEditing()}
+                    disabled={osEdit.saving}
+                    className="inline-flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+                  >
+                    {osEdit.saving ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -2004,30 +2165,59 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               onViewClient={onViewClient}
               onViewSale={onViewSale}
               onNavigate={onNavigate}
-              onClose={onClose}
+              onClose={handleRequestClose}
               onAbrirCronograma={() => setActiveTab('Cronograma & Alocação')}
               tipoOs={projeto.tipo}
               podeAlterarTipoOs={projeto.status !== 'CONCLUIDO' && projeto.status !== 'CANCELADO'}
               alterandoTipoOs={alterandoTipoOs}
               onAlterarTipoOs={handleAlterarTipoOs}
+              podeEditarPrazo={projeto.status !== 'CONCLUIDO' && projeto.status !== 'CANCELADO'}
+              onPrazoEstimadoSaved={async () => {
+                if (onRefresh) await onRefresh();
+                await carregarResumoApropriacao();
+              }}
+              isEditing={osEdit.isEditing}
+              editDraft={osEdit.draft}
+              onEditDraftChange={osEdit.patchDraft}
+              editSaving={osEdit.saving}
+              onSaveEdit={osEdit.saveEditing}
+              onCancelEdit={osEdit.cancelEditing}
+              clientesOptions={osEdit.clientes.map((c) => ({
+                id: c.id,
+                nome: c.nome,
+                documento: c.cpfCnpj,
+              }))}
+              usuariosOptions={usuariosDisponiveis.map((u) => ({
+                id: u.id,
+                nome: u.name || u.nome || '',
+                role: u.role || u.funcao,
+              }))}
             />
           )}
 
-          {/* Se projeto marcado como sem obra: permitir concluir quando não há tasks OU quando todas as tasks estão concluídas */}
-          {activeTab === 'Kanban' && projeto.semObra && projeto.status !== 'CONCLUIDO' && (tasks.length === 0 || tasks.every(t => t.status === 'Concluído')) && (
+          {/* Concluir OS: sem obra, ou Quadros/Painéis com Kanban 100% */}
+          {activeTab === 'Kanban' &&
+            projeto.status !== 'CONCLUIDO' &&
+            (tasks.length === 0 || tasks.every((t) => t.status === 'Concluído')) &&
+            (projeto.semObra || isOsTipoQuadrosPainels(projeto.tipo)) && (
             <div className="p-6">
               <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft text-center">
                 <p className="text-gray-700 dark:text-gray-300 mb-4">
                   {tasks.length === 0
-                    ? 'Esta ordem de serviço foi marcada como sem obra e não possui tarefas no Kanban.'
+                    ? 'Esta ordem de serviço não possui tarefas no Kanban.'
                     : 'Todas as tarefas do Kanban foram concluídas. Você pode concluir a ordem de serviço.'}
                 </p>
+                {isOsTipoQuadrosPainels(projeto.tipo) && (
+                  <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+                    Para Quadros/Painéis, o checklist de entrega (foto, materiais, romaneio e recebimento) deve estar completo.
+                  </p>
+                )}
                 <p className="text-sm text-gray-500 mb-4">
                   Ao concluir, registre uma justificativa de conclusão. O progresso será exibido como 100%.
                 </p>
                 <div className="flex items-center justify-center gap-3">
                   <button
-                    onClick={() => setConcluirModalOpen(true)}
+                    onClick={() => void tentarAbrirConcluirOs()}
                     className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-semibold"
                   >
                     Concluir Ordem de Serviço
@@ -2825,194 +3015,22 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           )}
 
           {activeTab === 'Resultado' && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Resultado — Orçado vs Realizado</h3>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const agora = new Date();
-                    const competencia = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
-                    try {
-                      await projetosService.baixarCsvHorasCustoContabil(competencia, projeto.id);
-                      toast.success('CSV contábil exportado');
-                    } catch {
-                      toast.error('Erro ao exportar CSV contábil');
-                    }
-                  }}
-                  className="text-sm font-semibold px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800"
-                >
-                  Exportar CSV contábil
-                </button>
-              </div>
-              {!resumoApropriacao ? (
-                <p className="text-sm text-gray-500">Carregando resumo...</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className={`rounded-2xl border-2 p-5 ${resumoApropriacao.estouroHorasEngenharia ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-blue-200 bg-blue-50 dark:bg-blue-900/20'}`}>
-                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Horas de Engenharia</h4>
-                      <div className="flex justify-between text-sm mb-2">
-                        <span>Orçado</span>
-                        <span className="font-semibold">{formatQuantidade(resumoApropriacao.horasEngenhariaOrcadas, 'h')}</span>
-                      </div>
-                      <div className="flex justify-between text-sm mb-3">
-                        <span>Realizado</span>
-                        <span className={`font-semibold ${resumoApropriacao.estouroHorasEngenharia ? 'text-red-700' : ''}`}>
-                          {formatQuantidade(resumoApropriacao.horasEngenhariaRealizadas, 'h')}
-                        </span>
-                      </div>
-                      <div className="h-3 bg-white/70 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${resumoApropriacao.estouroHorasEngenharia ? 'bg-red-500' : 'bg-blue-500'}`}
-                          style={{
-                            width: `${Math.min(100, resumoApropriacao.horasEngenhariaOrcadas > 0 ? (resumoApropriacao.horasEngenhariaRealizadas / resumoApropriacao.horasEngenhariaOrcadas) * 100 : 0)}%`,
-                          }}
-                        />
-                      </div>
-                      {resumoApropriacao.estouroHorasEngenharia && (
-                        <p className="text-xs text-red-700 mt-2 font-semibold">Orçamento de horas estourado</p>
-                      )}
-                    </div>
-
-                    <div className={`rounded-2xl border-2 p-5 ${resumoApropriacao.estouroDiariasEquipe ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20'}`}>
-                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Execução</h4>
-                      <div className="flex justify-between text-sm mb-2">
-                        <span>Orçado</span>
-                        <span className="font-semibold">{formatQuantidade(resumoApropriacao.diariasEquipeOrcadas, 'd')}</span>
-                      </div>
-                      <div className="flex justify-between text-sm mb-3">
-                        <span>Realizado</span>
-                        <span className={`font-semibold ${resumoApropriacao.estouroDiariasEquipe ? 'text-red-700' : ''}`}>
-                          {formatQuantidade(resumoApropriacao.diariasEquipeRealizadas, 'd')}
-                        </span>
-                      </div>
-                      <div className="h-3 bg-white/70 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${resumoApropriacao.estouroDiariasEquipe ? 'bg-red-500' : 'bg-emerald-500'}`}
-                          style={{
-                            width: `${Math.min(100, resumoApropriacao.diariasEquipeOrcadas > 0 ? (resumoApropriacao.diariasEquipeRealizadas / resumoApropriacao.diariasEquipeOrcadas) * 100 : 0)}%`,
-                          }}
-                        />
-                      </div>
-                      {resumoApropriacao.estouroDiariasEquipe && (
-                        <p className="text-xs text-red-700 mt-2 font-semibold">Orçamento de diárias estourado</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="card-primary p-4">
-                      <div className="text-xs text-gray-500">Homem-hora orçado</div>
-                      <div className="text-xl font-bold">{formatQuantidade(resumoApropriacao.homemHoraOrcado, 'h')}</div>
-                    </div>
-                    <div className="card-primary p-4">
-                      <div className="text-xs text-gray-500">Homem-hora realizado</div>
-                      <div className="text-xl font-bold">{formatQuantidade(resumoApropriacao.homemHoraRealizado, 'h')}</div>
-                    </div>
-                    <div className="card-primary p-4">
-                      <div className="text-xs text-gray-500">Valor fechado</div>
-                      <div className="text-xl font-bold">{formatMoeda(resumoApropriacao.valorFechado)}</div>
-                    </div>
-                    <div className={`card-primary p-4 ${resumoApropriacao.resultado >= 0 ? '' : 'ring-2 ring-red-300'}`}>
-                      <div className="text-xs text-gray-500">Resultado</div>
-                      <div className={`text-xl font-bold ${resumoApropriacao.resultado >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                        {formatMoeda(resumoApropriacao.resultado)}
-                      </div>
-                      <div className="text-[10px] text-gray-500 mt-1">
-                        Custo orç: {formatMoeda(resumoApropriacao.custoOrcado)} · real:{' '}
-                        {formatMoeda(resumoApropriacao.custoRealizado)}
-                      </div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">
-                        F1 confirmado: {formatMoeda(resumoApropriacao.custoApontamento ?? 0)} · F1 aguardando execução:{' '}
-                        {formatMoeda(resumoApropriacao.custoApontamentoPrevisto ?? 0)} · calendário confirmado:{' '}
-                        {formatMoeda(resumoApropriacao.custoCalendario ?? 0)} · calendário previsto:{' '}
-                        {formatMoeda(resumoApropriacao.custoCalendarioPrevisto ?? 0)}
-                      </div>
-                      {resumoApropriacao.valorFechado > 0 && (
-                        <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">
-                          Custo realizado vs valor orçado:{' '}
-                          {(
-                            (resumoApropriacao.custoRealizado / resumoApropriacao.valorFechado) *
-                            100
-                          ).toFixed(1)}
-                          % · projetado:{' '}
-                          {(
-                            ((resumoApropriacao.custoProjetado ?? resumoApropriacao.custoRealizado) /
-                              resumoApropriacao.valorFechado) *
-                            100
-                          ).toFixed(1)}
-                          %
-                        </div>
-                      )}
-                      <div className="text-[10px] text-sky-700 dark:text-sky-300 mt-0.5">
-                        Projetado (real + previsão): {formatMoeda(resumoApropriacao.custoProjetado ?? resumoApropriacao.custoRealizado)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {(resumoApropriacao.calendarioLinhas?.length ?? 0) > 0 && (
-                    <div className="rounded-2xl border border-gray-200 dark:border-dark-border overflow-hidden">
-                      <div className="px-4 py-3 bg-gray-50 dark:bg-dark-bg border-b border-gray-200 dark:border-dark-border">
-                        <h4 className="font-bold text-sm text-gray-800 dark:text-white">
-                          Custo por pessoa (calendário — previsão e confirmado)
-                        </h4>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Taxas do cadastro RH. Previsão conta na ocupação/projetado; Confirmado entra no realizado.
-                        </p>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100 dark:border-dark-border">
-                              <th className="px-4 py-2 font-semibold">Data</th>
-                              <th className="px-4 py-2 font-semibold">Funcionário</th>
-                              <th className="px-4 py-2 font-semibold">Status</th>
-                              <th className="px-4 py-2 font-semibold">Modo</th>
-                              <th className="px-4 py-2 font-semibold text-right">Horas</th>
-                              <th className="px-4 py-2 font-semibold text-right">Unitário</th>
-                              <th className="px-4 py-2 font-semibold text-right">Custo dia</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {resumoApropriacao.calendarioLinhas.map((linha) => (
-                              <tr
-                                key={`${linha.eventoId}-${linha.funcionarioId}-${linha.data}`}
-                                className="border-b border-gray-50 dark:border-dark-border/50"
-                              >
-                                <td className="px-4 py-2 whitespace-nowrap">{linha.data}</td>
-                                <td className="px-4 py-2">
-                                  <div className="font-medium">{linha.funcionarioNome}</div>
-                                  {linha.cargo ? (
-                                    <div className="text-xs text-gray-500">{linha.cargo}</div>
-                                  ) : null}
-                                </td>
-                                <td className="px-4 py-2">{linha.modoCusto}</td>
-                                <td className="px-4 py-2 text-right">{linha.totalHoras}</td>
-                                <td className="px-4 py-2 text-right">{formatMoeda(linha.valorUnitario)}</td>
-                                <td className="px-4 py-2 text-right font-semibold">
-                                  {formatMoeda(linha.custoDia)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot>
-                            <tr className="bg-gray-50 dark:bg-dark-bg">
-                              <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">
-                                Total calendário
-                              </td>
-                              <td className="px-4 py-2 text-right font-bold">
-                                {formatMoeda(resumoApropriacao.custoCalendario ?? 0)}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            <OsResultadoTab
+              projeto={projeto}
+              resumo={resumoApropriacao}
+              apontamentos={apontamentosResultado}
+              loadingApontamentos={loadingApontamentosResultado}
+              onExportCsv={async () => {
+                const agora = new Date();
+                const competencia = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+                try {
+                  await projetosService.baixarCsvHorasCustoContabil(competencia, projeto.id);
+                  toast.success('CSV contábil exportado');
+                } catch {
+                  toast.error('Erro ao exportar CSV contábil');
+                }
+              }}
+            />
           )}
           </div>
         </div>
@@ -3115,97 +3133,36 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
 
                 {/* Entrega do quadro (OS Quadros e Painéis) */}
                 {exigeFormularioEntregaQuadro(projeto.tipo, taskForm.titulo || taskEditando?.titulo) && (
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/10 p-4 space-y-3">
-                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                      Entrega do quadro
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                          Data da entrega *
-                        </label>
-                        <input
-                          type="date"
-                          value={taskForm.entregaQuadro.dataEntrega || ''}
-                          onChange={(e) =>
-                            setTaskForm({
-                              ...taskForm,
-                              entregaQuadro: { ...taskForm.entregaQuadro, dataEntrega: e.target.value },
-                            })
-                          }
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                          Entregue por *
-                        </label>
-                        <input
-                          type="text"
-                          value={taskForm.entregaQuadro.entregadorNome || ''}
-                          onChange={(e) =>
-                            setTaskForm({
-                              ...taskForm,
-                              entregaQuadro: { ...taskForm.entregaQuadro, entregadorNome: e.target.value },
-                            })
-                          }
-                          placeholder="Nome de quem entregou"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                          Recebido por *
-                        </label>
-                        <input
-                          type="text"
-                          value={taskForm.entregaQuadro.recebedorNome || ''}
-                          onChange={(e) =>
-                            setTaskForm({
-                              ...taskForm,
-                              entregaQuadro: { ...taskForm.entregaQuadro, recebedorNome: e.target.value },
-                            })
-                          }
-                          placeholder="Nome de quem recebeu"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                          Local de entrega/recebimento *
-                        </label>
-                        <input
-                          type="text"
-                          value={taskForm.entregaQuadro.localRecebimento || ''}
-                          onChange={(e) =>
-                            setTaskForm({
-                              ...taskForm,
-                              entregaQuadro: { ...taskForm.entregaQuadro, localRecebimento: e.target.value },
-                            })
-                          }
-                          placeholder="Ex.: Obra do cliente, fábrica S3E..."
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-                        />
-                      </div>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(taskForm.entregaQuadro.recebidoNoLocal)}
-                        onChange={(e) =>
-                          setTaskForm({
-                            ...taskForm,
-                            entregaQuadro: {
-                              ...taskForm.entregaQuadro,
-                              recebidoNoLocal: e.target.checked,
-                            },
-                          })
-                        }
-                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-                      />
-                      Recebido no local da obra/cliente
-                    </label>
-                  </div>
+                  <OsEntregaQuadroForm
+                    value={taskForm.entregaQuadro}
+                    onChange={(entregaQuadro) => setTaskForm({ ...taskForm, entregaQuadro })}
+                    printContext={{
+                      numeroOs: projeto.orcamento?.numeroSequencial,
+                      tituloOs: projeto.titulo,
+                      clienteNome: projeto.cliente?.nome || '',
+                      clienteTelefone: taskForm.entregaQuadro.clienteTelefone,
+                      clienteEndereco:
+                        (projeto as any).enderecoObra ||
+                        taskForm.entregaQuadro.localRecebimento ||
+                        '',
+                    }}
+                    produtosSugestao={(orcamentoCompleto?.items || projeto.orcamento?.items || [])
+                      .filter((it: any) => {
+                        const t = String(it.tipo || '').toUpperCase();
+                        return t === 'MATERIAL' || t === 'KIT' || t === 'COTACAO' || !t;
+                      })
+                      .slice(0, 20)
+                      .map((it: any) => ({
+                        nome:
+                          it.material?.nome ||
+                          it.kit?.nome ||
+                          it.cotacao?.nome ||
+                          it.descricao ||
+                          'Item',
+                        codigo: it.material?.sku || undefined,
+                        quantidade: it.quantidade,
+                      }))}
+                  />
                 )}
 
                 {/* Status */}
@@ -3754,6 +3711,49 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           </AlertDialogContent>
         </AlertDialog>
 
+        <AlertDialog
+          open={osEdit.dirtyDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) osEdit.setDirtyDialogOpen(false);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Alterações não salvas</AlertDialogTitle>
+              <AlertDialogDescription>
+                {osEdit.dirtyDialogMode === 'cancel-edit'
+                  ? 'Há alterações na edição da OS. Deseja salvar, descartar ou continuar editando?'
+                  : 'Há alterações não salvas. Deseja salvar antes de fechar, descartar ou cancelar?'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-wrap sm:flex-nowrap">
+              <AlertDialogCancel onClick={() => osEdit.setDirtyDialogOpen(false)}>
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-gray-600 hover:bg-gray-700"
+                onClick={() => {
+                  osEdit.confirmDirtyDiscard(
+                    osEdit.dirtyDialogMode === 'close' ? onClose : undefined,
+                  );
+                }}
+              >
+                Descartar
+              </AlertDialogAction>
+              <AlertDialogAction
+                className="bg-blue-600 hover:bg-blue-700"
+                onClick={() => {
+                  void osEdit.confirmDirtySave(
+                    osEdit.dirtyDialogMode === 'close' ? onClose : undefined,
+                  );
+                }}
+              >
+                Salvar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         {/* AlertDialog para Confirmação de Alocação de Material */}
         <AlertDialog open={confirmarAlocacaoOpen} onOpenChange={setConfirmarAlocacaoOpen}>
           <AlertDialogContent>
@@ -4007,7 +4007,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         projetoTitulo={projeto.titulo}
         isOpen={apontamentoOpen}
         onClose={() => setApontamentoOpen(false)}
-        onSaved={(resumo) => setResumoApropriacao(resumo)}
+        onSaved={(resumo) => {
+          setResumoApropriacao(resumo);
+          void carregarApontamentosResultado();
+        }}
       />
 
       {estoqueEscapeOpen && (

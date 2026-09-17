@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   projetosEngenhariaService,
@@ -17,6 +17,7 @@ interface EngenhariaTarefasResumoProps {
   onOpenOs?: (projetoId: string) => void;
   refreshKey?: number;
   onProgressRefresh?: () => void;
+  searchTerm?: string;
 }
 
 const btnAmber =
@@ -25,10 +26,24 @@ const btnAmber =
 const btnEmerald =
   'text-xs px-2 py-1 rounded-lg font-medium border border-emerald-200 dark:border-emerald-700/60 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/35 dark:text-emerald-200 dark:hover:bg-emerald-900/55 disabled:opacity-50';
 
+function tarefaMatchesBusca(t: EngenhariaTarefaResumoRow, termo: string): boolean {
+  const raw = termo.trim().toLowerCase();
+  if (!raw) return true;
+  const campos = [
+    t.osTitulo,
+    t.titulo,
+    t.descricao,
+    t.clienteNome,
+    t.numeroSequencial != null ? String(t.numeroSequencial) : '',
+  ];
+  return campos.some((c) => (c ?? '').toLowerCase().includes(raw));
+}
+
 const EngenhariaTarefasResumo: React.FC<EngenhariaTarefasResumoProps> = ({
   onOpenOs,
   refreshKey = 0,
   onProgressRefresh,
+  searchTerm = '',
 }) => {
   const [tarefas, setTarefas] = useState<EngenhariaTarefaResumoRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +68,11 @@ const EngenhariaTarefasResumo: React.FC<EngenhariaTarefasResumoProps> = ({
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
+
+  const tarefasFiltradas = useMemo(
+    () => tarefas.filter((t) => tarefaMatchesBusca(t, searchTerm)),
+    [tarefas, searchTerm],
+  );
 
   const atualizarStatus = async (
     tarefa: EngenhariaTarefaResumoRow,
@@ -104,12 +124,16 @@ const EngenhariaTarefasResumo: React.FC<EngenhariaTarefasResumoProps> = ({
         <p className="p-8 text-center text-gray-500 dark:text-dark-text-secondary text-sm">
           Nenhuma tarefa do Kanban atribuída a você nos seus projetos.
         </p>
+      ) : tarefasFiltradas.length === 0 ? (
+        <p className="p-8 text-center text-gray-500 dark:text-dark-text-secondary text-sm">
+          Nenhuma tarefa encontrada para a busca.
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-slate-300 bg-gray-50 dark:bg-slate-800/90">
-                <th className="px-4 py-3">OS / Cliente</th>
+                <th className="px-4 py-3">OS / Título</th>
                 <th className="px-4 py-3">Tarefa</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Prioridade</th>
@@ -118,7 +142,7 @@ const EngenhariaTarefasResumo: React.FC<EngenhariaTarefasResumoProps> = ({
               </tr>
             </thead>
             <tbody>
-              {tarefas.map((t) => {
+              {tarefasFiltradas.map((t) => {
                 const busy = updatingTaskId === t.id;
                 const concluida = isKanbanConcluido(t.status);
                 const emAndamento = isKanbanEmAndamento(t.status);
@@ -132,8 +156,11 @@ const EngenhariaTarefasResumo: React.FC<EngenhariaTarefasResumoProps> = ({
                       <div className="font-semibold text-blue-700 dark:text-blue-400">
                         #{t.numeroSequencial ?? '—'}
                       </div>
-                      <div className="text-xs text-gray-600 dark:text-dark-text-secondary truncate max-w-[180px]">
-                        {t.clienteNome || t.osTitulo}
+                      <div
+                        className="text-xs text-gray-600 dark:text-dark-text-secondary truncate max-w-[180px]"
+                        title={t.osTitulo || t.clienteNome || undefined}
+                      >
+                        {t.osTitulo || t.clienteNome || 'Sem título'}
                       </div>
                     </td>
                     <td className="px-4 py-3">

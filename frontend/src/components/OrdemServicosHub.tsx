@@ -5,7 +5,7 @@ import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util
 import ProjetosEngenhariaTable from './ProjetosEngenhariaTable';
 import OsEquipeAnalyticsModal from './OsEquipeAnalyticsModal';
 import { isAdmin, isDeveloper } from '../utils/permissions';
-import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
+import { projetosService, type Projeto, type CreateProjetoData } from '../services/projetosService';
 import { ordemServicosService } from '../services/ordemServicosService';
 import { projetosEngenhariaService, type InfoAtribuicaoOs } from '../services/projetosEngenhariaService';
 import { VistoriasCelescPanel } from './os/VistoriasCelescPanel';
@@ -26,10 +26,26 @@ import {
   type CockpitResumoItem,
 } from '../utils/osCockpit.util';
 import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
+import OsPrazoProgressoBar from './os/OsPrazoProgressoBar';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { serverDateToInput, formatDateDisplay, nowYmdInSaoPaulo, addDaysToYmd } from '../utils/date';
 import { projetoMatchesBusca } from '../utils/buscaOs.util';
+
+type AbaOs = 'listagem' | 'concluidos' | 'projetos' | 'vistorias';
+
+function placeholderBuscaOs(aba: AbaOs): string {
+  switch (aba) {
+    case 'projetos':
+      return 'Buscar projeto...';
+    case 'vistorias':
+      return 'Buscar vistoria...';
+    case 'concluidos':
+      return 'Buscar OS concluída...';
+    default:
+      return 'Buscar OS...';
+  }
+}
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -51,11 +67,6 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-);
-const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
     </svg>
 );
 const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -196,7 +207,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [minhasTarefasFilter, setMinhasTarefasFilter] = useState(false);
     const [projetoIdsComMinhasTarefas, setProjetoIdsComMinhasTarefas] = useState<Set<string>>(new Set());
     const [projetoIdsComMinhasTarefasAtrasadas, setProjetoIdsComMinhasTarefasAtrasadas] = useState<Set<string>>(new Set());
-    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'concluidos' | 'projetos' | 'vistorias'>('listagem');
+    const [abaAtiva, setAbaAtiva] = useState<AbaOs>('listagem');
     const [contagemEngenharia, setContagemEngenharia] = useState(0);
     const [contagemVistorias, setContagemVistorias] = useState(0);
     const [engenhariaRefreshKey, setEngenhariaRefreshKey] = useState(0);
@@ -217,7 +228,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
     const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
     
-    const [projetoToEdit, setProjetoToEdit] = useState<Projeto | null>(null);
     const [projetoToView, setProjetoToView] = useState<Projeto | null>(null);
     const [projetoToDelete, setProjetoToDelete] = useState<Projeto | null>(null);
     
@@ -651,44 +661,24 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     };
 
     // ==================== HANDLERS ====================
-    const handleOpenCreateModal = (projeto: Projeto | null = null) => {
-        if (projeto) {
-            setProjetoToEdit(projeto);
-            setFormState({
-                titulo: projeto.titulo,
-                descricao: projeto.descricao,
-                tipo: projeto.tipo,
-                clienteId: projeto.clienteId,
-                responsavelId: projeto.responsavelId || '',
-                dataInicio: serverDateToInput(projeto.dataInicio as any),
-                dataPrevisao: serverDateToInput(projeto.dataPrevisao as any),
-                orcamentoId: projeto.orcamentoId || '',
-                horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
-                diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
-                valorHoraEngenharia: projeto.valorHoraEngenharia ?? null,
-                valorDiariaEquipe: projeto.valorDiariaEquipe ?? null,
-                exigeVistoriaCelesc: Boolean(projeto.exigeVistoriaCelesc),
-            });
-        } else {
-            setProjetoToEdit(null);
-            setFormState({
-                titulo: '',
-                descricao: '',
-                tipo: 'PROJETOS_ELETRICOS',
-                clienteId: '',
-                responsavelId: '',
-                dataInicio: '',
-                dataPrevisao: '',
-                orcamentoId: '',
-                horasEngenhariaOrcadas: 0,
-                diariasEquipeOrcadas: 0,
-                valorHoraEngenharia: null,
-                valorDiariaEquipe: null,
-                exigeVistoriaCelesc: false,
-            });
-            setBuscaCliente('');
-            setBuscaOrcamento('');
-        }
+    const handleOpenCreateModal = () => {
+        setFormState({
+            titulo: '',
+            descricao: '',
+            tipo: 'PROJETOS_ELETRICOS',
+            clienteId: '',
+            responsavelId: '',
+            dataInicio: '',
+            dataPrevisao: '',
+            orcamentoId: '',
+            horasEngenhariaOrcadas: 0,
+            diariasEquipeOrcadas: 0,
+            valorHoraEngenharia: null,
+            valorDiariaEquipe: null,
+            exigeVistoriaCelesc: false,
+        });
+        setBuscaCliente('');
+        setBuscaOrcamento('');
         setOpenDropdownCliente(false);
         setOpenDropdownOrcamento(false);
         setIsCreateModalOpen(true);
@@ -721,7 +711,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!projetoToEdit && !formState.orcamentoId) {
+        if (!formState.orcamentoId) {
             toast.error('Selecione um orçamento aprovado');
             return;
         }
@@ -730,70 +720,41 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             return;
         }
         try {
-            if (projetoToEdit) {
-                const updatePayload: UpdateProjetoData = {
-                    titulo: formState.titulo,
-                    descricao: formState.descricao,
-                    tipo: formState.tipo,
-                    clienteId: formState.clienteId,
-                    responsavelId: formState.responsavelId,
-                    exigeVistoriaCelesc: formState.exigeVistoriaCelesc,
+            const orcamento = orcamentos.find((o) => o.id === formState.orcamentoId);
+            const hoje = nowYmdInSaoPaulo();
+            const amanha = addDaysToYmd(hoje, 1);
+            const createPayload: CreateProjetoData = {
+                ...formState,
+                dataInicio:
+                    formState.dataInicio ||
+                    (orcamento?.previsaoInicio
+                        ? serverDateToInput(orcamento.previsaoInicio)
+                        : hoje),
+                dataPrevisao:
+                    formState.dataPrevisao ||
+                    (orcamento?.previsaoTermino
+                        ? serverDateToInput(orcamento.previsaoTermino)
+                        : amanha),
+                horasEngenhariaOrcadas: 0,
+                diariasEquipeOrcadas: 0,
+                valorHoraEngenharia: null,
+                valorDiariaEquipe: null,
+            };
+            const response = await projetosService.criar(createPayload);
+            if (response.success && response.data) {
+                const created = response.data;
+                const responsavelUsuario = created.responsavelId
+                    ? usuariosOs.find((u) => u.id === created.responsavelId)
+                    : undefined;
+                const merged = {
+                    ...created,
+                    responsavel: created.responsavel ?? (responsavelUsuario
+                        ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
+                        : undefined),
                 };
-                const response = await projetosService.atualizar(projetoToEdit.id, updatePayload);
-                if (response.success && response.data) {
-                    const updated = response.data;
-                    const responsavelUsuario = updated.responsavelId
-                        ? usuariosOs.find((u) => u.id === updated.responsavelId)
-                        : undefined;
-                    const merged = {
-                        ...updated,
-                        responsavel: updated.responsavel ?? (responsavelUsuario
-                            ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
-                            : undefined),
-                    };
-                    setProjetos((prev) => prev.map((p) => (p.id === projetoToEdit.id ? merged : p)));
-                    setIsCreateModalOpen(false);
-                    setProjetoToEdit(null);
-                    setVistoriasRefreshKey((k) => k + 1);
-                    toast.success('Ordem de serviço atualizada');
-                }
-            } else {
-                const orcamento = orcamentos.find((o) => o.id === formState.orcamentoId);
-                const hoje = nowYmdInSaoPaulo();
-                const amanha = addDaysToYmd(hoje, 1);
-                const createPayload: CreateProjetoData = {
-                    ...formState,
-                    dataInicio:
-                        formState.dataInicio ||
-                        (orcamento?.previsaoInicio
-                            ? serverDateToInput(orcamento.previsaoInicio)
-                            : hoje),
-                    dataPrevisao:
-                        formState.dataPrevisao ||
-                        (orcamento?.previsaoTermino
-                            ? serverDateToInput(orcamento.previsaoTermino)
-                            : amanha),
-                    horasEngenhariaOrcadas: 0,
-                    diariasEquipeOrcadas: 0,
-                    valorHoraEngenharia: null,
-                    valorDiariaEquipe: null,
-                };
-                const response = await projetosService.criar(createPayload);
-                if (response.success && response.data) {
-                    const created = response.data;
-                    const responsavelUsuario = created.responsavelId
-                        ? usuariosOs.find((u) => u.id === created.responsavelId)
-                        : undefined;
-                    const merged = {
-                        ...created,
-                        responsavel: created.responsavel ?? (responsavelUsuario
-                            ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
-                            : undefined),
-                    };
-                    setProjetos(prev => [merged, ...prev]);
-                    setIsCreateModalOpen(false);
-                    setVistoriasRefreshKey((k) => k + 1);
-                }
+                setProjetos(prev => [merged, ...prev]);
+                setIsCreateModalOpen(false);
+                setVistoriasRefreshKey((k) => k + 1);
             }
         } catch (err: unknown) {
             const message =
@@ -905,16 +866,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         const atribuido = Boolean(engInfoMap[projeto.id]?.atribuido);
         const actions = [
             {
-                label: 'Visualizar',
-                icon: <EyeIcon className="w-4 h-4" />,
-                onClick: () => handleOpenViewModal(projeto),
-            },
-            {
-                label: 'Editar',
-                icon: <PencilIcon className="w-4 h-4" />,
-                onClick: () => handleOpenCreateModal(projeto),
-            },
-            {
                 label: getProjetoEngenhariaActionLabel(atribuido),
                 icon: <CubeIcon className="w-4 h-4" />,
                 onClick: () => abrirAtribuirEngenharia(projeto),
@@ -928,7 +879,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             },
         ];
         if (projeto.status === 'CONCLUIDO' && canRevertOsToAprovada) {
-            actions.splice(3, 0, {
+            actions.splice(1, 0, {
                 label: 'Voltar para Aprovada',
                 icon: <span className="text-sm">↩</span>,
                 onClick: () => void handleVoltarParaAprovada(projeto),
@@ -938,12 +889,8 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         return actions;
     }, [engInfoMap, canRevertOsToAprovada, handleVoltarParaAprovada]);
 
-    // Fechar modais com ESC
+    // Fechar modais com ESC (view modal trata ESC internamente por causa do dirty check)
     useEscapeKey(isCreateModalOpen, () => setIsCreateModalOpen(false));
-    useEscapeKey(isViewModalOpen, () => {
-        setIsViewModalOpen(false);
-        setProjetoToView(null);
-    });
     useEscapeKey(isTeamModalOpen, () => setIsTeamModalOpen(false));
     useEscapeKey(isTaskModalOpen, () => setIsTaskModalOpen(false));
     useEscapeKey(extendPrazoModalOpen, () => setExtendPrazoModalOpen(false));
@@ -1218,7 +1165,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 </ScrollableRow>
             </header>
 
-            {/* Abas de Navegação: Listagem | Projetos | Concluídos */}
+            {/* Abas de Navegação + busca unificada */}
             <div className={pageTabBarContainerClasses}>
                 <div className={mobileTabBarStripClasses}>
                 <ScrollableRow
@@ -1311,12 +1258,36 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     </button>
                 </ScrollableRow>
                 </div>
+                <div className="px-3 sm:px-4 py-3 border-t border-gray-100 dark:border-dark-border bg-gray-50/80 dark:bg-dark-bg/40">
+                    <div className="relative max-w-xl">
+                        <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none" />
+                        <input
+                            type="search"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder={placeholderBuscaOs(abaAtiva)}
+                            aria-label={placeholderBuscaOs(abaAtiva)}
+                            className="w-full pl-10 pr-10 py-2.5 text-sm border border-gray-200 dark:border-dark-border rounded-xl bg-white dark:bg-dark-card text-gray-900 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 focus:border-blue-500 transition-all"
+                        />
+                        {searchTerm ? (
+                            <button
+                                type="button"
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 px-1.5 py-0.5"
+                                aria-label="Limpar busca"
+                            >
+                                Limpar
+                            </button>
+                        ) : null}
+                    </div>
+                </div>
             </div>
 
             {abaAtiva === 'projetos' ? (
                 <ProjetosEngenhariaTable
                     onOpenOs={handleOpenOsFromEngenharia}
                     refreshKey={engenhariaRefreshKey}
+                    searchTerm={searchTerm}
                     onProgressRefresh={() => {
                         void fetchProgressForProjects(projetos);
                     }}
@@ -1328,6 +1299,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             ) : abaAtiva === 'vistorias' ? (
                 <VistoriasCelescPanel
                     refreshKey={vistoriasRefreshKey}
+                    searchTerm={searchTerm}
                     onCountChange={setContagemVistorias}
                     onOpenOs={(item) => {
                         void handleOpenViewModal(item as Projeto);
@@ -1335,29 +1307,15 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 />
             ) : (
             <>
-            {/* Filtros e Busca */}
+            {/* Filtros */}
             <div className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    {/* Busca */}
-                    <div className="md:col-span-2">
-                        <div className="relative">
-                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="Buscar por número OS, nome, cliente..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                            />
-                        </div>
-                    </div>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Filtro por Status */}
                     <div>
                         <select
                             value={statusFilter}
                             onChange={(e) => setStatusFilter(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all dark:bg-dark-card dark:text-dark-text"
                         >
                             <option value="Todos">Todos os Status</option>
                             <option value="PROPOSTA">📋 Pendente</option>
@@ -1384,7 +1342,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                         </select>
                     </div>
                     {abaAtiva === 'concluidos' && (
-                        <div className="md:col-span-4 flex items-center">
+                        <div className="md:col-span-2 flex items-center">
                             <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-700 rounded-xl p-3 w-full">
                                 <p className="text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
                                     ✅ Exibindo apenas ordens de serviço concluídas (status Concluído e progresso 100%)
@@ -1414,7 +1372,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                 onChange={(e) => setMinhasTarefasFilter(e.target.checked)}
                                 className="w-4 h-4 text-amber-500 border-gray-300 rounded focus:ring-amber-500"
                             />
-                            <span className="text-sm text-gray-600">Somente OS com minhas tarefas</span>
+                            <span className="text-sm text-gray-600 dark:text-dark-text-secondary">Somente OS com minhas tarefas</span>
                         </label>
                         {/* Toggle Mostrar Cancelados */}
                         <label className="flex items-center gap-2 cursor-pointer">
@@ -1424,17 +1382,8 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                 onChange={(e) => setMostrarCancelados(e.target.checked)}
                                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                             />
-                            <span className="text-sm text-gray-600">Mostrar cancelados</span>
+                            <span className="text-sm text-gray-600 dark:text-dark-text-secondary">Mostrar cancelados</span>
                         </label>
-                        
-                        {searchTerm && (
-                            <button
-                                onClick={() => setSearchTerm('')}
-                                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                                Limpar busca
-                            </button>
-                        )}
                     </div>
                 </div>
             </div>
@@ -1576,18 +1525,38 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </div>
                                 </div>
 
-                                {/* Progress Bar */}
-                                <div className="mb-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-xs font-medium text-gray-600">Progresso</span>
-                                        <span className="text-xs font-bold text-blue-600">{Math.round(progresso)}%</span>
+                                {/* Progresso execução (azul) + consumo do prazo */}
+                                <div className="mb-4 space-y-3">
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
+                                                Progresso de execução
+                                            </span>
+                                            <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                                                {Math.round(progresso)}%
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2.5 overflow-hidden shadow-inner">
+                                            <div
+                                                className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500"
+                                                style={{ width: `${progresso}%` }}
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden shadow-inner">
-                                        <div 
-                                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500"
-                                            style={{ width: `${progresso}%` }}
-                                        ></div>
-                                    </div>
+                                    <OsPrazoProgressoBar
+                                        variant="compact"
+                                        dataInicio={projeto.dataInicio}
+                                        dataPrevisao={cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao}
+                                        dataConclusao={projeto.dataConclusao}
+                                        status={projeto.status}
+                                        diariasOrcadas={
+                                            cockpitResumo?.diariasEquipeOrcadas ??
+                                            projeto.diariasEquipeOrcadas ??
+                                            0
+                                        }
+                                        diariasRealizadas={cockpitResumo?.diariasEquipeRealizadas ?? 0}
+                                        showWhenEmpty
+                                    />
                                 </div>
 
                                 {/* Prazo e custo de tempo */}
@@ -1608,6 +1577,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                             {formatDateDisplay((cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao) as any) || '—'}
                                         </span>
                                     </div>
+                                    {cockpitResumo != null && (
+                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-blue-100/80 dark:border-dark-border">
+                                            <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
+                                                Diárias realizadas
+                                            </span>
+                                            <span className="text-xs font-bold text-gray-800 dark:text-dark-text tabular-nums">
+                                                {cockpitResumo.diariasEquipeRealizadas} /{' '}
+                                                {cockpitResumo.diariasEquipeOrcadas || '—'}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Datas */}
@@ -1631,6 +1611,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                             )}
                                         </div>
                                     )}
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-gray-100">
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleOpenViewModal(projeto)}
+                                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+                                    >
+                                        <EyeIcon className="w-4 h-4" />
+                                        Abrir
+                                    </button>
                                 </div>
                             </div>
                         );
@@ -1717,7 +1708,15 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         </span>
                                     </td>
                                     <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
-                                        <div className="flex items-center justify-center" style={{ position: 'relative' }}>
+                                        <div className="flex items-center justify-center gap-2" style={{ position: 'relative' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleOpenViewModal(projeto)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                            >
+                                                <EyeIcon className="w-3.5 h-3.5" />
+                                                Abrir
+                                            </button>
                                             <ActionsDropdown label="Ações" actions={buildProjetoActions(projeto)} />
                                         </div>
                                     </td>
@@ -1733,13 +1732,13 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             </>
             )}
 
-            {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
+            {/* MODAL DE CRIAÇÃO (create only — edição no cockpit) */}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         <div className="flex justify-between items-center p-6 border-b border-gray-100">
                             <h2 className="text-2xl font-bold text-gray-900">
-                                {projetoToEdit ? 'Editar Ordem De Serviço' : 'Nova Ordem De Serviço'}
+                                Nova Ordem De Serviço
                             </h2>
                             <button
                                 onClick={() => setIsCreateModalOpen(false)}
@@ -1855,6 +1854,36 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </select>
                                 </div>
 
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Data de início (estimativa)
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={formState.dataInicio}
+                                        onChange={(e) => setFormState({ ...formState, dataInicio: e.target.value })}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        Pode ser preenchida ao selecionar o orçamento (previsão de início).
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Data limite / previsão
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={formState.dataPrevisao}
+                                        onChange={(e) => setFormState({ ...formState, dataPrevisao: e.target.value })}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        Pode ser preenchida ao selecionar o orçamento (previsão de término).
+                                    </p>
+                                </div>
+
                                 <div className="md:col-span-2 relative">
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Orçamento *
@@ -1945,7 +1974,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     type="submit"
                                     className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                                 >
-                                    {projetoToEdit ? 'Atualizar' : 'Criar'} Projeto
+                                    Criar Projeto
                                 </button>
                             </div>
                         </form>
@@ -1958,7 +1987,10 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 <ModalVizualizacaoProjeto
                     projeto={projetoToView as any}
                     isOpen={isViewModalOpen}
-                    onClose={() => setIsViewModalOpen(false)}
+                    onClose={() => {
+                        setIsViewModalOpen(false);
+                        setProjetoToView(null);
+                    }}
                     onRefresh={refreshModalContext}
                     onViewBudget={onViewBudget}
                     onViewSale={onViewSale}
@@ -1974,11 +2006,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     engenhariaAtribuicao={engenhariaAtribuicaoModal}
                     onAtribuirEngenharia={() => {
                         if (projetoToView) abrirAtribuirEngenharia(projetoToView);
-                    }}
-                    onEditOs={() => {
-                        const p = projetoToView;
-                        setIsViewModalOpen(false);
-                        if (p) handleOpenCreateModal(p);
                     }}
                 />
             )}

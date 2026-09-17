@@ -1,28 +1,28 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import type { Projeto } from '../../services/projetosService';
 import { projetosService } from '../../services/projetosService';
 import {
   calcularCustoTempoOrcado,
   calcularDiasCorridos,
   calcularDiasEstimadosTexto,
-  detectarEstouroPrazoExecucao,
 } from '../../utils/osCockpit.util';
+import { calcularPrazoProgresso } from '../../utils/osPrazoProgresso.util';
 import { formatMoeda, formatQuantidade, type ResultadoOsCalculado } from '../../utils/apropriacaoOs';
 import { serverDateToInput, formatDateDisplay } from '../../utils/date';
 
 export interface OsPrazoEstimadoCardProps {
   projetoId: string;
-  projeto: Pick<
-    Projeto,
-    | 'status'
-    | 'dataInicio'
-    | 'dataPrevisao'
-    | 'horasEngenhariaOrcadas'
-    | 'diariasEquipeOrcadas'
-    | 'valorHoraEngenharia'
-    | 'valorDiariaEquipe'
-  >;
+  projeto: {
+    status: string;
+    dataInicio?: string | null;
+    dataPrevisao?: string | null;
+    dataConclusao?: string | null;
+    dataFim?: string | null;
+    horasEngenhariaOrcadas?: number | null;
+    diariasEquipeOrcadas?: number | null;
+    valorHoraEngenharia?: number | null;
+    valorDiariaEquipe?: number | null;
+  };
   resumo: ResultadoOsCalculado | null;
   loading?: boolean;
   canEdit: boolean;
@@ -75,12 +75,27 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
       valorDiariaEquipe: projeto.valorDiariaEquipe,
     });
 
-  const estouro = detectarEstouroPrazoExecucao({
-    status: projeto.status,
-    diariasOrcadas,
-    diariasRealizadas,
-    diasCorridos,
-  });
+  const prazoProgresso = useMemo(
+    () =>
+      calcularPrazoProgresso({
+        dataInicio: projeto.dataInicio,
+        dataPrevisao: projeto.dataPrevisao,
+        dataConclusao: projeto.dataConclusao,
+        dataFim: projeto.dataFim,
+        status: projeto.status,
+        diariasOrcadas,
+        diariasRealizadas,
+      }),
+    [
+      projeto.dataInicio,
+      projeto.dataPrevisao,
+      projeto.dataConclusao,
+      projeto.dataFim,
+      projeto.status,
+      diariasOrcadas,
+      diariasRealizadas,
+    ]
+  );
 
   const pctDiarias =
     diariasOrcadas > 0 ? Math.min(100, (diariasRealizadas / diariasOrcadas) * 100) : 0;
@@ -116,7 +131,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
   return (
     <div
       className={`rounded-xl border bg-white dark:bg-dark-card p-5 ${
-        estouro.estourou
+        prazoProgresso.estourou
           ? 'border-red-300 dark:border-red-700'
           : 'border-gray-200 dark:border-dark-border'
       }`}
@@ -229,7 +244,15 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
           </div>
           <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${estouro.motivo === 'dias_corridos' ? 'bg-red-500' : 'bg-blue-600'}`}
+              className={`h-full transition-all ${
+                prazoProgresso.motivoEstouro === 'dias_corridos'
+                  ? 'bg-red-500'
+                  : prazoProgresso.cor === 'orange'
+                    ? 'bg-orange-500'
+                    : prazoProgresso.cor === 'yellow'
+                      ? 'bg-amber-400'
+                      : 'bg-gray-400'
+              }`}
               style={{ width: `${pctDiasCorridos}%` }}
             />
           </div>
@@ -243,7 +266,15 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
           </div>
           <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${estouro.motivo === 'diarias' ? 'bg-red-500' : 'bg-blue-600'}`}
+              className={`h-full transition-all ${
+                prazoProgresso.motivoEstouro === 'diarias'
+                  ? 'bg-red-500'
+                  : prazoProgresso.cor === 'orange'
+                    ? 'bg-orange-500'
+                    : prazoProgresso.cor === 'yellow'
+                      ? 'bg-amber-400'
+                      : 'bg-gray-400'
+              }`}
               style={{ width: `${pctDiarias}%` }}
             />
           </div>
@@ -257,9 +288,9 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
             {formatDateDisplay(projeto.dataPrevisao as string) || '—'}
           </strong>
         </span>
-        {estouro.estourou && (
-          <span className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md">
-            Estouro de prazo
+        {prazoProgresso.temEstimativa && (
+          <span className={`text-xs font-medium px-2 py-1 rounded-md ${prazoProgresso.badgeClassName}`}>
+            {prazoProgresso.badge}
           </span>
         )}
       </div>

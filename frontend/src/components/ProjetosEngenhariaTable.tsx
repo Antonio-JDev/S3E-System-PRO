@@ -26,6 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
+import { projetoMatchesBusca } from '../utils/buscaOs.util';
 
 const inputDark =
   'border border-gray-200 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600';
@@ -35,6 +36,21 @@ const STATUS_CONCLUIDO_ENG = 'Concluído';
 /** Status ativos na aba Projetos (concluídos somem da lista). */
 const STATUS_FILTRO_ATIVOS = STATUS_ENGENHARIA_OPCOES.filter((s) => s !== STATUS_CONCLUIDO_ENG);
 
+function engenhariaRowMatchesBusca(row: ProjetoEngenhariaRow, termo: string): boolean {
+  if (!termo.trim()) return true;
+  const nomeProjeto = (row.engenharia?.nomeProjeto ?? '').toLowerCase();
+  if (nomeProjeto.includes(termo.trim().toLowerCase())) return true;
+  return projetoMatchesBusca(
+    {
+      id: row.projetoId,
+      titulo: row.titulo,
+      cliente: row.cliente,
+      orcamento: { numeroSequencial: row.numeroSequencial },
+    },
+    termo,
+  );
+}
+
 interface ProjetosEngenhariaTableProps {
   onOpenOs?: (projetoId: string) => void;
   refreshKey?: number;
@@ -43,6 +59,8 @@ interface ProjetosEngenhariaTableProps {
   onEngenhariaUpdated?: (projetoId: string) => void;
   /** Contagem de projetos ativos (sem Concluído) para o badge da aba. */
   onActiveCountChange?: (count: number) => void;
+  /** Busca unificada do hub (filtra a tabela de engenharia). */
+  searchTerm?: string;
 }
 
 function useDebouncedPatch(
@@ -109,7 +127,12 @@ function RowEditor({
           placeholder="Nome do projeto"
           onChange={(e) => patchField({ nomeProjeto: e.target.value })}
         />
-        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1 truncate">{row.cliente.nome}</p>
+        <p
+          className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1 truncate"
+          title={row.titulo}
+        >
+          {row.titulo || 'Sem título'}
+        </p>
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1 max-w-[140px]">
@@ -201,6 +224,7 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
   onProgressRefresh,
   onEngenhariaUpdated,
   onActiveCountChange,
+  searchTerm = '',
 }) => {
   const [rows, setRows] = useState<ProjetoEngenhariaRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -252,14 +276,17 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
   };
 
   const filteredRows = useMemo(() => {
-    if (statusFilter === 'Todos') return rowsAtivos;
-    return rowsAtivos.filter((r) => (r.engenharia?.statusEngenharia ?? 'A fazer') === statusFilter);
-  }, [rowsAtivos, statusFilter]);
+    const byStatus =
+      statusFilter === 'Todos'
+        ? rowsAtivos
+        : rowsAtivos.filter((r) => (r.engenharia?.statusEngenharia ?? 'A fazer') === statusFilter);
+    return byStatus.filter((r) => engenhariaRowMatchesBusca(r, searchTerm));
+  }, [rowsAtivos, statusFilter, searchTerm]);
 
   const projetoConcluirLabel = useMemo(() => {
     if (!projetoIdConcluir) return '';
     const row = rows.find((r) => r.projetoId === projetoIdConcluir);
-    return row?.engenharia?.nomeProjeto || row?.cliente?.nome || `#${row?.numeroSequencial ?? ''}`;
+    return row?.engenharia?.nomeProjeto || row?.titulo || `#${row?.numeroSequencial ?? ''}`;
   }, [projetoIdConcluir, rows]);
 
   const handleRequestConcluir = (projetoId: string) => {
@@ -338,7 +365,7 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-blue-50 dark:bg-slate-800/90 text-left text-xs font-bold uppercase tracking-wide text-blue-900 dark:text-blue-200">
-                  <th className="px-4 py-3">Nº / Nome</th>
+                  <th className="px-4 py-3">Nº / Ordem de serviço</th>
                   <th className="px-4 py-3">Tipo</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Status CELESC</th>
@@ -353,7 +380,9 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
                       colSpan={6}
                       className="px-4 py-8 text-center text-gray-500 dark:text-dark-text-secondary text-sm"
                     >
-                      Nenhum projeto com status &quot;{statusFilter}&quot;.
+                      {searchTerm.trim()
+                        ? 'Nenhum projeto encontrado para a busca.'
+                        : `Nenhum projeto com status "${statusFilter}".`}
                     </td>
                   </tr>
                 ) : (
@@ -377,6 +406,7 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
         onOpenOs={onOpenOs}
         refreshKey={refreshKey}
         onProgressRefresh={onProgressRefresh}
+        searchTerm={searchTerm}
       />
       <EngenhariaBibliotecaDocumentos refreshKey={refreshKey} />
 

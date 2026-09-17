@@ -28,7 +28,7 @@ describe('engenhariaProjeto constants', () => {
 describe('ProjetosEngenhariaTable (colunas)', () => {
   it('lista colunas da tabela sem Progresso e Ações', () => {
     const colunas = [
-      'Nº / Nome',
+      'Nº / Ordem de serviço',
       'Tipo',
       'Status',
       'Status CELESC',
@@ -38,6 +38,7 @@ describe('ProjetosEngenhariaTable (colunas)', () => {
     expect(colunas).toHaveLength(6);
     expect(colunas).not.toContain('Progresso');
     expect(colunas).not.toContain('Ações');
+    expect(colunas).not.toContain('Nº / Nome');
   });
 
   it('filtros de status incluem todos os novos valores', () => {
