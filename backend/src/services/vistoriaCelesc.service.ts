@@ -1,5 +1,13 @@
 import { Prisma, StatusVistoriaCelesc as StatusVistoriaCelescEnum } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import {
+  ITENS_PADRAO_VISTORIA_CELESC,
+  ItemAvaliacaoReprova,
+  itensReprovadosLegadoParaAvaliacao,
+  montarChecklistComEstado,
+  normalizarItensAvaliacao,
+  validarItensAvaliacaoReprova,
+} from '../utils/vistoriaReprovaItens.util';
 
 export const PRAZO_RESPOSTA_CELESC_DIAS = 30;
 
@@ -22,12 +30,23 @@ const STATUS_FILA: StatusVistoriaCelesc[] = [
 
 export type ReprovarVistoriaInput = {
   dataReprovacao: Date | string;
-  motivos: string;
-  itensReprovados: string[] | string;
+  /** Observações gerais (opcional se itensAvaliacao for enviado) */
+  motivos?: string;
+  /** Legado: lista de labels dos itens reprovados */
+  itensReprovados?: string[] | string;
+  /** Novo: avaliação por item com passou/justificativa */
+  itensAvaliacao?: ItemAvaliacaoReprova[] | unknown;
   criadoPorId?: string | null;
 };
 
-function parseItensReprovados(raw: string[] | string): string[] {
+export type AtualizarReprovaVistoriaInput = {
+  dataReprovacao?: Date | string;
+  motivos?: string;
+  itensAvaliacao: ItemAvaliacaoReprova[] | unknown;
+};
+
+function parseItensReprovados(raw: string[] | string | undefined): string[] {
+  if (raw == null) return [];
   if (Array.isArray(raw)) {
     return raw.map((s) => String(s).trim()).filter(Boolean);
   }
@@ -35,6 +54,45 @@ function parseItensReprovados(raw: string[] | string): string[] {
     .split(/\r?\n|,/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function resolverAvaliacaoDeInput(input: {
+  motivos?: string;
+  itensReprovados?: string[] | string;
+  itensAvaliacao?: unknown;
+}): {
+  itensAvaliacao: ItemAvaliacaoReprova[];
+  itensReprovados: string[];
+  motivos: string;
+} {
+  if (input.itensAvaliacao != null) {
+    const validacao = validarItensAvaliacaoReprova(input.itensAvaliacao);
+    if (!validacao.ok) throw new Error(validacao.message);
+    const motivosExtra = String(input.motivos || '').trim();
+    return {
+      itensAvaliacao: validacao.itens,
+      itensReprovados: validacao.itensReprovados,
+      motivos: motivosExtra || validacao.motivosResumo,
+    };
+  }
+
+  // Legado: motivos + lista de strings
+  const motivos = String(input.motivos || '').trim();
+  if (!motivos) throw new Error('Motivos / observações são obrigatórios');
+
+  const itensReprovados = parseItensReprovados(input.itensReprovados);
+  if (itensReprovados.length === 0) {
+    throw new Error('Informe ao menos um item reprovado');
+  }
+
+  const itensAvaliacao = itensReprovados.map((label) => ({
+    codigo: label.toLowerCase().replace(/\s+/g, '_').slice(0, 64),
+    label,
+    passou: false,
+    justificativa: motivos,
+  }));
+
+  return { itensAvaliacao, itensReprovados, motivos };
 }
 
 function calcularPrazo(dataProtocolo: Date | null | undefined) {
@@ -78,6 +136,33 @@ async function syncStatusCelescEngenharia(
     where: { projetoId },
     data: { statusCelesc: [...limpos, label] },
   });
+}
+
+function hydrateReprovacao(h: {
+  id: string;
+  projetoId: string;
+  dataReprovacao: Date;
+  motivos: string;
+  itensReprovados: unknown;
+  itensAvaliacao?: unknown;
+  criadoEm: Date;
+  criadoPorId?: string | null;
+  criadoPor?: { id: string; name: string } | null;
+}) {
+  const salvos =
+    h.itensAvaliacao != null
+      ? normalizarItensAvaliacao(h.itensAvaliacao)
+      : itensReprovadosLegadoParaAvaliacao(h.itensReprovados);
+
+  return {
+    ...h,
+    itensAvaliacao: salvos,
+    checklist: montarChecklistComEstado(salvos),
+  };
+}
+
+export function listarItensChecklistVistoria() {
+  return ITENS_PADRAO_VISTORIA_CELESC;
 }
 
 export async function entrarNaFilaSeAplicavel(projetoId: string) {
@@ -140,6 +225,9 @@ export async function listarFila() {
       responsavel: p.responsavel
         ? { id: p.responsavel.id, nome: p.responsavel.name }
         : null,
+      historicoReprovacoesVistoria: p.historicoReprovacoesVistoria.map((h) =>
+        hydrateReprovacao(h),
+      ),
       ...prazo,
       qtdReprovacoes: p.historicoReprovacoesVistoria.length,
     };
@@ -177,6 +265,9 @@ export async function protocolar(projetoId: string) {
   await syncStatusCelescEngenharia(projetoId, 'AGUARDANDO CELESC');
   return {
     ...atualizado,
+    historicoReprovacoesVistoria: atualizado.historicoReprovacoesVistoria.map((h) =>
+      hydrateReprovacao(h),
+    ),
     ...calcularPrazo(atualizado.dataProtocoloVistoria),
     qtdReprovacoes: atualizado.historicoReprovacoesVistoria.length,
   };
@@ -196,18 +287,12 @@ export async function reprovar(projetoId: string, input: ReprovarVistoriaInput) 
     throw new Error('Só é possível reprovar vistoria em AGUARDANDO_CELESC ou REPROVADO');
   }
 
-  const motivos = String(input.motivos || '').trim();
-  if (!motivos) throw new Error('Motivos / observações são obrigatórios');
-
-  const itensReprovados = parseItensReprovados(input.itensReprovados);
-  if (itensReprovados.length === 0) {
-    throw new Error('Informe ao menos um item reprovado');
-  }
-
   const dataReprovacao = new Date(input.dataReprovacao);
   if (Number.isNaN(dataReprovacao.getTime())) {
     throw new Error('Data da reprovação inválida');
   }
+
+  const { itensAvaliacao, itensReprovados, motivos } = resolverAvaliacaoDeInput(input);
 
   const [, atualizado] = await prisma.$transaction([
     prisma.historicoReprovacaoVistoria.create({
@@ -216,6 +301,7 @@ export async function reprovar(projetoId: string, input: ReprovarVistoriaInput) 
         dataReprovacao,
         motivos,
         itensReprovados: itensReprovados as Prisma.InputJsonValue,
+        itensAvaliacao: itensAvaliacao as Prisma.InputJsonValue,
         criadoPorId: input.criadoPorId ?? null,
       },
     }),
@@ -235,9 +321,60 @@ export async function reprovar(projetoId: string, input: ReprovarVistoriaInput) 
   await syncStatusCelescEngenharia(projetoId, 'REPROVADO');
   return {
     ...atualizado,
+    historicoReprovacoesVistoria: atualizado.historicoReprovacoesVistoria.map((h) =>
+      hydrateReprovacao(h),
+    ),
     ...calcularPrazo(atualizado.dataProtocoloVistoria),
     qtdReprovacoes: atualizado.historicoReprovacoesVistoria.length,
   };
+}
+
+export async function obterReprovacao(projetoId: string, reprovacaoId: string) {
+  const registro = await prisma.historicoReprovacaoVistoria.findFirst({
+    where: { id: reprovacaoId, projetoId },
+    include: { criadoPor: { select: { id: true, name: true } } },
+  });
+  if (!registro) throw new Error('Reprovação não encontrada');
+  return hydrateReprovacao(registro);
+}
+
+export async function atualizarReprovacao(
+  projetoId: string,
+  reprovacaoId: string,
+  input: AtualizarReprovaVistoriaInput,
+) {
+  const existente = await prisma.historicoReprovacaoVistoria.findFirst({
+    where: { id: reprovacaoId, projetoId },
+  });
+  if (!existente) throw new Error('Reprovação não encontrada');
+
+  const validacao = validarItensAvaliacaoReprova(input.itensAvaliacao);
+  if (!validacao.ok) throw new Error(validacao.message);
+
+  let dataReprovacao = existente.dataReprovacao;
+  if (input.dataReprovacao != null) {
+    const parsed = new Date(input.dataReprovacao);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error('Data da reprovação inválida');
+    }
+    dataReprovacao = parsed;
+  }
+
+  const motivosExtra = input.motivos != null ? String(input.motivos).trim() : '';
+  const motivos = motivosExtra || validacao.motivosResumo;
+
+  const atualizado = await prisma.historicoReprovacaoVistoria.update({
+    where: { id: reprovacaoId },
+    data: {
+      dataReprovacao,
+      motivos,
+      itensReprovados: validacao.itensReprovados as Prisma.InputJsonValue,
+      itensAvaliacao: validacao.itens as Prisma.InputJsonValue,
+    },
+    include: { criadoPor: { select: { id: true, name: true } } },
+  });
+
+  return hydrateReprovacao(atualizado);
 }
 
 export async function aprovar(projetoId: string) {
@@ -266,6 +403,9 @@ export async function aprovar(projetoId: string) {
   await syncStatusCelescEngenharia(projetoId, 'APROVADO');
   return {
     ...atualizado,
+    historicoReprovacoesVistoria: atualizado.historicoReprovacoesVistoria.map((h) =>
+      hydrateReprovacao(h),
+    ),
     ...calcularPrazo(atualizado.dataProtocoloVistoria),
     qtdReprovacoes: atualizado.historicoReprovacoesVistoria.length,
   };

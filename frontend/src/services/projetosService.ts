@@ -7,6 +7,8 @@ export {
   type ProjetoFilters,
   type StatusVistoriaCelesc,
   type HistoricoReprovacaoVistoria,
+  type ItemAvaliacaoReprovaVistoria,
   type VistoriaCelescItem,
   type ReprovarVistoriaPayload,
+  type AtualizarReprovaVistoriaPayload,
 } from './ordemServicosService';

@@ -12,6 +12,8 @@ jest.mock('../lib/prisma', () => ({
     },
     historicoReprovacaoVistoria: {
       create: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
     },
   },
 }));
@@ -19,6 +21,7 @@ jest.mock('../lib/prisma', () => ({
 import { prisma } from '../lib/prisma';
 import {
   aprovar,
+  atualizarReprovacao,
   entrarNaFilaSeAplicavel,
   protocolar,
   reprovar,
@@ -125,7 +128,7 @@ describe('vistoriaCelesc.service', () => {
       expect(result.qtdReprovacoes).toBe(1);
     });
 
-    it('exige motivos', async () => {
+    it('exige motivos no formato legado', async () => {
       (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
         id: 'p1',
         exigeVistoriaCelesc: true,
@@ -139,6 +142,130 @@ describe('vistoriaCelesc.service', () => {
           itensReprovados: [],
         }),
       ).rejects.toThrow(/Motivos/);
+    });
+
+    it('aceita itensAvaliacao com justificativa por item', async () => {
+      (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
+        id: 'p1',
+        exigeVistoriaCelesc: true,
+        statusVistoria: StatusVistoriaCelesc.AGUARDANDO_CELESC,
+      });
+      (prisma.$transaction as jest.Mock).mockResolvedValue([
+        { id: 'h1' },
+        {
+          id: 'p1',
+          statusVistoria: StatusVistoriaCelesc.REPROVADO,
+          dataProtocoloVistoria: new Date('2026-07-01T12:00:00Z'),
+          historicoReprovacoesVistoria: [
+            {
+              id: 'h1',
+              projetoId: 'p1',
+              dataReprovacao: new Date('2026-07-10'),
+              motivos: 'Aterramento: Haste insuficiente',
+              itensReprovados: ['Aterramento'],
+              itensAvaliacao: [
+                {
+                  codigo: 'aterramento',
+                  label: 'Aterramento',
+                  passou: false,
+                  justificativa: 'Haste insuficiente',
+                },
+              ],
+              criadoEm: new Date(),
+              criadoPorId: 'u1',
+              criadoPor: null,
+            },
+          ],
+        },
+      ]);
+
+      const result = await reprovar('p1', {
+        dataReprovacao: '2026-07-10',
+        itensAvaliacao: [
+          {
+            codigo: 'aterramento',
+            label: 'Aterramento',
+            passou: false,
+            justificativa: 'Haste insuficiente',
+          },
+          {
+            codigo: 'quadro_medicao',
+            label: 'Quadro de medição',
+            passou: true,
+            justificativa: '',
+          },
+        ],
+        criadoPorId: 'u1',
+      });
+
+      expect(result.statusVistoria).toBe(StatusVistoriaCelesc.REPROVADO);
+      expect(result.historicoReprovacoesVistoria[0].itensAvaliacao).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ codigo: 'aterramento', passou: false }),
+        ]),
+      );
+    });
+  });
+
+  describe('atualizarReprovacao', () => {
+    it('atualiza itens e exige justificativa nos reprovados', async () => {
+      (prisma.historicoReprovacaoVistoria.findFirst as jest.Mock).mockResolvedValue({
+        id: 'h1',
+        projetoId: 'p1',
+        dataReprovacao: new Date('2026-07-10'),
+        motivos: 'antigo',
+        itensReprovados: ['Aterramento'],
+        itensAvaliacao: null,
+      });
+
+      await expect(
+        atualizarReprovacao('p1', 'h1', {
+          itensAvaliacao: [
+            { codigo: 'aterramento', label: 'Aterramento', passou: false, justificativa: '' },
+          ],
+        }),
+      ).rejects.toThrow(/Justificativa obrigatória/);
+
+      (prisma.historicoReprovacaoVistoria.update as jest.Mock).mockResolvedValue({
+        id: 'h1',
+        projetoId: 'p1',
+        dataReprovacao: new Date('2026-07-10'),
+        motivos: 'Aterramento: Corrigido',
+        itensReprovados: ['Aterramento'],
+        itensAvaliacao: [
+          {
+            codigo: 'aterramento',
+            label: 'Aterramento',
+            passou: false,
+            justificativa: 'Corrigido',
+          },
+        ],
+        criadoEm: new Date(),
+        criadoPorId: null,
+        criadoPor: null,
+      });
+
+      const ok = await atualizarReprovacao('p1', 'h1', {
+        itensAvaliacao: [
+          {
+            codigo: 'aterramento',
+            label: 'Aterramento',
+            passou: false,
+            justificativa: 'Corrigido',
+          },
+          {
+            codigo: 'quadro_medicao',
+            label: 'Quadro de medição',
+            passou: true,
+            justificativa: '',
+          },
+        ],
+      });
+
+      expect(prisma.historicoReprovacaoVistoria.update).toHaveBeenCalled();
+      expect(ok.itensAvaliacao.find((i) => i.codigo === 'aterramento')?.justificativa).toBe(
+        'Corrigido',
+      );
     });
   });
 

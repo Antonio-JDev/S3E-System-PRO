@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
-import type { StatusVistoriaCelesc, VistoriaCelescItem } from '../../services/ordemServicosService';
+import type {
+  HistoricoReprovacaoVistoria,
+  ItemAvaliacaoReprovaVistoria,
+  StatusVistoriaCelesc,
+  VistoriaCelescItem,
+} from '../../services/ordemServicosService';
 import {
   ModalReprovacaoVistoria,
-  formatItensReprovados,
+  normalizeItensAvaliacao,
 } from './ModalReprovacaoVistoria';
 
 const STATUS_LABEL: Record<StatusVistoriaCelesc, string> = {
@@ -27,6 +32,30 @@ function statusBadgeClass(status: StatusVistoriaCelesc | null | undefined) {
   }
 }
 
+function ItemAvaliacaoLinha({ item }: { item: ItemAvaliacaoReprovaVistoria }) {
+  return (
+    <li className="text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+            item.passou
+              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+              : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+          }`}
+        >
+          {item.passou ? 'Passou' : 'Não passou'}
+        </span>
+        <span className="font-medium text-gray-800 dark:text-dark-text">{item.label}</span>
+      </div>
+      {!item.passou && item.justificativa ? (
+        <p className="mt-0.5 pl-1 text-gray-600 dark:text-dark-text-secondary whitespace-pre-wrap">
+          {item.justificativa}
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
 interface VistoriaCelescCardProps {
   item: VistoriaCelescItem;
   busy?: boolean;
@@ -34,7 +63,20 @@ interface VistoriaCelescCardProps {
   onAprovar: (id: string) => Promise<void>;
   onReprovar: (
     id: string,
-    payload: { dataReprovacao: string; motivos: string; itensReprovados: string[] },
+    payload: {
+      dataReprovacao: string;
+      motivos?: string;
+      itensAvaliacao: ItemAvaliacaoReprovaVistoria[];
+    },
+  ) => Promise<void>;
+  onAtualizarReprova: (
+    projetoId: string,
+    reprovacaoId: string,
+    payload: {
+      dataReprovacao?: string;
+      motivos?: string;
+      itensAvaliacao: ItemAvaliacaoReprovaVistoria[];
+    },
   ) => Promise<void>;
   onOpenOs?: (item: VistoriaCelescItem) => void;
 }
@@ -45,10 +87,14 @@ export const VistoriaCelescCard: React.FC<VistoriaCelescCardProps> = ({
   onProtocolar,
   onAprovar,
   onReprovar,
+  onAtualizarReprova,
   onOpenOs,
 }) => {
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [modalReprova, setModalReprova] = useState(false);
+  const [reprovaEditando, setReprovaEditando] = useState<HistoricoReprovacaoVistoria | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const status = item.statusVistoria ?? null;
@@ -71,6 +117,11 @@ export const VistoriaCelescCard: React.FC<VistoriaCelescCardProps> = ({
     }
     return `${item.diasDecorridos}d decorridos · ${item.diasRestantes ?? 0}d restantes`;
   })();
+
+  const fecharModal = () => {
+    setModalReprova(false);
+    setReprovaEditando(null);
+  };
 
   return (
     <>
@@ -127,23 +178,54 @@ export const VistoriaCelescCard: React.FC<VistoriaCelescCardProps> = ({
         )}
 
         {historicoAberto && (
-          <div className="rounded-xl border border-red-100 dark:border-red-900/40 bg-red-50/60 dark:bg-red-900/10 p-3 space-y-3 max-h-56 overflow-y-auto">
-            {(item.historicoReprovacoesVistoria ?? []).map((h) => (
-              <div key={h.id} className="text-sm border-b border-red-100/80 dark:border-red-900/30 pb-2 last:border-0 last:pb-0">
-                <div className="font-semibold text-gray-800 dark:text-dark-text">
-                  {new Date(h.dataReprovacao).toLocaleDateString('pt-BR')}
-                  {h.criadoPor?.name ? ` · ${h.criadoPor.name}` : ''}
+          <div className="rounded-xl border border-red-100 dark:border-red-900/40 bg-red-50/60 dark:bg-red-900/10 p-3 space-y-3 max-h-72 overflow-y-auto">
+            {(item.historicoReprovacoesVistoria ?? []).map((h) => {
+              const avaliacao = normalizeItensAvaliacao(h);
+              return (
+                <div
+                  key={h.id}
+                  className="text-sm border-b border-red-100/80 dark:border-red-900/30 pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold text-gray-800 dark:text-dark-text">
+                      {new Date(h.dataReprovacao).toLocaleDateString('pt-BR')}
+                      {h.criadoPor?.name ? ` · ${h.criadoPor.name}` : ''}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy || submitting}
+                      onClick={() => {
+                        setReprovaEditando(h);
+                        setModalReprova(true);
+                      }}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                    >
+                      Editar reprova
+                    </button>
+                  </div>
+                  <ul className="mt-2 space-y-2">
+                    {avaliacao.map((it) => (
+                      <ItemAvaliacaoLinha key={`${h.id}-${it.codigo}`} item={it} />
+                    ))}
+                  </ul>
+                  {(() => {
+                    const autoResumo = avaliacao
+                      .filter((i) => !i.passou && i.justificativa)
+                      .map((i) => `${i.label}: ${i.justificativa}`)
+                      .join('\n');
+                    const motivosExtra =
+                      h.motivos && h.motivos.trim() && h.motivos.trim() !== autoResumo
+                        ? h.motivos.trim()
+                        : '';
+                    return motivosExtra ? (
+                      <p className="mt-2 text-gray-600 dark:text-dark-text-secondary whitespace-pre-wrap">
+                        {motivosExtra}
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
-                <ul className="mt-1 list-disc pl-5 text-gray-700 dark:text-dark-text-secondary">
-                  {formatItensReprovados(h.itensReprovados).map((it) => (
-                    <li key={it}>{it}</li>
-                  ))}
-                </ul>
-                <p className="mt-1 text-gray-600 dark:text-dark-text-secondary whitespace-pre-wrap">
-                  {h.motivos}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -185,7 +267,10 @@ export const VistoriaCelescCard: React.FC<VistoriaCelescCardProps> = ({
               <button
                 type="button"
                 disabled={busy || submitting}
-                onClick={() => setModalReprova(true)}
+                onClick={() => {
+                  setReprovaEditando(null);
+                  setModalReprova(true);
+                }}
                 className="rounded-xl border border-red-300 dark:border-red-700 px-3.5 py-2 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60"
               >
                 Registrar Reprova
@@ -199,12 +284,17 @@ export const VistoriaCelescCard: React.FC<VistoriaCelescCardProps> = ({
         open={modalReprova}
         tituloOs={item.titulo}
         submitting={submitting}
-        onClose={() => setModalReprova(false)}
+        reprovaExistente={reprovaEditando}
+        onClose={fecharModal}
         onSubmit={async (payload) => {
           setSubmitting(true);
           try {
-            await onReprovar(item.id, payload);
-            setModalReprova(false);
+            if (reprovaEditando?.id) {
+              await onAtualizarReprova(item.id, reprovaEditando.id, payload);
+            } else {
+              await onReprovar(item.id, payload);
+            }
+            fecharModal();
           } finally {
             setSubmitting(false);
           }
