@@ -6,6 +6,11 @@ import {
   getSystemLogs,
   getUserSessionAudit,
 } from './debugMcp.handlers';
+import {
+  getOsStatus,
+  getOrcamentos,
+  getWhatsappStatus,
+} from './debugMcp.extra.handlers';
 
 function textoJson(dados: unknown) {
   const falha = typeof dados === 'object' && dados !== null && (dados as { ok?: boolean }).ok === false;
@@ -54,30 +59,11 @@ export async function autenticarChaveMcp(req: Request, res: Response, next: Next
   next();
 }
 
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
 export async function tratarRequisicaoMcp(req: Request, res: Response): Promise<void> {
   try {
-    const { McpServer } = (await import('@modelcontextprotocol/sdk/server/mcp.js')) as {
-      McpServer: new (info: { name: string; version: string }) => {
-        registerTool: (
-          name: string,
-          config: Record<string, unknown>,
-          cb: (args: Record<string, unknown>) => Promise<unknown>
-        ) => void;
-        connect: (transport: unknown) => Promise<void>;
-        close: () => Promise<void>;
-      };
-    };
-    const { StreamableHTTPServerTransport } = (await import(
-      '@modelcontextprotocol/sdk/server/streamableHttp.js'
-    )) as {
-      StreamableHTTPServerTransport: new (options?: {
-        sessionIdGenerator?: undefined;
-        enableJsonResponse?: boolean;
-      }) => {
-        handleRequest: (req: unknown, res: unknown, parsedBody?: unknown) => Promise<void>;
-        close: () => Promise<void>;
-      };
-    };
 
     const server = new McpServer({
       name: 's3e-erp-debug',
@@ -127,6 +113,50 @@ export async function tratarRequisicaoMcp(req: Request, res: Response): Promise<
         annotations: { readOnlyHint: true },
       },
       async (args) => executar(() => getUserSessionAudit(args))
+    );
+
+    server.registerTool(
+      'get_os_status',
+      {
+        title: 'Ordens de Serviço',
+        description:
+          'Consulta as Ordens de Serviço (OS) do ERP S3E — tabela Projeto. Permite filtrar por status (ex: PROPOSTA, EM_ANDAMENTO, CONCLUIDO, CANCELADO) e/ou nome do cliente. Retorna titulo, status, tipo, cliente, responsavel, datas e valor. Somente leitura.',
+        inputSchema: {
+          status: z.string().optional().describe('Status da OS (ex: PROPOSTA, EM_ANDAMENTO, CONCLUIDO, CANCELADO, PAUSADO)'),
+          clienteNome: z.string().optional().describe('Parte do nome do cliente para filtrar'),
+          limit: z.number().int().min(1).max(100).optional().describe('Quantidade maxima. Padrao: 20'),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      async (args) => executar(() => getOsStatus(args))
+    );
+
+    server.registerTool(
+      'get_orcamentos',
+      {
+        title: 'Orcamentos',
+        description:
+          'Consulta os orcamentos do ERP S3E. Permite filtrar por status (ex: Pendente, Aprovado, Recusado, Cancelado, Enviado ao Cliente, Concretizado) e/ou nome do cliente. Retorna numero, titulo, status, precoVenda, validade, motivo de recusa. Somente leitura.',
+        inputSchema: {
+          status: z.string().optional().describe('Status do orcamento (ex: Pendente, Aprovado, Recusado, Cancelado, Concretizado)'),
+          clienteNome: z.string().optional().describe('Parte do nome do cliente para filtrar'),
+          limit: z.number().int().min(1).max(100).optional().describe('Quantidade maxima. Padrao: 20'),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      async (args) => executar(() => getOrcamentos(args))
+    );
+
+    server.registerTool(
+      'get_whatsapp_status',
+      {
+        title: 'Status do WhatsApp',
+        description:
+          'Retorna o status atual da conexao WhatsApp do S3E (conectado, desconectado, alcancavel) e o historico do monitor automatico de queda — incluindo ha quantos minutos esta offline, quando o ultimo alerta por email foi enviado e o total de alertas disparados. Somente leitura.',
+        inputSchema: {},
+        annotations: { readOnlyHint: true },
+      },
+      async () => executar(() => getWhatsappStatus())
     );
 
     const transport = new StreamableHTTPServerTransport({

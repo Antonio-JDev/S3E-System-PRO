@@ -74,7 +74,6 @@
     "react-dropzone": "^14.3.8",
     "react-emoji-render": "^2.0.1",
     "react-is": "^19.2.0",
-    "react-quill": "^2.0.0",
     "react-router-dom": "^7.9.4",
     "react-to-print": "^3.2.0",
     "recharts": "^3.3.0",
