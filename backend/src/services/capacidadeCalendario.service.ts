@@ -59,7 +59,7 @@ export async function calcularCapacidadeCalendario(
   const statusFiltro =
     params.status && params.status.length > 0
       ? params.status
-      : (['APROVADO', 'EXECUCAO'] as ProjetoStatus[]);
+      : (['PROPOSTA', 'VALIDADO', 'APROVADO', 'EXECUCAO'] as ProjetoStatus[]);
 
   const funcionariosAtivos = await prisma.funcionario.count({
     where: { status: 'Ativo' },

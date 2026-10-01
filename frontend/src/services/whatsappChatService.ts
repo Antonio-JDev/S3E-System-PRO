@@ -511,15 +511,22 @@ export function whatsappCdnImageProxyUrl(url: string | null | undefined): string
 /**
  * URL da foto de perfil servida pelo backend (cache persistente, sem 403 no CDN).
  * Use quando houver indício de foto (`cachedProfilePictureUrl` ou fetch recente).
+ * `cacheKey` força o browser a baixar de novo após contact-meta atualizar a URL.
  */
 export function whatsappProfilePictureImageUrl(
   chatId: string,
-  hasPictureHint = true
+  hasPictureHint = true,
+  cacheKey?: string | number | null,
+  opts?: { refresh?: boolean }
 ): string | undefined {
   const cid = (chatId || '').trim();
   if (!cid || !hasPictureHint) return undefined;
   const backend = getBackendUrl();
   let q = `chatId=${encodeURIComponent(cid)}`;
+  if (opts?.refresh) q += '&refresh=1';
+  if (cacheKey != null && String(cacheKey).trim()) {
+    q += `&v=${encodeURIComponent(String(cacheKey).trim())}`;
+  }
   const token =
     typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
   if (token && token !== 'null' && token !== 'undefined' && token.trim()) {

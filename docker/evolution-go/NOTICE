@@ -1,0 +1,7 @@
+Esta imagem é o Evolution Go 0.7.2 (https://github.com/evolution-foundation/evolution-go)
+com uma alteração em pkg/whatsmeow/service/whatsmeow.go: um único sqlstore
+compartilhado, com pool limitado, no lugar de sqlstore.New a cada StartClient.
+
+Evolution Go é licenciado sob Apache License 2.0, com as condições adicionais
+do arquivo LICENSE do projeto original. O manager e os avisos de copyright
+da interface não são modificados.

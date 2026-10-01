@@ -103,7 +103,10 @@ export class InventarioService {
   ): Promise<AjusteInventarioResultado> {
     const validacao = validarQuantidadeContada(input.quantidadeContada);
     if (!validacao.ok) {
-      throw Object.assign(new Error(validacao.message), { statusCode: 400 });
+      throw Object.assign(
+        new Error((validacao as { ok: false; message: string }).message),
+        { statusCode: 400 }
+      );
     }
 
     if (!input.materialId) {

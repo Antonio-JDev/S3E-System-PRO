@@ -64,6 +64,8 @@ import gastosVeiculoRoutes from './routes/gastosVeiculo.routes';
 import planosRoutes from './routes/planos.routes';
 import despesasFixasRoutes from './routes/despesasFixas.routes';
 import logsRoutes from './routes/logs';
+import configuracaoDevMcpRoutes from './routes/configuracaoDevMcp.routes';
+import mcpDebugRoutes from './routes/mcpDebug.routes';
 import tarefasObraRoutes from './routes/tarefasObra';
 import tarefasInternasRoutes from './routes/tarefasInternas.routes';
 import diagnosticoRoutes from './routes/diagnostico';
@@ -197,7 +199,10 @@ const corsOptions: CorsOptions = {
     'If-Modified-Since',
     'If-None-Match',
     'X-Requested-With',
-    'Accept'
+    'Accept',
+    'mcp-protocol-version',
+    'mcp-session-id',
+    'Last-Event-ID'
   ]
 };
 
@@ -534,6 +539,8 @@ app.use('/api/gastos-veiculo', gastosVeiculoRoutes);
 app.use('/api/planos', planosRoutes);
 app.use('/api/despesas-fixas', despesasFixasRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/dev/mcp', configuracaoDevMcpRoutes);
+app.use('/api/mcp', mcpDebugRoutes);
 app.use('/api/diagnostico', diagnosticoRoutes);
 app.use('/api/ferramentas', ferramentasRoutes);
 app.use('/api/kits-ferramenta', kitsFerramentaRoutes);

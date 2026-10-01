@@ -16,9 +16,13 @@ import {
 
 const PROFILE_PIC_DIR = path.join(process.cwd(), 'uploads', 'whatsapp-profile-pics');
 
+/** Após este tempo, revalida URL na EvoGo mesmo com arquivo em disco. */
+const PROFILE_PIC_DISK_TTL_MS = 2 * 60 * 60 * 1000;
+
 type ProfilePicMeta = {
   sourceUrl: string;
   contentType: string;
+  savedAt?: number;
 };
 
 function ensureProfilePicDir(): void {
@@ -70,14 +74,20 @@ function readCachedFile(paths: { img: string; meta: string }): {
   buffer: Buffer;
   contentType: string;
   etag: string;
+  sourceUrl: string;
+  ageMs: number;
 } | null {
   if (!fs.existsSync(paths.img) || !fs.existsSync(paths.meta)) return null;
   try {
     const meta = JSON.parse(fs.readFileSync(paths.meta, 'utf8')) as ProfilePicMeta;
+    const mtime = fs.statSync(paths.img).mtimeMs;
+    const savedAt = typeof meta.savedAt === 'number' ? meta.savedAt : mtime;
     return {
       buffer: fs.readFileSync(paths.img),
       contentType: meta.contentType || 'image/jpeg',
-      etag: meta.sourceUrl || 'cached'
+      etag: meta.sourceUrl || 'cached',
+      sourceUrl: meta.sourceUrl || '',
+      ageMs: Date.now() - savedAt,
     };
   } catch {
     return null;
@@ -88,6 +98,8 @@ function readCachedFileForVariants(chatIds: string[]): {
   buffer: Buffer;
   contentType: string;
   etag: string;
+  sourceUrl: string;
+  ageMs: number;
 } | null {
   for (const id of chatIds) {
     const hit = readCachedFile(profilePicPaths(id));
@@ -102,20 +114,22 @@ function writeCachedFileForVariants(
   meta: ProfilePicMeta
 ): void {
   ensureProfilePicDir();
+  const withTs: ProfilePicMeta = { ...meta, savedAt: Date.now() };
   for (const id of chatIds) {
     const paths = profilePicPaths(id);
     fs.writeFileSync(paths.img, buffer);
-    fs.writeFileSync(paths.meta, JSON.stringify(meta));
+    fs.writeFileSync(paths.meta, JSON.stringify(withTs));
   }
 }
 
 /**
  * Foto de perfil servida pelo backend (sem hotlink no browser → sem 403).
- * Persiste em disco; só baixa de novo quando a URL de origem mudar.
+ * Persiste em disco; revalida URL na EvoGo após TTL ou com `refresh`.
  * Replica cache entre variantes LID↔PN do mesmo contato.
  */
 export async function getWhatsappProfilePictureImage(
-  chatId: string
+  chatId: string,
+  opts?: { refresh?: boolean }
 ): Promise<{ buffer: Buffer; contentType: string; etag: string } | null> {
   const canon = canonicalWhatsappChatId(chatId);
   if (!canon) return null;
@@ -124,21 +138,58 @@ export async function getWhatsappProfilePictureImage(
   const identities = await loadWhatsappChatIdentities();
   const variants = expandedStorageChatIdVariants(canon, identities);
   const variantKeys = variants.map((v) => canonicalWhatsappChatId(v)).filter(Boolean);
+  const refresh = opts?.refresh === true;
 
   const diskHit = readCachedFileForVariants(variantKeys);
-  if (diskHit) return diskHit;
+  const diskFresh = Boolean(diskHit && diskHit.ageMs < PROFILE_PIC_DISK_TTL_MS);
 
-  if (profilePictureNegativeDiskAny(variantKeys)) {
+  let dbUrl: string | null = null;
+  try {
+    const row = await prisma.whatsappContactCache.findUnique({
+      where: { chatId: canon },
+      select: { profilePictureUrl: true },
+    });
+    dbUrl = row?.profilePictureUrl?.trim() || null;
+  } catch {
+    dbUrl = null;
+  }
+
+  // Disco fresco e URL ainda igual à do banco → serve sem bater na EvoGo.
+  if (
+    diskHit &&
+    diskFresh &&
+    !refresh &&
+    (!dbUrl || !diskHit.sourceUrl || dbUrl === diskHit.sourceUrl)
+  ) {
+    return {
+      buffer: diskHit.buffer,
+      contentType: diskHit.contentType,
+      etag: diskHit.etag,
+    };
+  }
+
+  if (!refresh && profilePictureNegativeDiskAny(variantKeys) && !diskHit) {
     return null;
   }
 
-  let sourceUrl = await fetchWhatsappProviderProfilePictureUrlForChat(canon);
+  // Revalida URL no provedor quando o disco envelheceu ou o caller pediu refresh.
+  // Se o contact-meta já gravou URL nova no banco, usa ela sem novo IQ na EvoGo.
+  const urlChanged = Boolean(dbUrl && diskHit?.sourceUrl && dbUrl !== diskHit.sourceUrl);
+  let sourceUrl: string | null = null;
+  if (urlChanged && dbUrl && !refresh) {
+    sourceUrl = dbUrl;
+  } else {
+    sourceUrl = await fetchWhatsappProviderProfilePictureUrlForChat(canon, {
+      forceRefresh: refresh || !diskFresh,
+    });
+  }
+
   if (!sourceUrl) {
     for (const v of variantKeys) {
       if (v === canon) continue;
       const row = await prisma.whatsappContactCache.findUnique({
         where: { chatId: v },
-        select: { profilePictureUrl: true }
+        select: { profilePictureUrl: true },
       });
       const u = row?.profilePictureUrl?.trim();
       if (u) {
@@ -148,40 +199,48 @@ export async function getWhatsappProfilePictureImage(
     }
   }
   if (!sourceUrl) {
-    const row = await prisma.whatsappContactCache.findUnique({
-      where: { chatId: canon },
-      select: { profilePictureUrl: true }
-    });
-    sourceUrl = row?.profilePictureUrl?.trim() || null;
+    sourceUrl = dbUrl;
   }
 
   if (!sourceUrl) {
+    if (diskHit) {
+      // Mantém a última foto conhecida se o provedor falhou agora.
+      return {
+        buffer: diskHit.buffer,
+        contentType: diskHit.contentType,
+        etag: diskHit.etag,
+      };
+    }
     profilePictureNegativeDiskSetMany(variantKeys);
     return null;
   }
 
-  const paths = profilePicPaths(canon);
-  if (fs.existsSync(paths.img) && fs.existsSync(paths.meta)) {
-    try {
-      const meta = JSON.parse(fs.readFileSync(paths.meta, 'utf8')) as ProfilePicMeta;
-      if (meta.sourceUrl === sourceUrl) {
-        const result = {
-          buffer: fs.readFileSync(paths.img),
-          contentType: meta.contentType || 'image/jpeg',
-          etag: sourceUrl
-        };
-        writeCachedFileForVariants(variantKeys, result.buffer, meta);
-        return result;
-      }
-    } catch {
-      // rebaixa abaixo
-    }
+  // Mesma URL de origem e já temos bytes → só renova o savedAt no meta.
+  if (diskHit && diskHit.sourceUrl === sourceUrl) {
+    writeCachedFileForVariants(variantKeys, diskHit.buffer, {
+      sourceUrl,
+      contentType: diskHit.contentType,
+    });
+    return {
+      buffer: diskHit.buffer,
+      contentType: diskHit.contentType,
+      etag: sourceUrl,
+    };
   }
 
   const remote = await fetchRemoteImageBytes(sourceUrl);
   if (!remote) {
-    profilePictureNegativeDiskSetMany(variantKeys);
-    return readCachedFileForVariants(variantKeys);
+    if (!diskHit) {
+      profilePictureNegativeDiskSetMany(variantKeys);
+    }
+    if (diskHit) {
+      return {
+        buffer: diskHit.buffer,
+        contentType: diskHit.contentType,
+        etag: diskHit.etag,
+      };
+    }
+    return null;
   }
 
   const meta: ProfilePicMeta = { sourceUrl, contentType: remote.contentType };
@@ -190,12 +249,12 @@ export async function getWhatsappProfilePictureImage(
   try {
     const row = await prisma.whatsappContactCache.findUnique({
       where: { chatId: canon },
-      select: { displayName: true }
+      select: { displayName: true },
     });
     await persistWhatsappContactCache({
       chatId: canon,
       displayName: row?.displayName ?? null,
-      profilePictureUrl: sourceUrl
+      profilePictureUrl: sourceUrl,
     });
   } catch {
     // best-effort

@@ -256,7 +256,8 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
         createdBy: (req as any).user?.userId || (req as any).user?.id || null,
       });
       if (!aliasResult.ok) {
-        res.status(400).json({ error: aliasResult.message, material });
+        const erro = aliasResult as { ok: false; message: string };
+        res.status(400).json({ error: erro.message, material });
         return;
       }
     }
@@ -375,7 +376,8 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
         createdBy: (req as any).user?.userId || (req as any).user?.id || null,
       });
       if (!sync.ok) {
-        res.status(400).json({ error: sync.message });
+        const erro = sync as { ok: false; message: string };
+        res.status(400).json({ error: erro.message });
         return;
       }
     } else if (eanInformado || cprodInformado) {
@@ -402,7 +404,8 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
           createdBy: (req as any).user?.userId || (req as any).user?.id || null,
         });
         if (!aliasResult.ok) {
-          res.status(400).json({ error: aliasResult.message });
+          const erro = aliasResult as { ok: false; message: string };
+          res.status(400).json({ error: erro.message });
           return;
         }
       }

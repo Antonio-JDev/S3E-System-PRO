@@ -30,6 +30,7 @@ import {
   UserPlus,
   UserRound,
   BellOff,
+  ChevronDown,
   ClipboardList,
 } from 'lucide-react';
 import { loadPdfCustomizationFromStorage } from '../../hooks/usePDFCustomization';
@@ -956,6 +957,8 @@ const ContactAvatar = memo(function ContactAvatar({
   label,
   size,
   eagerLoadProfilePicture = false,
+  pictureVersion,
+  refreshPicture = false,
   children,
 }: {
   chatId?: string;
@@ -964,21 +967,32 @@ const ContactAvatar = memo(function ContactAvatar({
   size: 'list' | 'header';
   /** Tenta o proxy `/profile-picture/image` mesmo sem URL cacheada (ex.: agenda aberta). */
   eagerLoadProfilePicture?: boolean;
+  /** Cache-bust (ex.: contactMetaUpdatedAt ou hash da URL). */
+  pictureVersion?: string | number | null;
+  /** Pede revalidação no backend (`refresh=1`). */
+  refreshPicture?: boolean;
   children?: React.ReactNode;
 }) {
   const [imgErr, setImgErr] = useState(false);
   const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-[49px] w-[49px] text-[15px]';
   const hasPictureHint = Boolean((imageUrl || '').trim()) || eagerLoadProfilePicture;
+  const versionKey =
+    pictureVersion ??
+    ((imageUrl || '').trim()
+      ? String((imageUrl || '').trim().length) + ':' + (imageUrl || '').trim().slice(-24)
+      : null);
   const avatarSrc =
     chatId && !isWhatsappProfilePictureMissing(chatId)
-      ? whatsappProfilePictureImageUrl(chatId, hasPictureHint)
+      ? whatsappProfilePictureImageUrl(chatId, hasPictureHint, versionKey, {
+          refresh: refreshPicture,
+        })
       : chatId
         ? undefined
         : whatsappCdnImageProxyUrl(imageUrl);
 
   useEffect(() => {
     setImgErr(false);
-  }, [chatId, imageUrl, eagerLoadProfilePicture]);
+  }, [chatId, imageUrl, eagerLoadProfilePicture, versionKey, refreshPicture]);
 
   const showImg = Boolean(avatarSrc && !imgErr);
   return (
@@ -2394,6 +2408,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const composerDraftInputRef = useRef<WhatsappComposerEditorHandle>(null);
   const chatFileDragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const evolutionReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const evolutionReadLastByChatRef = useRef<Map<string, string>>(new Map());
@@ -3126,6 +3143,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   useEffect(() => {
     if (!chatId || !contactMetaUpdatedAt) return;
+    clearWhatsappProfilePictureMissing(chatId);
     void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
   }, [chatId, contactMetaUpdatedAt, queryClient]);
 
@@ -5102,8 +5120,38 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   }, [chatId]);
 
   useEffect(() => {
+    nearBottomRef.current = true;
+    setShowJumpToLatest(false);
+    // Troca de conversa: sempre desce para o fim.
+    const id = window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [chatId]);
+
+  const updateNearBottomFromScroll = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = distance < 120;
+    nearBottomRef.current = near;
+    setShowJumpToLatest(!near);
+  }, []);
+
+  const jumpToLatestMessage = useCallback(() => {
+    nearBottomRef.current = true;
+    setShowJumpToLatest(false);
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [displayMessages.length, chatId]);
+  }, []);
+
+  useEffect(() => {
+    // Só acompanha novas mensagens se o operador já estiver perto do fim (estilo WA).
+    if (!nearBottomRef.current) {
+      setShowJumpToLatest(true);
+      return;
+    }
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [displayMessages.length]);
 
   const archiveConversationMut = useMutation({
     mutationFn: async () => {
@@ -6266,7 +6314,19 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   active ? 'is-active' : ''
                 }`}
               >
-                <ContactAvatar chatId={c.chatId} imageUrl={rowPic} label={avatarLabel} size="list" />
+                <ContactAvatar
+                  chatId={c.chatId}
+                  imageUrl={rowPic}
+                  label={avatarLabel}
+                  size="list"
+                  pictureVersion={
+                    active && contactMetaUpdatedAt
+                      ? contactMetaUpdatedAt
+                      : rowPic
+                        ? `${rowPic.length}:${rowPic.slice(-32)}`
+                        : null
+                  }
+                />
                 <div className="flex min-h-[52px] min-w-0 flex-1 flex-col justify-center gap-0.5 border-b border-[var(--wa-border)] py-3 group-hover:border-transparent group-[.is-active]:border-transparent">
                   <div className="flex items-center justify-between gap-2">
                     <span
@@ -7719,6 +7779,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     formatPhoneForDisplay(chatId)
                   }
                   size="header"
+                  pictureVersion={contactMetaUpdatedAt || null}
                 />
                 <div className="min-w-0">
                   <p className="truncate text-[16px] font-medium text-[var(--wa-text)]">{headerPrimary}</p>
@@ -7906,8 +7967,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 aria-hidden
                 className="wa-wallpaper pointer-events-none absolute inset-0 z-0"
               />
-              <div className="wa-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto bg-transparent py-2">
-              {loadingMsgs && (
+              <div
+                ref={messagesScrollRef}
+                className="wa-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto bg-transparent py-2"
+                onScroll={updateNearBottomFromScroll}
+              >              {loadingMsgs && (
                 <div className="flex justify-center py-16">
                   <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#25d366] border-t-transparent" />
                 </div>
@@ -8021,6 +8085,17 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 })}
               <div ref={bottomRef} />
               </div>
+              {showJumpToLatest && chatId ? (
+                <button
+                  type="button"
+                  onClick={jumpToLatestMessage}
+                  className="absolute bottom-4 right-4 z-[20] flex h-10 w-10 items-center justify-center rounded-full border border-[#e9edef] bg-white text-[#54656f] shadow-[0_2px_8px_rgba(11,20,26,0.25)] transition hover:bg-[#f0f2f5] dark:border-[var(--wa-border)] dark:bg-[#233138] dark:text-[var(--wa-icon)] dark:hover:bg-[#2a3942]"
+                  aria-label="Ir para a mensagem mais recente"
+                  title="Ir para a última mensagem"
+                >
+                  <ChevronDown className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+                </button>
+              ) : null}
             </div>
 
             {!isInForwardSelectionMode && pendingMediaList.length > 0 ? (

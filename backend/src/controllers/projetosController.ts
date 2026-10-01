@@ -763,6 +763,41 @@ export const reverterProjetoStatus = async (req: Request, res: Response): Promis
   }
 };
 
+/** Remove vínculo de obra: semObra, status APROVADO, apaga obra e alocações antigas. */
+export const removerVinculoObra = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { justificativa } = req.body as { justificativa?: string };
+    const user = (req as AuthRequest).user;
+    const role = String(user?.role || '').toLowerCase();
+
+    if (role === 'eletricista') {
+      res.status(403).json({
+        success: false,
+        error: 'Eletricistas não podem remover o vínculo de obra da ordem de serviço.',
+      });
+      return;
+    }
+
+    const atualizado = await projetosService.removerVinculoObra(id, String(justificativa ?? ''));
+
+    res.json({
+      success: true,
+      data: atualizado,
+      message: 'Vínculo de obra removido. A OS voltou para Aprovado.',
+    });
+  } catch (error: unknown) {
+    console.error('Erro ao remover vínculo de obra:', error);
+    const msg = error instanceof Error ? error.message : 'Erro ao remover vínculo de obra';
+    const statusCode = msg.includes('não encontrado')
+      ? 404
+      : msg.includes('mínimo') || msg.includes('cancelada')
+        ? 400
+        : 500;
+    res.status(statusCode).json({ success: false, error: msg });
+  }
+};
+
 // Cancelar/desativar projeto
 export const deleteProjeto = async (req: Request, res: Response): Promise<void> => {
   try {

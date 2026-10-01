@@ -3,7 +3,8 @@ import FullCalendar from '@fullcalendar/react';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin, { Draggable, type EventReceiveArg } from '@fullcalendar/interaction';
-import type { DateSelectArg, EventClickArg, EventContentArg, DatesSetArg } from '@fullcalendar/core';
+import type { DateSelectArg, EventClickArg, EventContentArg, DatesSetArg, EventDropArg } from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import { toast } from 'sonner';
 import ModalCriarEvento from './ModalCriarEvento';
@@ -16,6 +17,8 @@ import {
 } from '../services/eventosCalendarioService';
 import { ordemServicosService, type Projeto } from '../services/ordemServicosService';
 import { projetoMatchesBusca } from '../utils/buscaOs.util';
+import { osVisivelNoCalendario, STATUS_OS_CALENDARIO } from '../utils/osCalendarioLista.util';
+import { statusLabel } from '../utils/osStatus.util';
 import { orcamentosService } from '../services/orcamentosService';
 import { axiosApiService } from '../services/axiosApi';
 import {
@@ -43,10 +46,12 @@ const STATUS_FILTRO = [
   { id: 'VALIDO' as EventoStatus, label: 'Válido / Confirmado', dot: 'bg-emerald-500', ring: 'ring-emerald-300' },
 ] as const;
 
-const STATUS_OS_FILTRO = [
-  { id: 'APROVADO', label: 'OS Aprovada' },
-  { id: 'EXECUCAO', label: 'OS Em Execução' },
-] as const;
+const STATUS_OS_FILTRO: { id: (typeof STATUS_OS_CALENDARIO)[number]; label: string }[] = [
+  { id: 'PROPOSTA', label: 'Pendente' },
+  { id: 'VALIDADO', label: 'Validado' },
+  { id: 'APROVADO', label: 'Aprovada' },
+  { id: 'EXECUCAO', label: 'Em execução' },
+];
 
 interface UsuarioResumo {
   id: string;
@@ -332,11 +337,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     });
     ordemServicosService.listar().then((res) => {
       if (res.success && Array.isArray(res.data)) {
-        setOrdensServico(
-          res.data.filter(
-            (p) => p.status !== 'CANCELADO' && p.status !== 'CONCLUIDO' && !p.semObra,
-          ),
-        );
+        setOrdensServico(res.data.filter((p) => osVisivelNoCalendario(p.status)));
       }
     });
   }, []);
@@ -466,6 +467,9 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         borderColor: '#34d399',
         textColor: '#ecfdf5',
         classNames: ['fc-event-alocacao-os'],
+        editable: false,
+        startEditable: false,
+        durationEditable: false,
       };
     });
   }, [alocacoesOs, mostrarAlocacoesOs]);
@@ -478,6 +482,9 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         start: e.dataInicio,
         end: e.dataFim,
         extendedProps: { evento: e },
+        editable: true,
+        startEditable: true,
+        durationEditable: true,
         ...getEventStyle(e.tipo, e.status, Boolean(e.projeto)),
       })),
       ...eventosAlocacaoOs,
@@ -564,6 +571,30 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     setModalAberto(true);
   };
 
+  const persistirDatasEvento = async (info: EventDropArg | EventResizeDoneArg) => {
+    if (info.event.extendedProps.tipo === 'ALOCACAO_OS') {
+      info.revert();
+      return;
+    }
+    const id = info.event.id;
+    const start = info.event.start;
+    const end = info.event.end ?? (start ? new Date(start.getTime() + 60 * 60 * 1000) : null);
+    if (!id || !start || !end) {
+      info.revert();
+      return;
+    }
+    const res = await eventosCalendarioService.atualizar(id, {
+      dataInicio: start.toISOString(),
+      dataFim: end.toISOString(),
+    });
+    if (!res.success || !res.data) {
+      info.revert();
+      toast.error(res.error || 'Não foi possível atualizar o horário do evento');
+      return;
+    }
+    setEventos((prev) => prev.map((evento) => (evento.id === res.data!.id ? res.data! : evento)));
+  };
+
   const navegar = (dir: -1 | 1) => {
     const api = calendarRef.current?.getApi();
     if (!api) return;
@@ -590,9 +621,12 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
 
   const ordensServicoFiltradas = useMemo(() => {
     const termo = buscaOsSidebar.trim();
-    if (!termo) return ordensServico;
-    return ordensServico.filter((p) => projetoMatchesBusca(p, termo));
-  }, [ordensServico, buscaOsSidebar]);
+    return ordensServico.filter((p) => {
+      if (!statusOsAtivos.has(p.status) || !osVisivelNoCalendario(p.status)) return false;
+      if (!termo) return true;
+      return projetoMatchesBusca(p, termo);
+    });
+  }, [ordensServico, buscaOsSidebar, statusOsAtivos]);
 
   useEffect(() => {
     const el = osListaRef.current;
@@ -790,7 +824,8 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
                   <div className="min-w-0">
                     <div className="text-xs font-semibold truncate">{labelOsProjeto(p)}</div>
                     <div className={estilo.subtitle}>
-                      {p.cliente?.nome || p.titulo}
+                      {statusLabel(p.status)}
+                      {(p.cliente?.nome || p.titulo) ? ` · ${p.cliente?.nome || p.titulo}` : ''}
                     </div>
                   </div>
                 </div>
@@ -1180,11 +1215,20 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               selectable
               selectMirror
               droppable
+              editable
+              eventResizableFromStart
               eventDisplay="block"
               events={calendarEvents}
               eventContent={renderEventContent}
               eventClick={handleEventClick}
               eventReceive={handleEventReceive}
+              eventDrop={(info) => {
+                void persistirDatasEvento(info);
+              }}
+              eventResize={(info) => {
+                void persistirDatasEvento(info);
+              }}
+              eventAllow={(_dropInfo, draggedEvent) => draggedEvent?.extendedProps?.tipo !== 'ALOCACAO_OS'}
               select={handleDateSelect}
               datesSet={handleDatesSet}
               nowIndicator

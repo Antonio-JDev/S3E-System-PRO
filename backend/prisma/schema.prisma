@@ -284,6 +284,18 @@ model ConfiguracaoSistema {
   @@map("configuracoes_sistema")
 }
 
+/// Segredos da tela DEV (MCP de debug e chave Gemini). Nunca gravar em arquivo versionado.
+model ConfiguracaoDevMcp {
+  id           String   @id @default("dev-mcp")
+  mcpApiKey    String   @map("mcp_api_key")
+  geminiApiKey String?  @map("gemini_api_key")
+  usarGemini   Boolean  @default(false) @map("usar_gemini")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("configuracao_dev_mcp")
+}
+
 // ============================================
 // CADASTROS BÁSICOS
 // ============================================
@@ -711,13 +723,25 @@ model EventoCalendario {
   orcamentoId  String?
   projetoId    String?
   custoVeiculo Decimal?     @default(0) @db.Decimal(12, 2)
+  /// Subconjunto de equipe marcado como engenharia (vazio em eventos antigos: classifica pelo cargo/taxa)
+  equipeEngenhariaIds String[] @default([])
+  /// Subconjunto de equipe marcado como execução
+  equipeExecucaoIds   String[] @default([])
+  /// Custo manual R$/h de engenharia neste evento. Vazio usa valorHora do funcionário.
+  valorHoraEngenharia Decimal? @db.Decimal(12, 2)
+  /// Custo manual R$/h de execução neste evento. Vazio usa valorHora ou diária/8 do funcionário.
+  valorHoraExecucao   Decimal? @db.Decimal(12, 2)
+  /// Evento VALIDO gerado a partir de uma previsão. A previsão original permanece.
+  eventoOrigemId      String?  @unique
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  orcamento Orcamento?    @relation(fields: [orcamentoId], references: [id], onDelete: SetNull)
-  projeto   Projeto?      @relation(fields: [projetoId], references: [id], onDelete: SetNull)
-  equipe    Funcionario[]
-  veiculos  Veiculo[]
+  orcamento    Orcamento?         @relation(fields: [orcamentoId], references: [id], onDelete: SetNull)
+  projeto      Projeto?           @relation(fields: [projetoId], references: [id], onDelete: SetNull)
+  equipe       Funcionario[]
+  veiculos     Veiculo[]
+  eventoOrigem EventoCalendario?  @relation("EventoConfirmacao", fields: [eventoOrigemId], references: [id], onDelete: SetNull)
+  confirmacao  EventoCalendario?  @relation("EventoConfirmacao")
 
   @@index([dataInicio, dataFim])
   @@index([status])

@@ -17,7 +17,8 @@ export const listarEventosCalendario = async (req: AuthRequest, res: Response): 
     const dataInicio = parseDateQuery(req.query.dataInicio, 'dataInicio');
     const dataFim = parseDateQuery(req.query.dataFim, 'dataFim');
 
-    if (!dataInicio || !dataFim) {
+    const projetoIdQuery = typeof req.query.projetoId === 'string' ? req.query.projetoId : undefined;
+    if ((!dataInicio || !dataFim) && !projetoIdQuery) {
       res.status(400).json({ success: false, error: 'Parâmetros dataInicio e dataFim são obrigatórios' });
       return;
     }
@@ -30,12 +31,12 @@ export const listarEventosCalendario = async (req: AuthRequest, res: Response): 
 
     const eventos = await eventosCalendarioService.listar(
       {
-        dataInicio,
-        dataFim,
+        dataInicio: dataInicio ?? undefined,
+        dataFim: dataFim ?? undefined,
         status,
         tipo: typeof req.query.tipo === 'string' ? req.query.tipo : undefined,
         busca: typeof req.query.busca === 'string' ? req.query.busca : undefined,
-        projetoId: typeof req.query.projetoId === 'string' ? req.query.projetoId : undefined,
+        projetoId: projetoIdQuery,
       },
       req.user
     );
@@ -112,9 +113,40 @@ export const buscarEventoCalendario = async (req: AuthRequest, res: Response): P
   }
 };
 
+function listaIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return [];
+  return value.map((id) => String(id).trim()).filter(Boolean);
+}
+
+function numeroOpcional(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export const criarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, projetoId, custoVeiculo, equipeIds, veiculoIds, snapWorkshift, alocarPeriodoOs } = req.body;
+    const {
+      titulo,
+      descricao,
+      dataInicio,
+      dataFim,
+      status,
+      tipo,
+      orcamentoId,
+      projetoId,
+      custoVeiculo,
+      equipeIds,
+      equipeEngenhariaIds,
+      equipeExecucaoIds,
+      valorHoraEngenharia,
+      valorHoraExecucao,
+      veiculoIds,
+      snapWorkshift,
+      alocarPeriodoOs,
+    } = req.body;
 
     if (!titulo?.trim()) {
       res.status(400).json({ success: false, error: 'Título é obrigatório' });
@@ -137,6 +169,10 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
         projetoId,
         custoVeiculo,
         equipeIds: Array.isArray(equipeIds) ? equipeIds : [],
+        equipeEngenhariaIds: listaIds(equipeEngenhariaIds) ?? [],
+        equipeExecucaoIds: listaIds(equipeExecucaoIds) ?? [],
+        valorHoraEngenharia: numeroOpcional(valorHoraEngenharia) ?? null,
+        valorHoraExecucao: numeroOpcional(valorHoraExecucao) ?? null,
         veiculoIds: Array.isArray(veiculoIds) ? veiculoIds : [],
         snapWorkshift: Boolean(snapWorkshift),
         alocarPeriodoOs: alocarPeriodoOs === true,
@@ -156,7 +192,25 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
 export const atualizarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, projetoId, custoVeiculo, equipeIds, veiculoIds, snapWorkshift, alocarPeriodoOs } = req.body;
+    const {
+      titulo,
+      descricao,
+      dataInicio,
+      dataFim,
+      status,
+      tipo,
+      orcamentoId,
+      projetoId,
+      custoVeiculo,
+      equipeIds,
+      equipeEngenhariaIds,
+      equipeExecucaoIds,
+      valorHoraEngenharia,
+      valorHoraExecucao,
+      veiculoIds,
+      snapWorkshift,
+      alocarPeriodoOs,
+    } = req.body;
 
     const evento = await eventosCalendarioService.atualizar(
       id,
@@ -171,6 +225,10 @@ export const atualizarEventoCalendario = async (req: AuthRequest, res: Response)
         projetoId,
         custoVeiculo,
         equipeIds: equipeIds !== undefined ? (Array.isArray(equipeIds) ? equipeIds : []) : undefined,
+        equipeEngenhariaIds: listaIds(equipeEngenhariaIds),
+        equipeExecucaoIds: listaIds(equipeExecucaoIds),
+        valorHoraEngenharia: numeroOpcional(valorHoraEngenharia),
+        valorHoraExecucao: numeroOpcional(valorHoraExecucao),
         veiculoIds: veiculoIds !== undefined ? (Array.isArray(veiculoIds) ? veiculoIds : []) : undefined,
         snapWorkshift: snapWorkshift === undefined ? undefined : Boolean(snapWorkshift),
         alocarPeriodoOs: alocarPeriodoOs === undefined ? undefined : alocarPeriodoOs === true,

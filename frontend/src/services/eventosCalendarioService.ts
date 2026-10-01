@@ -65,6 +65,11 @@ export interface EventoCalendario {
   orcamentoId?: string | null;
   projetoId?: string | null;
   custoVeiculo?: number | string | null;
+  equipeEngenhariaIds?: string[];
+  equipeExecucaoIds?: string[];
+  valorHoraEngenharia?: number | string | null;
+  valorHoraExecucao?: number | string | null;
+  eventoOrigemId?: string | null;
   createdAt: string;
   updatedAt: string;
   equipe: FuncionarioEquipeResumo[];
@@ -88,17 +93,22 @@ export interface CriarEventoDTO {
   projetoId?: string | null;
   custoVeiculo?: number | null;
   equipeIds?: string[];
+  equipeEngenhariaIds?: string[];
+  equipeExecucaoIds?: string[];
+  valorHoraEngenharia?: number | null;
+  valorHoraExecucao?: number | null;
   veiculoIds?: string[];
   snapWorkshift?: boolean;
   alocarPeriodoOs?: boolean;
 }
 
 export interface ListarEventosParams {
-  dataInicio: string;
-  dataFim: string;
+  dataInicio?: string;
+  dataFim?: string;
   status?: EventoStatus;
   tipo?: string;
   busca?: string;
+  projetoId?: string;
 }
 
 export interface OrcamentoPreenchido {
@@ -140,6 +150,10 @@ export interface CapacidadeCalendarioResponse {
 class EventosCalendarioService {
   async listar(params: ListarEventosParams) {
     return axiosApiService.get<EventoCalendario[]>(ENDPOINTS.EVENTOS_CALENDARIO, params);
+  }
+
+  async listarPorProjeto(projetoId: string) {
+    return axiosApiService.get<EventoCalendario[]>(ENDPOINTS.EVENTOS_CALENDARIO, { projetoId });
   }
 
   async buscar(id: string) {

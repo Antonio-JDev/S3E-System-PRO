@@ -5,7 +5,6 @@ import { validarConclusaoOsEngenharia } from './projetosEngenharia.service';
 import { ContasReceberService } from './contasReceber.service';
 import {
   entrarNaFilaSeAplicavel,
-  validarConclusaoVistoriaCelesc,
 } from './vistoriaCelesc.service';
 import { validarConclusaoOsQuadros } from './osEntregaQuadro.service';
 
@@ -471,15 +470,6 @@ export class ProjetosService {
       const bloqueio = await validarConclusaoOsEngenharia(projetoId);
       if (bloqueio) throw new Error(bloqueio);
 
-      const bloqueioVistoria = validarConclusaoVistoriaCelesc({
-        exigeVistoriaCelesc: Boolean(
-          (projeto as { exigeVistoriaCelesc?: boolean }).exigeVistoriaCelesc,
-        ),
-        statusVistoria:
-          (projeto as { statusVistoria?: string | null }).statusVistoria ?? null,
-      });
-      if (bloqueioVistoria) throw new Error(bloqueioVistoria);
-
       const bloqueioQuadros = await validarConclusaoOsQuadros(
         projetoId,
         projeto.tipo,
@@ -692,6 +682,54 @@ export class ProjetosService {
     return prisma.projeto.update({
       where: { id: projetoId },
       data: updateData,
+    });
+  }
+
+  /**
+   * Remove o vínculo de obra da OS sem apagar calendário, apontamentos, tasks, orçamento ou documentos.
+   * Não chama reverterStatus: ele recusa destino que não seja anterior e não solta compras.obraId.
+   * O estorno de estoque reutiliza apenas a baixa já feita por obra no rollback.
+   */
+  async removerVinculoObra(projetoId: string, justificativa: string) {
+    const motivo = String(justificativa ?? '').trim();
+    if (motivo.length < 3) {
+      throw new Error('Informe uma justificativa com no mínimo 3 caracteres');
+    }
+
+    const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
+    if (!projeto) throw new Error('Projeto não encontrado');
+
+    if (String(projeto.status) === 'CANCELADO') {
+      throw new Error('Não é possível remover a obra de uma OS cancelada');
+    }
+
+    const obra = await prisma.obra.findUnique({ where: { projetoId } });
+
+    if (obra) {
+      await prisma.compra.updateMany({
+        where: { obraId: obra.id },
+        data: { obraId: null },
+      });
+
+      const { EstoqueService } = await import('./estoque.service');
+      await EstoqueService.estornarBaixaPorObra(obra.id, projetoId);
+
+      await prisma.alocacaoEquipe.deleteMany({ where: { obraId: obra.id } });
+      await prisma.obra.delete({ where: { id: obra.id } });
+    }
+
+    await prisma.alocacaoObra.deleteMany({ where: { projetoId } });
+
+    return prisma.projeto.update({
+      where: { id: projetoId },
+      data: {
+        semObra: true,
+        justificativaSemObra: motivo,
+        status: ProjetoStatus.APROVADO,
+        dataFim: null,
+        dataConclusao: null,
+        concluidoPorId: null,
+      },
     });
   }
 

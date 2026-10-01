@@ -187,9 +187,12 @@ const SENSITIVE_KEYS = new Set([
   'password',
   'senha',
   'token',
-  'refreshToken',
+  'refreshtoken',
   'secret',
   'authorization',
+  'mcpapikey',
+  'geminiapikey',
+  'apikey',
 ]);
 
 export function sanitizeBodyForAudit(body: unknown): unknown {

@@ -974,22 +974,23 @@ export const vincularItemAoMaterial = async (req: Request, res: Response): Promi
       createdBy: userId,
     });
 
-    if (!result.ok) {
-      res.status(result.status).json({
-        success: false,
-        error: result.message,
+    if (result.ok) {
+      res.json({
+        success: true,
+        message:
+          'Item vinculado ao estoque. EAN/cProd gravados no alias do fornecedor para matching automático nas próximas compras.',
+        data: {
+          item: result.item,
+          alias: result.alias,
+        },
       });
       return;
     }
 
-    res.json({
-      success: true,
-      message:
-        'Item vinculado ao estoque. EAN/cProd gravados no alias do fornecedor para matching automático nas próximas compras.',
-      data: {
-        item: result.item,
-        alias: result.alias,
-      },
+    const erro = result as { ok: false; status: number; message: string };
+    res.status(erro.status).json({
+      success: false,
+      error: erro.message,
     });
   } catch (error: any) {
     console.error('Erro ao vincular item da compra ao material:', error);

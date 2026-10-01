@@ -54,6 +54,8 @@ export const API_MOUNTS: ApiMount[] = [
   { prefix: '/api/planos', tag: 'Planos', description: 'Planos contratuais', routeFile: 'planos.routes.ts' },
   { prefix: '/api/despesas-fixas', tag: 'Despesas Fixas', description: 'Despesas recorrentes', routeFile: 'despesasFixas.routes.ts' },
   { prefix: '/api/logs', tag: 'Logs', description: 'Auditoria do sistema', routeFile: 'logs.ts' },
+  { prefix: '/api/dev/mcp', tag: 'DEV MCP', description: 'Configuração da chave MCP e Gemini (desenvolvedor)', routeFile: 'configuracaoDevMcp.routes.ts' },
+  { prefix: '/api/mcp', tag: 'MCP', description: 'Servidor MCP de debug (chave de API)', routeFile: 'mcpDebug.routes.ts' },
   { prefix: '/api/diagnostico', tag: 'Diagnóstico', description: 'Ferramentas de diagnóstico', routeFile: 'diagnostico.ts' },
   { prefix: '/api/ferramentas', tag: 'Ferramentas', description: 'Patrimônio de ferramentas', routeFile: 'ferramentas.routes.ts' },
   { prefix: '/api/kits-ferramenta', tag: 'Kits Ferramenta', description: 'Kits e recibos', routeFile: 'kits-ferramenta.routes.ts' },

@@ -196,6 +196,12 @@ class OrdemServicosService {
     return axiosApiService.put<Projeto>(`${ENDPOINTS.PROJETOS}/${id}/reverter-status`, { status });
   }
 
+  async removerVinculoObra(id: string, justificativa: string) {
+    return axiosApiService.post<Projeto>(`${ENDPOINTS.PROJETOS}/${id}/remover-vinculo-obra`, {
+      justificativa,
+    });
+  }
+
   async desativar(id: string) {
     return axiosApiService.delete<Projeto>(`${ENDPOINTS.PROJETOS}/${id}`);
   }

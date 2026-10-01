@@ -5,6 +5,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { configuracoesService } from '../services/configuracoesService';
 import { useWhatsAppRealtimeStatus, useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
 import ScrollableRow from './ui/ScrollableRow';
+import DevMcpPanel from './DevMcpPanel';
 import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // Icons
@@ -101,7 +102,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [actionFilter, setActionFilter] = useState<string>('Todos');
     const [entityFilter, setEntityFilter] = useState<string>('Todos');
-    const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao'>('logs');
+    const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao' | 'mcp'>('logs');
     const [backfillLoading, setBackfillLoading] = useState(false);
     const [portfolioUrl, setPortfolioUrl] = useState('https://antonio-jdev.github.io/portfolio-01/');
     const [portfolioSaving, setPortfolioSaving] = useState(false);
@@ -419,7 +420,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             { id: 'logs', label: '📋 Logs de Auditoria', icon: TerminalIcon },
                             { id: 'analytics', label: '📊 Analytics', icon: ChartBarIcon },
                             { id: 'health', label: '💚 Health Check', icon: CheckCircleIcon },
-                            { id: 'manutencao', label: '🔧 Manutenção', icon: WrenchIcon }
+                            { id: 'manutencao', label: '🔧 Manutenção', icon: WrenchIcon },
+                            { id: 'mcp', label: '🤖 MCP / IA', icon: TerminalIcon }
                         ].map(tab => (
                             <button
                                 key={tab.id}
@@ -912,6 +914,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'mcp' && <DevMcpPanel />}
                 </div>
             </div>
         </div>

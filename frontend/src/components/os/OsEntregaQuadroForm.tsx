@@ -7,6 +7,10 @@ import {
 import { imprimirRomaneio, type RomaneioPrintContext } from '../../utils/romaneioQuadroPrint.util';
 import { toast } from 'sonner';
 
+const inputCls =
+  'w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500';
+const labelCls = 'block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1';
+
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -21,17 +25,17 @@ function CampoFoto({
   value,
   onChange,
   disabled,
+  compact,
 }: {
   label: string;
   value?: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        {label}
-      </label>
+      <label className={labelCls}>{label}</label>
       <input
         type="file"
         accept="image/*"
@@ -55,7 +59,9 @@ function CampoFoto({
         <img
           src={value}
           alt={label}
-          className="mt-2 max-h-36 rounded-lg border border-gray-200 dark:border-dark-border object-contain bg-white"
+          className={`mt-2 rounded-lg border border-gray-200 dark:border-dark-border object-contain bg-white ${
+            compact ? 'max-h-28' : 'max-h-36'
+          }`}
         />
       ) : null}
     </div>
@@ -106,14 +112,12 @@ function AssinaturaCanvas({
 
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Assinatura do cliente *
-      </label>
+      <label className={labelCls}>Assinatura do cliente *</label>
       <canvas
         ref={canvasRef}
-        width={480}
+        width={560}
         height={140}
-        className="w-full max-w-md h-28 border border-dashed border-gray-300 dark:border-dark-border rounded-lg bg-white touch-none cursor-crosshair"
+        className="w-full h-28 sm:h-32 border border-dashed border-gray-300 dark:border-dark-border rounded-lg bg-white touch-none cursor-crosshair"
         onPointerDown={(e) => {
           if (disabled) return;
           drawing.current = true;
@@ -140,7 +144,7 @@ function AssinaturaCanvas({
           commit();
         }}
       />
-      <div className="flex gap-2 mt-1">
+      <div className="flex flex-wrap items-center gap-3 mt-1.5">
         <button
           type="button"
           disabled={disabled}
@@ -152,21 +156,38 @@ function AssinaturaCanvas({
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             onChange('');
           }}
-          className="text-xs text-gray-600 underline"
+          className="text-xs text-gray-600 dark:text-gray-400 underline hover:text-gray-900 dark:hover:text-white"
         >
           Limpar assinatura
         </button>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">ou digite o nome:</span>
+        <input
+          type="text"
+          disabled={disabled}
+          value={value && !value.startsWith('data:image') ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Nome por extenso"
+          className={`${inputCls} flex-1 min-w-[10rem] max-w-sm`}
+        />
       </div>
-      <p className="text-[11px] text-gray-500 mt-1">Ou digite o nome como assinatura:</p>
-      <input
-        type="text"
-        disabled={disabled}
-        value={value && !value.startsWith('data:image') ? value : ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Nome por extenso"
-        className="mt-1 w-full max-w-md px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-      />
     </div>
+  );
+}
+
+function Secao({
+  titulo,
+  children,
+}: {
+  titulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-gray-200 dark:border-dark-border bg-white/70 dark:bg-dark-bg/50 p-3 sm:p-4 space-y-3">
+      <h4 className="text-sm font-bold text-gray-900 dark:text-white border-b border-gray-100 dark:border-dark-border pb-2">
+        {titulo}
+      </h4>
+      {children}
+    </section>
   );
 }
 
@@ -196,7 +217,7 @@ export default function OsEntregaQuadroForm({
     patch({ romaneio: { ...rom, ...partial } });
   }
 
-  function handleImprimirRomaneio() {
+  async function handleImprimirRomaneio() {
     try {
       const comProdutos: EntregaQuadroMetadados = {
         ...value,
@@ -208,244 +229,255 @@ export default function OsEntregaQuadroForm({
               : produtosSugestao || [{ nome: printContext.tituloOs }],
         },
       };
-      imprimirRomaneio(comProdutos, printContext);
+      toast.loading('Gerando romaneio PDF…', { id: 'romaneio-pdf' });
       const marcado = marcarRomaneioGerado(comProdutos);
       onChange(marcado);
-      toast.success('Romaneio aberto para impressão');
+      await imprimirRomaneio(marcado, printContext);
+      toast.success('Use a janela de impressão para imprimir ou salvar o PDF', {
+        id: 'romaneio-pdf',
+      });
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao imprimir romaneio');
+      toast.error(err instanceof Error ? err.message : 'Erro ao gerar romaneio PDF', {
+        id: 'romaneio-pdf',
+      });
     }
   }
 
   return (
-    <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/10 p-4 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+    <div className="rounded-xl border border-amber-200 dark:border-amber-800/50 bg-amber-50/90 dark:bg-amber-950/20 overflow-hidden">
+      {/* Cabeçalho */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-4 py-3 border-b border-amber-200/70 dark:border-amber-800/40 bg-amber-100/60 dark:bg-amber-900/20">
+        <div className="min-w-0">
+          <p className="text-sm sm:text-base font-bold text-amber-950 dark:text-amber-100">
             Entrega do quadro / painel
           </p>
-          <p className="text-xs text-amber-800/80 dark:text-amber-200/70 mt-0.5">
-            Obrigatório para concluir a OS. Frota própria — gere o romaneio interno antes da saída.
+          <p className="text-xs text-amber-900/80 dark:text-amber-200/70 mt-0.5">
+            Obrigatório para concluir a OS · frota própria — gere o romaneio antes da saída
           </p>
         </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={handleImprimirRomaneio}
-          className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50"
-        >
-          Imprimir romaneio
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {checklist.ok ? (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+              Checklist completo
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-200/80 text-amber-950 dark:bg-amber-800/50 dark:text-amber-100">
+              {checklist.pendencias.length} pendência
+              {checklist.pendencias.length === 1 ? '' : 's'}
+            </span>
+          )}
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={handleImprimirRomaneio}
+            className="px-3.5 py-2 text-sm font-semibold rounded-lg bg-slate-800 dark:bg-slate-700 text-white hover:bg-slate-900 dark:hover:bg-slate-600 disabled:opacity-50 whitespace-nowrap"
+          >
+            Imprimir romaneio
+          </button>
+        </div>
       </div>
 
-      {!checklist.ok && (
-        <ul className="text-xs text-amber-900 dark:text-amber-100 list-disc pl-4 space-y-0.5">
+      {/* Pendências em chips (compacto) */}
+      {!checklist.ok && checklist.pendencias.length > 0 && (
+        <div className="px-3 sm:px-4 py-2.5 flex flex-wrap gap-1.5 border-b border-amber-200/50 dark:border-amber-800/30">
           {checklist.pendencias.map((p) => (
-            <li key={p}>Pendente: {p}</li>
+            <span
+              key={p}
+              className="inline-flex max-w-full items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-white/80 dark:bg-dark-bg text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 truncate"
+              title={p}
+            >
+              {p}
+            </span>
           ))}
-        </ul>
-      )}
-      {checklist.ok && (
-        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-          Checklist de entrega completo — OS pode ser concluída (demais regras à parte).
-        </p>
+        </div>
       )}
 
-      <CampoFoto
-        label="Foto do produto (montado / a entregar) *"
-        value={value.fotoProduto}
-        disabled={disabled}
-        onChange={(fotoProduto) => patch({ fotoProduto })}
-      />
+      {/* Corpo: 1 col mobile · 2 cols tablet+ */}
+      <div className="p-3 sm:p-4 grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+        {/* Coluna esquerda — preparação / romaneio */}
+        <div className="space-y-3 sm:space-y-4 min-w-0">
+          <Secao titulo="1. Preparação e romaneio">
+            <CampoFoto
+              label="Foto do produto (montado / a entregar) *"
+              value={value.fotoProduto}
+              disabled={disabled}
+              compact
+              onChange={(fotoProduto) => patch({ fotoProduto })}
+            />
 
-      <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
-        <input
-          type="checkbox"
-          disabled={disabled}
-          checked={Boolean(value.materiaisConferidos)}
-          onChange={(e) => patch({ materiaisConferidos: e.target.checked })}
-          className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-        />
-        <span>
-          <strong>Materiais conferidos</strong> com a aba Materiais da OS (BOM / alocados).
-          Marque apenas após revisar divergências.
-        </span>
-      </label>
+            <label className="flex items-start gap-2.5 text-sm text-gray-800 dark:text-gray-200 cursor-pointer">
+              <input
+                type="checkbox"
+                disabled={disabled}
+                checked={Boolean(value.materiaisConferidos)}
+                onChange={(e) => patch({ materiaisConferidos: e.target.checked })}
+                className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span>
+                <strong>Materiais conferidos</strong> com a aba Materiais da OS (BOM / alocados).
+              </span>
+            </label>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Qtd. volumes
-          </label>
-          <input
-            type="number"
-            min={0}
-            disabled={disabled}
-            value={rom.qtdVolumes ?? ''}
-            onChange={(e) =>
-              patchRomaneio({
-                qtdVolumes: e.target.value === '' ? undefined : Number(e.target.value),
-              })
-            }
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label className={labelCls}>Qtd. volumes</label>
+                <input
+                  type="number"
+                  min={0}
+                  disabled={disabled}
+                  value={rom.qtdVolumes ?? ''}
+                  onChange={(e) =>
+                    patchRomaneio({
+                      qtdVolumes: e.target.value === '' ? undefined : Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Peso líq. (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={disabled}
+                  value={rom.pesoLiquidoKg ?? ''}
+                  onChange={(e) =>
+                    patchRomaneio({
+                      pesoLiquidoKg: e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div className="col-span-2 sm:col-span-1">
+                <label className={labelCls}>Peso bruto (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={disabled}
+                  value={rom.pesoBrutoKg ?? ''}
+                  onChange={(e) =>
+                    patchRomaneio({
+                      pesoBrutoKg: e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className={labelCls}>Dimensões</label>
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={rom.dimensoes || ''}
+                  onChange={(e) => patchRomaneio({ dimensoes: e.target.value })}
+                  placeholder="Ex.: 80 × 60 × 30 cm"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Identificação / marcação</label>
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={rom.volumes?.[0]?.identificacao || ''}
+                  onChange={(e) =>
+                    patchRomaneio({
+                      volumes: [
+                        {
+                          identificacao: e.target.value,
+                          marcacao: rom.volumes?.[0]?.marcacao || 'S3E',
+                          tipo: rom.volumes?.[0]?.tipo || 'caixa',
+                        },
+                      ],
+                    })
+                  }
+                  placeholder="Ex.: Caixa 01 / Pallet A"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+          </Secao>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Peso líquido (kg)
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            disabled={disabled}
-            value={rom.pesoLiquidoKg ?? ''}
-            onChange={(e) =>
-              patchRomaneio({
-                pesoLiquidoKg: e.target.value === '' ? null : Number(e.target.value),
-              })
-            }
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Peso bruto (kg)
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            disabled={disabled}
-            value={rom.pesoBrutoKg ?? ''}
-            onChange={(e) =>
-              patchRomaneio({
-                pesoBrutoKg: e.target.value === '' ? null : Number(e.target.value),
-              })
-            }
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
+
+        {/* Coluna direita — recebimento cliente */}
+        <div className="space-y-3 sm:space-y-4 min-w-0">
+          <Secao titulo="2. Entrega final ao cliente">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="sm:col-span-2">
+                <label className={labelCls}>Nome do cliente / recebedor *</label>
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={value.clienteNome || value.recebedorNome || ''}
+                  onChange={(e) =>
+                    patch({ clienteNome: e.target.value, recebedorNome: e.target.value })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Telefone *</label>
+                <input
+                  type="tel"
+                  disabled={disabled}
+                  value={value.clienteTelefone || ''}
+                  onChange={(e) => patch({ clienteTelefone: e.target.value })}
+                  placeholder="(47) 99999-0000"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Data da entrega *</label>
+                <input
+                  type="date"
+                  disabled={disabled}
+                  value={value.dataEntrega || ''}
+                  onChange={(e) => patch({ dataEntrega: e.target.value })}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Entregue por</label>
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={value.entregadorNome || ''}
+                  onChange={(e) => patch({ entregadorNome: e.target.value })}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Local de entrega</label>
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={value.localRecebimento || ''}
+                  onChange={(e) => patch({ localRecebimento: e.target.value })}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+
+            <AssinaturaCanvas
+              value={value.assinaturaCliente}
+              disabled={disabled}
+              onChange={(assinaturaCliente) => patch({ assinaturaCliente })}
+            />
+
+            <CampoFoto
+              label="Foto do produto entregue *"
+              value={value.fotoProdutoEntregue}
+              disabled={disabled}
+              compact
+              onChange={(fotoProdutoEntregue) => patch({ fotoProdutoEntregue })}
+            />
+          </Secao>
         </div>
       </div>
-
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-          Dimensões (unitárias ou totais)
-        </label>
-        <input
-          type="text"
-          disabled={disabled}
-          value={rom.dimensoes || ''}
-          onChange={(e) => patchRomaneio({ dimensoes: e.target.value })}
-          placeholder="Ex.: 80 × 60 × 30 cm"
-          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-        />
-      </div>
-
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-          Identificação / marcação do volume
-        </label>
-        <input
-          type="text"
-          disabled={disabled}
-          value={rom.volumes?.[0]?.identificacao || ''}
-          onChange={(e) =>
-            patchRomaneio({
-              volumes: [
-                {
-                  identificacao: e.target.value,
-                  marcacao: rom.volumes?.[0]?.marcacao || 'S3E',
-                  tipo: rom.volumes?.[0]?.tipo || 'caixa',
-                },
-              ],
-            })
-          }
-          placeholder="Ex.: Caixa 01 / Pallet A"
-          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-        />
-      </div>
-
-      <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 pt-1 border-t border-amber-200/60 dark:border-amber-800/40">
-        Entrega final ao cliente
-      </p>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Nome do cliente / recebedor *
-          </label>
-          <input
-            type="text"
-            disabled={disabled}
-            value={value.clienteNome || value.recebedorNome || ''}
-            onChange={(e) =>
-              patch({ clienteNome: e.target.value, recebedorNome: e.target.value })
-            }
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Telefone *
-          </label>
-          <input
-            type="tel"
-            disabled={disabled}
-            value={value.clienteTelefone || ''}
-            onChange={(e) => patch({ clienteTelefone: e.target.value })}
-            placeholder="(47) 99999-0000"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Data da entrega *
-          </label>
-          <input
-            type="date"
-            disabled={disabled}
-            value={value.dataEntrega || ''}
-            onChange={(e) => patch({ dataEntrega: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Entregue por
-          </label>
-          <input
-            type="text"
-            disabled={disabled}
-            value={value.entregadorNome || ''}
-            onChange={(e) => patch({ entregadorNome: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-        <div className="md:col-span-2">
-          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Local de entrega
-          </label>
-          <input
-            type="text"
-            disabled={disabled}
-            value={value.localRecebimento || ''}
-            onChange={(e) => patch({ localRecebimento: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-white text-sm"
-          />
-        </div>
-      </div>
-
-      <AssinaturaCanvas
-        value={value.assinaturaCliente}
-        disabled={disabled}
-        onChange={(assinaturaCliente) => patch({ assinaturaCliente })}
-      />
-
-      <CampoFoto
-        label="Foto do produto entregue *"
-        value={value.fotoProdutoEntregue}
-        disabled={disabled}
-        onChange={(fotoProdutoEntregue) => patch({ fotoProdutoEntregue })}
-      />
     </div>
   );
 }

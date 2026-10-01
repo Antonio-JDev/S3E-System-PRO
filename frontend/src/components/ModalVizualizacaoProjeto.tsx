@@ -132,6 +132,7 @@ export interface ProjetoDetalhe {
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
   justificativaSemObra?: string | null;
+  alocacoes?: Array<{ id: string }>;
   clienteId?: string;
   exigeVistoriaCelesc?: boolean;
   entregaQuadro?: EntregaQuadroMetadados | null;
@@ -1347,6 +1348,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     () => projeto.status === 'CONCLUIDO' && String(user?.role || '').toLowerCase() !== 'eletricista',
     [projeto.status, user?.role]
   );
+  const podeRemoverObra = useMemo(() => {
+    const role = String(user?.role || '').toLowerCase();
+    if (role === 'eletricista' || projeto.status === 'CANCELADO') return false;
+    const temAlocacao = Array.isArray(projeto.alocacoes) && projeto.alocacoes.length > 0;
+    return !projeto.semObra || Boolean(obraVinculada) || temAlocacao;
+  }, [user?.role, projeto.status, projeto.semObra, projeto.alocacoes, obraVinculada]);
 
   async function handleVoltarParaAprovada() {
     setAlertConfig({
@@ -1763,6 +1770,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   // Estado e handlers para marcar "sem obra"
   const [modalSemObraOpen, setModalSemObraOpen] = useState(false);
   const [justificativaSemObraText, setJustificativaSemObraText] = useState('');
+  const [modalRemoverObraOpen, setModalRemoverObraOpen] = useState(false);
+  const [justificativaRemoverObra, setJustificativaRemoverObra] = useState('');
   const [concluirModalOpen, setConcluirModalOpen] = useState(false);
   const [concluirText, setConcluirText] = useState('');
   // Local/obra edit
@@ -1800,6 +1809,29 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orcamentoCompleto]);
+
+  async function handleConfirmRemoverObra() {
+    const motivo = (justificativaRemoverObra || '').trim();
+    if (motivo.length < 3) return;
+    try {
+      setLoadingAcao(true);
+      const response = await ordemServicosService.removerVinculoObra(projeto.id, motivo);
+      if (response.success) {
+        toast.success('Obra removida. A OS voltou para Aprovado.');
+        setModalRemoverObraOpen(false);
+        setJustificativaRemoverObra('');
+        await carregarObraVinculada();
+        if (onRefresh) await onRefresh();
+      } else {
+        toast.error(response.error || 'Erro ao remover obra');
+      }
+    } catch (error: any) {
+      console.error('Erro ao remover obra:', error);
+      toast.error(error?.response?.data?.error || error?.message || 'Erro ao remover obra');
+    } finally {
+      setLoadingAcao(false);
+    }
+  }
 
   async function handleConfirmSemObra() {
     try {
@@ -2158,6 +2190,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               onVoltarParaAprovada={handleVoltarParaAprovada}
               onIniciarObra={handleIniciarObra}
               onSemObra={() => setModalSemObraOpen(true)}
+              podeRemoverObra={podeRemoverObra}
+              onRemoverObra={() => {
+                setJustificativaRemoverObra('');
+                setModalRemoverObraOpen(true);
+              }}
               onAtribuirEngenharia={onAtribuirEngenharia}
               onUploadDocumento={() => setUploadModalOpen(true)}
               onExcluirDocumento={solicitarExclusaoDocumento}
@@ -3036,23 +3073,44 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         </div>
 
 
-        {/* Modal de Task */}
-        {taskModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="w-full max-w-2xl bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden">
+        {/* Modal de Task — largo quando há checklist de entrega (ERP desktop-first, ainda responsivo) */}
+        {taskModalOpen && (() => {
+          const mostraEntregaQuadro = exigeFormularioEntregaQuadro(
+            projeto.tipo,
+            taskForm.titulo || taskEditando?.titulo,
+          );
+          return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 animate-fade-in">
+            <div
+              className={`w-full bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden flex flex-col max-h-[min(92vh,920px)] ${
+                mostraEntregaQuadro
+                  ? 'max-w-6xl'
+                  : 'max-w-2xl'
+              }`}
+            >
               {/* Header */}
-              <div className="relative px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-indigo-600">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <div className="relative shrink-0 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-indigo-600">
+                <div className="flex items-center gap-3 pr-10">
+                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
                     <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-bold text-white">{taskEditando ? 'Editar Tarefa' : 'Nova Tarefa'}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-base sm:text-lg font-bold text-white truncate">
+                      {taskEditando ? 'Editar Tarefa' : 'Nova Tarefa'}
+                      {mostraEntregaQuadro ? ' · Entrega' : ''}
+                    </h3>
+                    {mostraEntregaQuadro && (
+                      <p className="text-xs text-blue-100/90 truncate">
+                        Preencha o checklist em duas colunas (desktop) ou em sequência (celular)
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <button 
                   onClick={() => setTaskModalOpen(false)} 
-                  className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
+                  className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -3060,19 +3118,37 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
-                {/* Título */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    📝 Título da Tarefa *
-                  </label>
-                  <input
-                    type="text"
-                    value={taskForm.titulo}
-                    onChange={(e) => setTaskForm({ ...taskForm, titulo: e.target.value })}
-                    placeholder="Ex: Instalação de quadro elétrico"
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
-                  />
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4">
+                {/* Título + status lado a lado em telas médias+ */}
+                <div className={`grid grid-cols-1 gap-4 ${mostraEntregaQuadro ? 'lg:grid-cols-3' : ''}`}>
+                  <div className={mostraEntregaQuadro ? 'lg:col-span-2' : ''}>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      📝 Título da Tarefa *
+                    </label>
+                    <input
+                      type="text"
+                      value={taskForm.titulo}
+                      onChange={(e) => setTaskForm({ ...taskForm, titulo: e.target.value })}
+                      placeholder="Ex: Instalação de quadro elétrico"
+                      className="w-full px-4 py-2.5 sm:py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                    />
+                  </div>
+                  {mostraEntregaQuadro && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                        🎯 Status
+                      </label>
+                      <select
+                        value={taskForm.status}
+                        onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value as any })}
+                        className="w-full px-4 py-2.5 sm:py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                      >
+                        <option value="A Fazer">⏳ A Fazer</option>
+                        <option value="Em Andamento">⚡ Em Andamento</option>
+                        <option value="Concluído">✓ Concluído</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Descrição */}
@@ -3081,16 +3157,16 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     📄 Descrição Detalhada *
                   </label>
                   <textarea
-                    rows={4}
+                    rows={mostraEntregaQuadro ? 2 : 4}
                     value={taskForm.descricao}
                     onChange={(e) => setTaskForm({ ...taskForm, descricao: e.target.value })}
                     placeholder="Descreva o que deve ser feito pelos engenheiros e técnicos..."
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                    className="w-full px-4 py-2.5 sm:py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
                   />
                 </div>
 
                 {/* Datas e responsáveis */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 gap-4 ${mostraEntregaQuadro ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2'}`}>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                       📆 Data de início
@@ -3099,11 +3175,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                       type="date"
                       value={taskForm.dataInicio}
                       onChange={(e) => setTaskForm({ ...taskForm, dataInicio: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                      className="w-full px-4 py-2.5 sm:py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
                     />
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Planejamento do início da tarefa (calendário local; sem deslocar um dia ao salvar).
-                    </p>
+                    {!mostraEntregaQuadro && (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Planejamento do início da tarefa (calendário local; sem deslocar um dia ao salvar).
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -3113,26 +3191,27 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                       type="date"
                       value={taskForm.prazo}
                       onChange={(e) => setTaskForm({ ...taskForm, prazo: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                      className="w-full px-4 py-2.5 sm:py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
                     />
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Se você não definir um prazo, o sistema salva automaticamente para <strong>1 dia após a criação</strong>.
-                    </p>
+                    {!mostraEntregaQuadro && (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Se você não definir um prazo, o sistema salva automaticamente para <strong>1 dia após a criação</strong>.
+                      </p>
+                    )}
+                  </div>
+                  <div className={mostraEntregaQuadro ? 'md:col-span-2 xl:col-span-1' : 'md:col-span-2'}>
+                    <UserSearchMultiSelect
+                      label="👤 Responsáveis (busque e selecione um ou mais)"
+                      users={usuariosDisponiveis.map(u => ({ id: u.id, name: u.name || u.nome || '', email: u.email, role: u.role || u.funcao }))}
+                      value={taskForm.responsavelIds}
+                      onChange={(ids) => setTaskForm({ ...taskForm, responsavelIds: ids, responsavelId: ids[0] || '' })}
+                      placeholder="Buscar por nome e selecionar..."
+                    />
                   </div>
                 </div>
 
-                <div>
-                  <UserSearchMultiSelect
-                    label="👤 Responsáveis (busque e selecione um ou mais)"
-                    users={usuariosDisponiveis.map(u => ({ id: u.id, name: u.name || u.nome || '', email: u.email, role: u.role || u.funcao }))}
-                    value={taskForm.responsavelIds}
-                    onChange={(ids) => setTaskForm({ ...taskForm, responsavelIds: ids, responsavelId: ids[0] || '' })}
-                    placeholder="Buscar por nome e selecionar..."
-                  />
-                </div>
-
                 {/* Entrega do quadro (OS Quadros e Painéis) */}
-                {exigeFormularioEntregaQuadro(projeto.tipo, taskForm.titulo || taskEditando?.titulo) && (
+                {mostraEntregaQuadro && (
                   <OsEntregaQuadroForm
                     value={taskForm.entregaQuadro}
                     onChange={(entregaQuadro) => setTaskForm({ ...taskForm, entregaQuadro })}
@@ -3165,53 +3244,60 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   />
                 )}
 
-                {/* Status */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    🎯 Status Inicial
-                  </label>
-                  <select
-                    value={taskForm.status}
-                    onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value as any })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
-                  >
-                    <option value="A Fazer">⏳ A Fazer</option>
-                    <option value="Em Andamento">⚡ Em Andamento</option>
-                    <option value="Concluído">✓ Concluído</option>
-                  </select>
-                </div>
+                {/* Status — só quando NÃO é entrega (já está no topo) */}
+                {!mostraEntregaQuadro && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      🎯 Status Inicial
+                    </label>
+                    <select
+                      value={taskForm.status}
+                      onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value as any })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white"
+                    >
+                      <option value="A Fazer">⏳ A Fazer</option>
+                      <option value="Em Andamento">⚡ Em Andamento</option>
+                      <option value="Concluído">✓ Concluído</option>
+                    </select>
+                  </div>
+                )}
+              </div>
 
-                {/* Botões */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-dark-border">
-                  <button 
-                    onClick={() => setTaskModalOpen(false)} 
-                    className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    onClick={handleSalvarTask} 
-                    className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-medium"
-                  >
-                    💾 {taskEditando ? 'Atualizar' : 'Criar'} Tarefa
-                  </button>
-                </div>
+              {/* Rodapé fixo */}
+              <div className="shrink-0 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg/80">
+                <button 
+                  onClick={() => setTaskModalOpen(false)} 
+                  className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleSalvarTask} 
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-medium"
+                >
+                  💾 {taskEditando ? 'Atualizar' : 'Criar'} Tarefa
+                </button>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Preview Task Modal */}
         {previewTask && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="w-full max-w-2xl bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden">
-              <div className="relative px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-gray-800 to-gray-900">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 animate-fade-in">
+            <div
+              className={`w-full bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden flex flex-col max-h-[min(90vh,880px)] ${
+                exigeFormularioEntregaQuadro(projeto.tipo, previewTask.titulo) ? 'max-w-4xl' : 'max-w-2xl'
+              }`}
+            >
+              <div className="relative shrink-0 px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-gray-800 to-gray-900">
                 <h3 className="text-lg font-bold text-white">Visualizar Tarefa</h3>
                 <button onClick={() => setPreviewTask(null)} className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-              <div className="p-8 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto p-6 sm:p-8 space-y-5">
                 <h4 className="text-xl font-semibold text-gray-900 dark:text-white">{previewTask.titulo}</h4>
                 <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line leading-relaxed">{previewTask.descricao || 'Sem descrição'}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-dark-border pt-4">
@@ -3257,6 +3343,56 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
                     Editar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Remover obra (volta para Aprovado e apaga vínculo) */}
+        {modalRemoverObraOpen && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="w-full max-w-xl bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden">
+              <div className="relative px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-gray-800 to-gray-900">
+                <h3 className="text-lg font-bold text-white">Remover obra</h3>
+                <button
+                  type="button"
+                  onClick={() => setModalRemoverObraOpen(false)}
+                  className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="p-6">
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+                  A ordem de serviço volta para <strong>Aprovado</strong>. A obra antiga e as alocações antigas saem.
+                  Eventos do calendário e apontamentos permanecem.
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">Informe o motivo (mínimo 3 caracteres).</p>
+                <textarea
+                  value={justificativaRemoverObra}
+                  onChange={(e) => setJustificativaRemoverObra(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 mb-4"
+                  placeholder="Ex: Obra lançada por engano — execução segue só no Kanban"
+                  minLength={3}
+                />
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModalRemoverObraOpen(false)}
+                    className="px-4 py-2 bg-gray-100 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirmRemoverObra()}
+                    disabled={loadingAcao || (justificativaRemoverObra || '').trim().length < 3}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingAcao ? 'Removendo...' : 'Remover obra'}
                   </button>
                 </div>
               </div>

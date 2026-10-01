@@ -11,6 +11,7 @@ import {
 import { montarResumoProdutividadeOs } from '../../utils/osPrazoProgresso.util';
 import type { ProjetoDetalhe } from '../ModalVizualizacaoProjeto';
 import OsExecucaoCalendarioPanel from './OsExecucaoCalendarioPanel';
+import OsFatiasTempoBarras from './OsFatiasTempoBarras';
 import OsPrazoEstimadoCard from './OsPrazoEstimadoCard';
 import OsPrazoProgressoBar from './OsPrazoProgressoBar';
 import type { OsEditFormDraft } from '../../hooks/useOsEditForm';
@@ -89,6 +90,8 @@ export interface OsVisaoGeralTabProps {
   podeVoltarParaAprovada?: boolean;
   onVoltarParaAprovada?: () => void;
   onSemObra?: () => void;
+  podeRemoverObra?: boolean;
+  onRemoverObra?: () => void;
   onAtribuirEngenharia?: () => void;
   onUploadDocumento: () => void;
   onExcluirDocumento: (id: string) => void;
@@ -136,6 +139,8 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
   podeVoltarParaAprovada,
   onVoltarParaAprovada,
   onSemObra,
+  podeRemoverObra,
+  onRemoverObra,
   onAtribuirEngenharia,
   onUploadDocumento,
   onExcluirDocumento,
@@ -258,7 +263,7 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
       )}
 
       {/* Alertas contextuais compactos */}
-      {!isEditing && (podeAprovar || podeGerarObra || podeVoltarParaAprovada || (engenhariaAtribuicao && !engenhariaAtribuicao.atribuido && onAtribuirEngenharia)) && (
+      {!isEditing && (podeAprovar || podeGerarObra || podeVoltarParaAprovada || podeRemoverObra || (engenhariaAtribuicao && !engenhariaAtribuicao.atribuido && onAtribuirEngenharia)) && (
         <div className="flex flex-wrap gap-2">
           {podeAprovar && onAprovar && (
             <button
@@ -308,6 +313,16 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50"
             >
               {loadingAcao ? 'Processando...' : 'Voltar para Aprovada'}
+            </button>
+          )}
+          {podeRemoverObra && onRemoverObra && (
+            <button
+              type="button"
+              onClick={onRemoverObra}
+              disabled={loadingAcao}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 text-red-700 dark:text-red-300 dark:border-red-800 text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+            >
+              Remover obra
             </button>
           )}
         </div>
@@ -454,6 +469,12 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
           </div>
         </div>
       </div>
+
+      <OsFatiasTempoBarras
+        projetoId={projeto.id}
+        horasEngenhariaOrcadas={horasOrcadas}
+        diariasEquipeOrcadas={diariasOrcadas}
+      />
 
       <OsPrazoEstimadoCard
         projetoId={projeto.id}

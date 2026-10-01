@@ -127,8 +127,12 @@ export function downloadPdfBlob(blob: Blob, filename: string): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
 }
 
 export type RenderSystemPdfDocumentParams = {

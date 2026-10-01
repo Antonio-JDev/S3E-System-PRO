@@ -711,8 +711,12 @@ export async function getWhatsappProfilePictureImageController(req: AuthRequest,
       res.status(400).json({ success: false, error: 'chatId é obrigatório' });
       return;
     }
+    const refresh =
+      req.query.refresh === '1' ||
+      req.query.refresh === 'true' ||
+      req.query.force === '1';
     const { getWhatsappProfilePictureImage } = await import('../services/whatsappProfilePictureImage.service');
-    const img = await getWhatsappProfilePictureImage(chatId);
+    const img = await getWhatsappProfilePictureImage(chatId, { refresh });
     if (!img) {
       res.status(404).end();
       return;
@@ -724,7 +728,8 @@ export async function getWhatsappProfilePictureImageController(req: AuthRequest,
       return;
     }
     res.setHeader('Content-Type', img.contentType);
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    // Cache curto no browser: a foto pode mudar; ETag cobre 304 quando igual.
+    res.setHeader('Cache-Control', refresh ? 'private, no-cache' : 'private, max-age=300');
     res.setHeader('ETag', etag);
     res.send(img.buffer);
   } catch (e) {
@@ -778,7 +783,11 @@ export async function getWhatsappProviderContactMeta(req: AuthRequest, res: Resp
     } catch (autoResolveErr) {
       console.warn('[WA-CONTACT-META] autoResolveLidIdentityIfNeeded falhou:', autoResolveErr);
     }
-    const profilePictureUrl = await fetchWhatsappProviderProfilePictureUrlForChat(chatId);
+    // Ao abrir o chat, força revalidação da foto (pula TTL positivo do banco)
+    // para refletir troca de avatar no WhatsApp do contato.
+    const profilePictureUrl = await fetchWhatsappProviderProfilePictureUrlForChat(chatId, {
+      forceRefresh: true
+    });
     const s3eHit = await findContatoS3eNomeAgendaForChat(chatId);
     try {
       await persistWhatsappContactCache({

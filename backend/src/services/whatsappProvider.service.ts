@@ -903,11 +903,10 @@ async function profilePictureNullCacheSetForChat(chatId: string): Promise<void> 
 /**
  * TTL do cache positivo persistente (em ms). Quando há uma foto já no
  * `whatsapp_contact_cache`, devolvemos sem chamar a EvoGo se a entrada
- * estiver "fresca" — evita um round-trip e blindagem contra o IQ travado
- * (que dispara o cache negativo de 10min). Após 24h tentamos novamente
- * (foto pode ter mudado).
+ * estiver "fresca". Reduzido de 24h → 2h para refletir troca de foto
+ * dos contatos com mais frequência (WhatsApp Web atualiza ao abrir chat).
  */
-const PROFILE_PICTURE_POSITIVE_TTL_MS = 24 * 60 * 60 * 1000;
+const PROFILE_PICTURE_POSITIVE_TTL_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Lookup no cache persistente (banco) para uma `chatId`. Retorna a URL/data
@@ -934,28 +933,34 @@ async function loadCachedProfilePictureUrlForChat(chatId: string): Promise<strin
 
 /** Foto: grupo usa endpoint /groups/.../picture; DM usa contatos. */
 export async function fetchWhatsappProviderProfilePictureUrlForChat(
-  chatId: string
+  chatId: string,
+  opts?: { forceRefresh?: boolean }
 ): Promise<string | null> {
   const canon = canonicalWhatsappChatId(chatId);
+  const forceRefresh = opts?.forceRefresh === true;
   if (canon.toLowerCase().endsWith('@g.us')) {
-    // Grupos também se beneficiam do cache positivo de 24h: a foto raramente
+    // Grupos também se beneficiam do cache positivo: a foto raramente
     // muda, mas cada `/group/info` no EvoGo custa um round-trip + risco de
     // rate-limit quando vários operadores abrem o mesmo grupo.
-    const cachedGroup = await loadCachedProfilePictureUrlForChat(canon);
-    if (cachedGroup) return cachedGroup;
+    if (!forceRefresh) {
+      const cachedGroup = await loadCachedProfilePictureUrlForChat(canon);
+      if (cachedGroup) return cachedGroup;
+    }
     return withProfilePictureSlot(() => fetchWhatsappProviderGroupPictureUrl(canon));
   }
 
   // Cache positivo persistente (banco) — protege contra o IQ travado da
   // EvoGo (até 75s). Se já temos uma foto recente, devolvemos sem chamar
   // o provedor. O `contact-meta` continua persistindo o resultado.
-  const cached = await loadCachedProfilePictureUrlForChat(canon);
-  if (cached) return cached;
+  if (!forceRefresh) {
+    const cached = await loadCachedProfilePictureUrlForChat(canon);
+    if (cached) return cached;
+  }
 
   // Cache negativo em memória: se já tentamos buscar nos últimos 10 minutos
   // e falhou (foto privada / contato sem foto / EvoGo timeout), economiza
   // ~3s por hover e mantém a UI fluida.
-  if (profilePictureNullCacheGet(canon) || profilePictureNegativeDiskAny([canon])) {
+  if (!forceRefresh && (profilePictureNullCacheGet(canon) || profilePictureNegativeDiskAny([canon]))) {
     return null;
   }
 
@@ -977,6 +982,9 @@ export async function fetchWhatsappProviderProfilePictureUrlForChat(
 
   if (!found) {
     await profilePictureNullCacheSetForChat(canon);
+  } else {
+    // Sucesso: limpa negativo em memória para não bloquear refresh futuro.
+    profilePictureNullCache.delete(canon.trim().toLowerCase());
   }
   return found;
 }

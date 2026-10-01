@@ -1,0 +1,371 @@
+# Docker Compose de produção — imagens 2.2.8
+
+Arquivo para comparar com o que já está no servidor e ajustar a versão das imagens.
+Base: `docker-compose.prod.yml` deste repositório (serviços, portas, volumes, redes e `env_file`).
+Credenciais continuam no `.env` ao lado do compose. Este markdown não inclui senhas novas.
+
+Imagens:
+
+- `odev10antonio/s3e-backend:2.2.8`
+- `odev10antonio/s3e-frontend:2.2.8`
+- `odev10antonio/s3e-evolution-go:0.7.2-poolfix` (já publicada; não rebuildar)
+
+Subir no servidor, depois de revisar o diff com o compose atual:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d
+```
+
+```yaml
+# ============================================
+# S3E System PRO - Docker Compose (PRODUÇÃO + Traefik — rede interna)
+# ============================================
+# Credenciais: arquivo `.env` na mesma pasta (modelo em `.env.prod.md`).
+#
+# Topologia (LAN 192.168.100.228 + Tailscale 100.74.201.62 + hosts app.s3eengenharia.com.br):
+#   Operadores ──HTTP:80──> Traefik (só nos IPs internos abaixo) ──> containers
+#     /           → frontend
+#     /api        → backend (sem middleware forwardingTimeout — ver labels)
+#     /socket.io  → backend (router dedicado, sem timeout agressivo)
+#     /uploads    → backend (router dedicado)
+#     /manager    → Evolution Go (stripPrefix /manager)
+#
+# WhatsApp webhook (sempre interno, não passa pelo Traefik):
+#   EvoGo ──> http://backend:3001/api/webhooks/whatsapp
+#
+# No servidor TrueNAS:
+# 1. cp .env.prod.md → .env (ajuste JWT_SECRET e senhas reais)
+# 2. Em cada PC: hosts → 192.168.100.228  app.s3eengenharia.com.br
+# 3. Fora da LAN: Tailscale (IP 100.74.201.62) — NÃO use Funnel público
+# 4. docker compose -f docker-compose.prod.yml --env-file .env up -d
+# 5. Frontend: build SEM VITE_API_URL fixo (mesma origem / Traefik /api) — ver frontend/Dockerfile
+# 6. Postgres EvoGo dedicado (`postgres-evogo`): evogo_auth + evogo_users
+#    Cutover a partir do Postgres do ERP: ./docker/postgres/migrate-evogo-to-dedicated.sh
+#    Sessão WhatsApp: volume evolution_go_dbdata (NÃO apagar)
+#    Imagem EvoGo: odev10antonio/s3e-evolution-go:0.7.2-poolfix (0.7.2 + pool único).
+#    Trocar só o container: docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps whatsapp-provider
+# ============================================
+
+services:
+  traefik:
+    image: traefik:v2.10.7
+    container_name: s3e-traefik-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik"
+      - "--entrypoints.web.address=:80"
+    ports:
+      # Só LAN + Tailscale privado (não publica 0.0.0.0 — evita exposição na internet)
+      - "${S3E_TRAEFIK_BIND_LAN:-192.168.100.228}:80:80"
+      - "${S3E_TRAEFIK_BIND_TAILSCALE:-100.74.201.62}:80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik
+
+  # Postgres do ERP (só s3e_producao). Sem evogo_* / evolution legado.
+  postgres:
+    image: postgres:16-alpine
+    container_name: s3e-postgres-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${DB_MAX_CONNECTIONS:-150}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - traefik
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Postgres dedicado Evolution Go (evogo_auth + evogo_users). Isola max_connections do ERP.
+  postgres-evogo:
+    image: postgres:16-alpine
+    container_name: s3e-postgres-evogo-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      # Defina EVOGO_DB_USER / EVOGO_DB_PASSWORD no .env (evite ${A:-${B}} — quebra linter YAML).
+      POSTGRES_USER: ${EVOGO_DB_USER:-evogo}
+      POSTGRES_PASSWORD: ${EVOGO_DB_PASSWORD}
+      # DB default; o init cria também evogo_auth.
+      POSTGRES_DB: evogo_users
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${EVOGO_DB_MAX_CONNECTIONS:-100}"
+    volumes:
+      - postgres_evogo_data:/var/lib/postgresql/data
+      - ./docker/postgres/evogo-init:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups
+    networks:
+      - traefik
+    healthcheck:
+      # $$POSTGRES_USER = variável do container (env_file/.environment), não interpolação Compose.
+      test:
+        - CMD-SHELL
+        - "pg_isready -U \"$$POSTGRES_USER\" -d evogo_users"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: s3e-redis-prod
+    restart: unless-stopped
+    command: [ "redis-server", "--appendonly", "yes" ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - traefik
+
+  # Evolution Go — serviço `whatsapp-provider` (backend: WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080)
+  whatsapp-provider:
+    image: odev10antonio/s3e-evolution-go:0.7.2-poolfix
+    container_name: s3e-whatsapp-provider-prod
+    restart: unless-stopped
+    shm_size: "2gb"
+    stop_grace_period: 60s
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      SERVER_PORT: "8080"
+      CLIENT_NAME: ${EVOLUTION_GO_CLIENT_NAME:-s3e}
+      GLOBAL_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
+      # Senha obrigatória no .env como EVOGO_DB_PASSWORD (mesmo valor do postgres-evogo).
+      POSTGRES_AUTH_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD}@postgres-evogo:5432/evogo_auth?sslmode=disable"
+      POSTGRES_USERS_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD}@postgres-evogo:5432/evogo_users?sslmode=disable"
+      DATABASE_SAVE_MESSAGES: "false"
+      WADEBUG: ${EVOLUTION_GO_WADEBUG:-INFO}
+      LOGTYPE: console
+      CONNECT_ON_STARTUP: "true"
+      WEBHOOK_FILES: "true"
+      WEBHOOK_URL: http://backend:3001/api/webhooks/whatsapp
+      OS_NAME: Linux
+      QRCODE_MAX_COUNT: ${WHATSAPP_PROVIDER_QRCODE_LIMIT:-60}
+    ports:
+      # Manager direto (QR) — mesmo padrão da infra antiga (:3333)
+      - "${WHATSAPP_PROVIDER_HTTP_PORT:-3333}:8080"
+    volumes:
+      - evolution_go_dbdata:/app/dbdata
+      - evolution_go_logs:/app/logs
+      - "/etc/localtime:/etc/localtime:ro"
+    depends_on:
+      postgres-evogo:
+        condition: service_healthy
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.s3e-evogo.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/manager`)"
+      - "traefik.http.routers.s3e-evogo.entrypoints=web"
+      - "traefik.http.routers.s3e-evogo.priority=100"
+      - "traefik.http.routers.s3e-evogo.middlewares=s3e-evogo-strip@docker"
+      - "traefik.http.middlewares.s3e-evogo-strip.stripprefix.prefixes=/manager"
+      - "traefik.http.services.s3e-evogo.loadbalancer.server.port=8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  backend:
+    image: odev10antonio/s3e-backend:2.2.8
+    container_name: s3e-backend-prod
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    dns_search: []
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?connection_limit=10
+      ENABLE_PRISMA_AUDIT: "true"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      FRONTEND_URL: ${FRONTEND_URL}
+      BACKEND_URL: ${BACKEND_URL}
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_FISCAL_HOST: ${SMTP_FISCAL_HOST}
+      SMTP_FISCAL_PORT: ${SMTP_FISCAL_PORT}
+      SMTP_FISCAL_SECURE: ${SMTP_FISCAL_SECURE}
+      SMTP_FISCAL_USER: ${SMTP_FISCAL_USER}
+      SMTP_FISCAL_PASS: ${SMTP_FISCAL_PASS}
+      SMTP_FISCAL_FROM: ${SMTP_FISCAL_FROM}
+      NFSE_XSD_PATH: /app/nfse-xsd
+      WHATSAPP_PROVIDER_KIND: ${WHATSAPP_PROVIDER_KIND:-evolution-go}
+      WHATSAPP_PROVIDER_BASE_URL: http://whatsapp-provider:8080
+      WHATSAPP_PROVIDER_SESSION: ${WHATSAPP_PROVIDER_SESSION:-s3e_session_prod}
+      WHATSAPP_PROVIDER_INTEGRATION: ${WHATSAPP_PROVIDER_INTEGRATION:-WHATSAPP-BAILEYS}
+      WHATSAPP_PROVIDER_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
+      WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN: ${WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN:-}
+      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-}
+      WHATSAPP_PROVIDER_PUBLIC_URL: ${WHATSAPP_PROVIDER_PUBLIC_URL:-http://192.168.100.228:3333}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:-}
+      WHATSAPP_MEDIA_ALLOWED_HOSTS: ${WHATSAPP_MEDIA_ALLOWED_HOSTS:-mmg.whatsapp.net,pps.whatsapp.net}
+      WHATSAPP_PROVIDER_SEND_PRESENCE: ${WHATSAPP_PROVIDER_SEND_PRESENCE:-composing}
+      WHATSAPP_PROVIDER_SEND_DELAY_MS: ${WHATSAPP_PROVIDER_SEND_DELAY_MS:-1500}
+      WHATSAPP_SEND_JITTER_MS_MIN: ${WHATSAPP_SEND_JITTER_MS_MIN:-2000}
+      WHATSAPP_SEND_JITTER_MS_MAX: ${WHATSAPP_SEND_JITTER_MS_MAX:-5000}
+      WHATSAPP_SEND_LOCK_TIMEOUT_MS: ${WHATSAPP_SEND_LOCK_TIMEOUT_MS:-120000}
+      WHATSAPP_SEND_LOCK_DISABLE: ${WHATSAPP_SEND_LOCK_DISABLE:-}
+      WHATSAPP_SEND_DEBUG: ${WHATSAPP_SEND_DEBUG:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+      - backend_certificados:/app/data/certificados
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro
+      - ./nfse-xsd:/app/nfse-xsd:ro
+      - ./backend/certs:/app/certs:ro
+      - "/etc/localtime:/etc/localtime:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      whatsapp-provider:
+        condition: service_started
+    networks:
+      - traefik
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/app.js"
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      # Roteador 1: Socket.io — prioridade alta, sem middleware de timeout (conexões longas)
+      - "traefik.http.routers.s3e-websocket.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/socket.io`)"
+      - "traefik.http.routers.s3e-websocket.entrypoints=web"
+      - "traefik.http.routers.s3e-websocket.priority=150"
+      - "traefik.http.routers.s3e-websocket.service=s3e-api"
+      # Roteador 2: API REST (sem middleware s3e-api-timeout — label inválida derruba o router → 502)
+      - "traefik.http.routers.s3e-api.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/api`)"
+      - "traefik.http.routers.s3e-api.entrypoints=web"
+      - "traefik.http.routers.s3e-api.priority=100"
+      # Roteador 3: uploads estáticos do backend
+      - "traefik.http.routers.s3e-uploads.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/uploads`)"
+      - "traefik.http.routers.s3e-uploads.entrypoints=web"
+      - "traefik.http.routers.s3e-uploads.priority=110"
+      - "traefik.http.routers.s3e-uploads.service=s3e-api"
+      # Opcional Traefik v2.10 — NÃO usar forwardingTimeouts (plural) nem idleTimeout:
+      # - traefik.http.routers.s3e-api.middlewares=s3e-api-timeout@docker
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.dialtimeout=60s
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.responseheadertimeout=60s
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.idleconntimeout=60s
+      # stripprefix /api NÃO ligar — Express monta rotas em /api/*
+      - "traefik.http.middlewares.s3e-api-strip.stripprefix.prefixes=/api"
+      - "traefik.http.services.s3e-api.loadbalancer.server.port=3001"
+
+  frontend:
+    image: odev10antonio/s3e-frontend:2.2.8
+    container_name: s3e-frontend-prod
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - traefik
+    depends_on:
+      - backend
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.s3e-app.rule=Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)"
+      - "traefik.http.routers.s3e-app.entrypoints=web"
+      - "traefik.http.routers.s3e-app.priority=10"
+      - "traefik.http.services.s3e-app.loadbalancer.server.port=80"
+
+  pgadmin:
+    image: dpage/pgadmin4:8.11
+    container_name: s3e-pgadmin-prod
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    env_file:
+      - .env
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - traefik
+
+volumes:
+  postgres_data:
+    name: apps_postgres_data
+    external: true
+  postgres_evogo_data:
+    driver: local
+  backend_uploads:
+    name: apps_backend_uploads
+    external: true
+  backend_logs:
+    name: apps_backend_logs
+    external: true
+  backend_certificados:
+    name: apps_backend_certificados
+    external: true
+  pgadmin_data:
+    driver: local
+  evolution_go_dbdata:
+    driver: local
+  evolution_go_logs:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  traefik:
+    driver: bridge
+
+```

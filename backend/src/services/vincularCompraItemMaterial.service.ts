@@ -177,7 +177,11 @@ export async function vincularCompraItemAoMaterial(
             createdBy: params.createdBy || null,
         });
         if (!codigos.ok) {
-            return { ok: false, status: 400, message: codigos.message };
+            return {
+                ok: false,
+                status: 400,
+                message: (codigos as { ok: false; message: string }).message,
+            };
         }
     }
 

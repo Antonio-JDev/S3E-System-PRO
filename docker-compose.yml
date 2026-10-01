@@ -3,9 +3,9 @@
 # ============================================
 # Desenvolvimento local: API + Vite + Postgres + Evolution Go + PgAdmin.
 #
-# IMPORTANTE: o provedor WhatsApp em DEV é Evolution Go (evoapicloud/evolution-go),
-# mesmo binário usado em produção. Mantemos paridade com prod para reproduzir
-# bugs do provedor sem precisar trocar de versão. Não é Evolution API v2.
+# IMPORTANTE: o provedor WhatsApp em DEV é Evolution Go
+# (odev10antonio/s3e-evolution-go:0.7.2-poolfix), o mesmo binário da produção.
+# É a 0.7.2 com pool de Postgres compartilhado. Não é Evolution API v2.
 #
 # Passo a passo:
 #   1. cp .env.example .env   (ou copie a secção "DEV em Docker" do .env.example)
@@ -87,7 +87,7 @@ services:
   # para o backend continuar usando WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080
   # sem precisar trocar nada entre dev e prod.
   whatsapp-provider:
-    image: evoapicloud/evolution-go:0.7.1
+    image: odev10antonio/s3e-evolution-go:0.7.2-poolfix
     container_name: s3e-whatsapp-provider-dev
     restart: unless-stopped
     env_file:

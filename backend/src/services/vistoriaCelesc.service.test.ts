@@ -289,15 +289,19 @@ describe('vistoriaCelesc.service', () => {
   });
 
   describe('validarConclusaoVistoriaCelesc', () => {
-    it('bloqueia conclusão sem vistoria aprovada', () => {
-      const msg = validarConclusaoVistoriaCelesc({
-        exigeVistoriaCelesc: true,
-        statusVistoria: StatusVistoriaCelesc.AGUARDANDO_CELESC,
-      });
-      expect(msg).toMatch(/vistoria CELESC/);
-    });
-
-    it('libera quando aprovada ou flag desligada', () => {
+    it('não bloqueia conclusão mesmo sem vistoria aprovada', () => {
+      expect(
+        validarConclusaoVistoriaCelesc({
+          exigeVistoriaCelesc: true,
+          statusVistoria: StatusVistoriaCelesc.AGUARDANDO_CELESC,
+        }),
+      ).toBeNull();
+      expect(
+        validarConclusaoVistoriaCelesc({
+          exigeVistoriaCelesc: true,
+          statusVistoria: StatusVistoriaCelesc.PENDENTE_PROTOCOLO,
+        }),
+      ).toBeNull();
       expect(
         validarConclusaoVistoriaCelesc({
           exigeVistoriaCelesc: true,

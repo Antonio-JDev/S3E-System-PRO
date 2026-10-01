@@ -67,7 +67,9 @@ function resolverAvaliacaoDeInput(input: {
 } {
   if (input.itensAvaliacao != null) {
     const validacao = validarItensAvaliacaoReprova(input.itensAvaliacao);
-    if (!validacao.ok) throw new Error(validacao.message);
+    if (!validacao.ok) {
+      throw new Error((validacao as { ok: false; message: string }).message);
+    }
     const motivosExtra = String(input.motivos || '').trim();
     return {
       itensAvaliacao: validacao.itens,
@@ -349,7 +351,9 @@ export async function atualizarReprovacao(
   if (!existente) throw new Error('Reprovação não encontrada');
 
   const validacao = validarItensAvaliacaoReprova(input.itensAvaliacao);
-  if (!validacao.ok) throw new Error(validacao.message);
+  if (!validacao.ok) {
+    throw new Error((validacao as { ok: false; message: string }).message);
+  }
 
   let dataReprovacao = existente.dataReprovacao;
   if (input.dataReprovacao != null) {
@@ -411,13 +415,13 @@ export async function aprovar(projetoId: string) {
   };
 }
 
-export function validarConclusaoVistoriaCelesc(projeto: {
+/**
+ * Vistoria CELESC não bloqueia a conclusão da OS.
+ * Mantida para compatibilidade de imports/mocks — sempre libera.
+ */
+export function validarConclusaoVistoriaCelesc(_projeto: {
   exigeVistoriaCelesc: boolean;
   statusVistoria: StatusVistoriaCelesc | string | null;
 }): string | null {
-  if (!projeto.exigeVistoriaCelesc) return null;
-  if (projeto.statusVistoria !== StatusVistoriaCelesc.VISTORIA_APROVADA) {
-    return 'Não é possível concluir a OS: a vistoria CELESC ainda não foi aprovada.';
-  }
   return null;
 }

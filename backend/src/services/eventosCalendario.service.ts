@@ -40,8 +40,8 @@ const includePadrao = {
 };
 
 export interface ListarEventosParams {
-  dataInicio: Date;
-  dataFim: Date;
+  dataInicio?: Date;
+  dataFim?: Date;
   status?: EventoStatus;
   tipo?: string;
   busca?: string;
@@ -59,6 +59,10 @@ export interface CriarEventoInput {
   projetoId?: string | null;
   custoVeiculo?: number | null;
   equipeIds?: string[];
+  equipeEngenhariaIds?: string[];
+  equipeExecucaoIds?: string[];
+  valorHoraEngenharia?: number | null;
+  valorHoraExecucao?: number | null;
   veiculoIds?: string[];
   snapWorkshift?: boolean;
   /** Somente quando true explicitamente: datas viram o período orçado da OS. */
@@ -80,23 +84,64 @@ export function podeVerCustoProjetado(user?: UsuarioCusto | null): boolean {
   return role === 'admin' || role === 'administrador';
 }
 
-function anexarCustoProjetado<T extends { dataInicio: Date; dataFim: Date; custoVeiculo: unknown; equipe: Array<{ valorHora: unknown; valorDiaria: unknown }> }>(
-  evento: T,
-  incluirCusto: boolean
-) {
+function anexarCustoProjetado<
+  T extends {
+    dataInicio: Date;
+    dataFim: Date;
+    custoVeiculo: unknown;
+    equipe: Array<{ id?: string; valorHora: unknown; valorDiaria: unknown }>;
+    equipeEngenhariaIds?: string[];
+    equipeExecucaoIds?: string[];
+    valorHoraEngenharia?: unknown;
+    valorHoraExecucao?: unknown;
+  },
+>(evento: T, incluirCusto: boolean) {
   if (!incluirCusto) return evento;
+  const engIds = new Set(evento.equipeEngenhariaIds ?? []);
+  const exeIds = new Set(evento.equipeExecucaoIds ?? []);
+  const taxaEng = evento.valorHoraEngenharia != null ? Number(evento.valorHoraEngenharia) : 0;
+  const taxaExe = evento.valorHoraExecucao != null ? Number(evento.valorHoraExecucao) : 0;
   const custo = calcularCustoEvento(
     new Date(evento.dataInicio),
     new Date(evento.dataFim),
-    evento.equipe.map(
-      (m): MembroEquipeCusto => ({
+    evento.equipe.map((m): MembroEquipeCusto => {
+      if (m.id && engIds.has(m.id) && taxaEng > 0) {
+        return { valorHora: taxaEng, valorDiaria: null };
+      }
+      if (m.id && exeIds.has(m.id) && taxaExe > 0) {
+        return { valorHora: taxaExe, valorDiaria: null };
+      }
+      return {
         valorHora: m.valorHora != null ? Number(m.valorHora) : null,
         valorDiaria: m.valorDiaria != null ? Number(m.valorDiaria) : null,
-      })
-    ),
+      };
+    }),
     evento.custoVeiculo != null ? Number(evento.custoVeiculo) : 0
   );
   return { ...evento, ...custo };
+}
+
+function idsLimpos(ids?: string[]): string[] | undefined {
+  if (!ids) return undefined;
+  return [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+}
+
+function normalizarAlocacao(data: {
+  equipeIds?: string[];
+  equipeEngenhariaIds?: string[];
+  equipeExecucaoIds?: string[];
+}) {
+  let engenharia = idsLimpos(data.equipeEngenhariaIds);
+  let execucao = idsLimpos(data.equipeExecucaoIds);
+  if (engenharia && execucao) {
+    const engSet = new Set(engenharia);
+    execucao = execucao.filter((id) => !engSet.has(id));
+  }
+  let equipeIds = idsLimpos(data.equipeIds);
+  if (engenharia || execucao) {
+    equipeIds = [...new Set([...(equipeIds ?? []), ...(engenharia ?? []), ...(execucao ?? [])])];
+  }
+  return { equipeIds, equipeEngenhariaIds: engenharia, equipeExecucaoIds: execucao };
 }
 
 async function validarVeiculoIds(veiculoIds: string[]) {
@@ -199,10 +244,14 @@ function validarDatas(dataInicio: Date, dataFim: Date) {
 export class EventosCalendarioService {
   async listar(params: ListarEventosParams, user?: UsuarioCusto) {
     const { dataInicio, dataFim, status, tipo, busca, projetoId } = params;
-    const where: Prisma.EventoCalendarioWhereInput = {
-      dataInicio: { lte: dataFim },
-      dataFim: { gte: dataInicio },
-    };
+    if ((!dataInicio || !dataFim) && !projetoId) {
+      throw new Error('Informe o período ou a ordem de serviço');
+    }
+    const where: Prisma.EventoCalendarioWhereInput = {};
+    if (dataInicio && dataFim) {
+      where.dataInicio = { lte: dataFim };
+      where.dataFim = { gte: dataInicio };
+    }
     if (status) where.status = status;
     if (tipo) where.tipo = tipo;
     if (projetoId) where.projetoId = projetoId;
@@ -236,7 +285,8 @@ export class EventosCalendarioService {
   async criar(data: CriarEventoInput, user?: UsuarioCusto) {
     let dataInicio = new Date(data.dataInicio);
     let dataFim = new Date(data.dataFim);
-    const equipeIds = data.equipeIds ?? [];
+    const alocacao = normalizarAlocacao(data);
+    const equipeIds = alocacao.equipeIds ?? [];
     const veiculoIds = data.veiculoIds ?? [];
     await validarEquipeIds(equipeIds);
     await validarVeiculoIds(veiculoIds);
@@ -273,6 +323,10 @@ export class EventosCalendarioService {
         orcamentoId,
         projetoId: projeto?.id || null,
         custoVeiculo: data.custoVeiculo ?? 0,
+        equipeEngenhariaIds: alocacao.equipeEngenhariaIds ?? [],
+        equipeExecucaoIds: alocacao.equipeExecucaoIds ?? [],
+        valorHoraEngenharia: data.valorHoraEngenharia ?? null,
+        valorHoraExecucao: data.valorHoraExecucao ?? null,
         equipe: equipeIds.length
           ? { connect: equipeIds.map((id) => ({ id })) }
           : undefined,
@@ -292,9 +346,14 @@ export class EventosCalendarioService {
 
     let dataInicio = data.dataInicio ? new Date(data.dataInicio) : existente.dataInicio;
     let dataFim = data.dataFim ? new Date(data.dataFim) : existente.dataFim;
+    const alocacao = normalizarAlocacao(data);
+    const statusAtualizacao =
+      data.status === EventoStatus.VALIDO && existente.status === EventoStatus.PREVISAO
+        ? undefined
+        : data.status;
 
-    if (data.equipeIds) {
-      await validarEquipeIds(data.equipeIds);
+    if (alocacao.equipeIds) {
+      await validarEquipeIds(alocacao.equipeIds);
     }
     if (data.veiculoIds) {
       await validarVeiculoIds(data.veiculoIds);
@@ -313,7 +372,7 @@ export class EventosCalendarioService {
       const periodo = await resolverPeriodoOs(String(projetoIdEfetivo));
       dataInicio = periodo.inicio;
       dataFim = periodo.fim;
-      const equipeIdsSnap = data.equipeIds ?? (
+      const equipeIdsSnap = alocacao.equipeIds ?? (
         await prisma.eventoCalendario.findUnique({
           where: { id },
           select: { equipe: { select: { id: true } } },
@@ -322,8 +381,8 @@ export class EventosCalendarioService {
       const snapped = await snapDatasWorkshift(equipeIdsSnap, dataInicio, dataFim);
       dataInicio = snapped.dataInicio;
       dataFim = snapped.dataFim;
-    } else if (data.snapWorkshift && data.equipeIds?.length) {
-      const snapped = await snapDatasWorkshift(data.equipeIds, dataInicio, dataFim);
+    } else if (data.snapWorkshift && alocacao.equipeIds?.length) {
+      const snapped = await snapDatasWorkshift(alocacao.equipeIds, dataInicio, dataFim);
       dataInicio = snapped.dataInicio;
       dataFim = snapped.dataFim;
     }
@@ -338,7 +397,7 @@ export class EventosCalendarioService {
       ...(data.descricao !== undefined && { descricao: data.descricao?.trim() || null }),
       ...((data.dataInicio !== undefined || data.alocarPeriodoOs === true) && { dataInicio }),
       ...((data.dataFim !== undefined || data.alocarPeriodoOs === true) && { dataFim }),
-      ...(data.status !== undefined && { status: data.status }),
+      ...(statusAtualizacao !== undefined && { status: statusAtualizacao }),
       ...(data.tipo !== undefined && { tipo: data.tipo }),
       ...(orcamentoId !== undefined && {
         orcamento: orcamentoId ? { connect: { id: orcamentoId } } : { disconnect: true },
@@ -347,8 +406,20 @@ export class EventosCalendarioService {
         projeto: projetoId ? { connect: { id: projetoId } } : { disconnect: true },
       }),
       ...(data.custoVeiculo !== undefined && { custoVeiculo: data.custoVeiculo ?? 0 }),
-      ...(data.equipeIds !== undefined && {
-        equipe: { set: data.equipeIds.map((equipeId) => ({ id: equipeId })) },
+      ...(alocacao.equipeEngenhariaIds !== undefined && {
+        equipeEngenhariaIds: alocacao.equipeEngenhariaIds,
+      }),
+      ...(alocacao.equipeExecucaoIds !== undefined && {
+        equipeExecucaoIds: alocacao.equipeExecucaoIds,
+      }),
+      ...(data.valorHoraEngenharia !== undefined && {
+        valorHoraEngenharia: data.valorHoraEngenharia,
+      }),
+      ...(data.valorHoraExecucao !== undefined && {
+        valorHoraExecucao: data.valorHoraExecucao,
+      }),
+      ...(alocacao.equipeIds !== undefined && {
+        equipe: { set: alocacao.equipeIds.map((equipeId) => ({ id: equipeId })) },
       }),
       ...(data.veiculoIds !== undefined && {
         veiculos: { set: data.veiculoIds.map((veiculoId) => ({ id: veiculoId })) },
@@ -384,11 +455,64 @@ export class EventosCalendarioService {
       throw new Error('Vincule uma ordem de serviço antes de confirmar');
     }
 
-    const evento = await prisma.eventoCalendario.update({
-      where: { id },
-      data: { status: EventoStatus.VALIDO },
-      include: includePadrao,
+    const dadosConfirmados = {
+      titulo: existente.titulo,
+      descricao: existente.descricao,
+      dataInicio: existente.dataInicio,
+      dataFim: existente.dataFim,
+      status: EventoStatus.VALIDO,
+      tipo: existente.tipo,
+      orcamentoId: existente.orcamentoId,
+      projetoId: existente.projetoId,
+      custoVeiculo: existente.custoVeiculo ?? 0,
+      equipeEngenhariaIds: existente.equipeEngenhariaIds,
+      equipeExecucaoIds: existente.equipeExecucaoIds,
+      valorHoraEngenharia: existente.valorHoraEngenharia,
+      valorHoraExecucao: existente.valorHoraExecucao,
+      equipe: { set: existente.equipe.map((membro) => ({ id: membro.id })) },
+      veiculos: { set: existente.veiculos.map((veiculo) => ({ id: veiculo.id })) },
+    };
+
+    const jaConfirmado = await prisma.eventoCalendario.findUnique({
+      where: { eventoOrigemId: id },
     });
+
+    const evento = jaConfirmado
+      ? await prisma.eventoCalendario.update({
+          where: { id: jaConfirmado.id },
+          data: dadosConfirmados,
+          include: includePadrao,
+        })
+      : await prisma.eventoCalendario.create({
+          data: {
+            titulo: existente.titulo,
+            descricao: existente.descricao,
+            dataInicio: existente.dataInicio,
+            dataFim: existente.dataFim,
+            status: EventoStatus.VALIDO,
+            tipo: existente.tipo,
+            custoVeiculo: existente.custoVeiculo ?? 0,
+            equipeEngenhariaIds: existente.equipeEngenhariaIds,
+            equipeExecucaoIds: existente.equipeExecucaoIds,
+            valorHoraEngenharia: existente.valorHoraEngenharia,
+            valorHoraExecucao: existente.valorHoraExecucao,
+            eventoOrigem: { connect: { id: existente.id } },
+            ...(existente.orcamentoId
+              ? { orcamento: { connect: { id: existente.orcamentoId } } }
+              : {}),
+            ...(existente.projetoId
+              ? { projeto: { connect: { id: existente.projetoId } } }
+              : {}),
+            ...(existente.equipe.length
+              ? { equipe: { connect: existente.equipe.map((membro) => ({ id: membro.id })) } }
+              : {}),
+            ...(existente.veiculos.length
+              ? { veiculos: { connect: existente.veiculos.map((veiculo) => ({ id: veiculo.id })) } }
+              : {}),
+          },
+          include: includePadrao,
+        });
+
     return anexarCustoProjetado(evento, podeVerCustoProjetado(user));
   }
 

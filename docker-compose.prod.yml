@@ -23,6 +23,8 @@
 # 6. Postgres EvoGo dedicado (`postgres-evogo`): evogo_auth + evogo_users
 #    Cutover a partir do Postgres do ERP: ./docker/postgres/migrate-evogo-to-dedicated.sh
 #    Sessão WhatsApp: volume evolution_go_dbdata (NÃO apagar)
+#    Imagem EvoGo: odev10antonio/s3e-evolution-go:0.7.2-poolfix (0.7.2 + pool único).
+#    Trocar só o container: docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps whatsapp-provider
 # ============================================
 
 services:
@@ -118,7 +120,7 @@ services:
 
   # Evolution Go — serviço `whatsapp-provider` (backend: WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080)
   whatsapp-provider:
-    image: evoapicloud/evolution-go:0.7.2
+    image: odev10antonio/s3e-evolution-go:0.7.2-poolfix
     container_name: s3e-whatsapp-provider-prod
     restart: unless-stopped
     shm_size: "2gb"

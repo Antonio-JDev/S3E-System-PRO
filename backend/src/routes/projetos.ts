@@ -6,6 +6,7 @@ import {
   updateProjeto,
   updateProjetoStatus,
   reverterProjetoStatus,
+  removerVinculoObra,
   deleteProjeto,
   criarProjetoDeOrcamento,
   listarProjetosAvancado,
@@ -204,6 +205,12 @@ router.put('/:id/status', updateProjetoStatus);
  * @desc Reverte status da OS (admin) — remove obra se necessário
  */
 router.put('/:id/reverter-status', reverterProjetoStatus);
+
+/**
+ * @route POST /api/projetos/:id/remover-vinculo-obra
+ * @desc Marca a OS como sem obra, volta para Aprovado e apaga obra/alocações antigas
+ */
+router.post('/:id/remover-vinculo-obra', removerVinculoObra);
 
 /**
  * @route PATCH /api/projetos/:id/protocolar-vistoria

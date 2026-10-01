@@ -104,7 +104,9 @@ export async function ajustarCompraComXml(
     dados.identidade
   );
   if (!identidadeOk.ok) {
-    throw new AjustarCompraXmlError(identidadeOk.message);
+    throw new AjustarCompraXmlError(
+      (identidadeOk as { ok: false; message: string }).message
+    );
   }
 
   const pares = emparelharItensCompraComXml(compra.items, dados.items);

@@ -11,7 +11,9 @@ import {
   type FuncionarioEquipeResumo,
   type OrcamentoPreenchido,
 } from '../services/eventosCalendarioService';
-import { calcularCustoEvento } from '../utils/custoEventoCalendario';
+import { calcularCustoEvento, resolverValorHora } from '../utils/custoEventoCalendario';
+import { particionarEquipe } from '../utils/fatiasTempoOs';
+import OsFatiasTempoBarras from './os/OsFatiasTempoBarras';
 import { isAdmin, isDeveloper } from '../utils/permissions';
 import { ordemServicosService } from '../services/ordemServicosService';
 import { veiculosService } from '../services/gerenciamentoService';
@@ -40,6 +42,23 @@ const TIPOS: { value: EventoTipo; label: string }[] = [
   { value: 'REUNIAO', label: 'Reunião' },
   { value: 'VISITA', label: 'Visita' },
 ];
+
+function taxaManual(raw: string): number | null {
+  if (!raw.trim()) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function listasIniciais(evento: EventoCalendario): { eng: string[]; exe: string[] } {
+  const eng = evento.equipeEngenhariaIds || [];
+  const exe = evento.equipeExecucaoIds || [];
+  if (eng.length || exe.length) return { eng, exe };
+  const partes = particionarEquipe(evento.equipe || [], [], []);
+  return {
+    eng: partes.engenharia.map((m) => m.id),
+    exe: partes.execucao.map((m) => m.id),
+  };
+}
 
 function toDatetimeLocal(value?: string | Date | null): string {
   if (!value) return '';
@@ -147,6 +166,11 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
   const [veiculosDisponiveis, setVeiculosDisponiveis] = useState<VeiculoEventoResumo[]>([]);
   const [veiculosSelecionados, setVeiculosSelecionados] = useState<VeiculoEventoResumo[]>([]);
   const [filtroVeiculo, setFiltroVeiculo] = useState('');
+  const [idsEngenharia, setIdsEngenharia] = useState<string[]>([]);
+  const [idsExecucao, setIdsExecucao] = useState<string[]>([]);
+  const [grupoAlvo, setGrupoAlvo] = useState<'ENGENHARIA' | 'EXECUCAO'>('EXECUCAO');
+  const [valorHoraEngenharia, setValorHoraEngenharia] = useState('');
+  const [valorHoraExecucao, setValorHoraExecucao] = useState('');
   const buscaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const equipePreMontadaRef = useRef<HTMLDivElement>(null);
 
@@ -280,6 +304,20 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           : ''
       );
       setPessoasSelecionadas(eventoInicial.equipe || []);
+      const listas = listasIniciais(eventoInicial);
+      setIdsEngenharia(listas.eng);
+      setIdsExecucao(listas.exe);
+      setGrupoAlvo('EXECUCAO');
+      setValorHoraEngenharia(
+        eventoInicial.valorHoraEngenharia != null && Number(eventoInicial.valorHoraEngenharia) > 0
+          ? String(eventoInicial.valorHoraEngenharia)
+          : '',
+      );
+      setValorHoraExecucao(
+        eventoInicial.valorHoraExecucao != null && Number(eventoInicial.valorHoraExecucao) > 0
+          ? String(eventoInicial.valorHoraExecucao)
+          : '',
+      );
       setVeiculosSelecionados(eventoInicial.veiculos || []);
       setModoAlocacaoObra('funcionario');
       setFiltroFuncionario('');
@@ -305,6 +343,11 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       setOrcamentoId(null);
       setCustoVeiculo('');
       setPessoasSelecionadas([]);
+      setIdsEngenharia([]);
+      setIdsExecucao([]);
+      setGrupoAlvo('EXECUCAO');
+      setValorHoraEngenharia('');
+      setValorHoraExecucao('');
       setVeiculosSelecionados([]);
       setModoAlocacaoObra('funcionario');
       setBuscaEquipe('');
@@ -346,6 +389,11 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     setSugestoesOs([]);
     setCustoVeiculo('');
     setPessoasSelecionadas([]);
+    setIdsEngenharia([]);
+    setIdsExecucao([]);
+    setGrupoAlvo('EXECUCAO');
+    setValorHoraEngenharia('');
+    setValorHoraExecucao('');
     setVeiculosSelecionados([]);
     setModoAlocacaoObra('equipe');
     setBuscaEquipe('');
@@ -370,24 +418,54 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
   const custoPreview = useMemo(() => {
     if (!isPrivileged || !dataInicio || !dataFim) return null;
     try {
+      const taxaEng = taxaManual(valorHoraEngenharia);
+      const taxaExe = taxaManual(valorHoraExecucao);
+      const equipeCusto = pessoasSelecionadas.map((membro) => {
+        const engenharia = idsEngenharia.includes(membro.id);
+        const execucao = idsExecucao.includes(membro.id) || (!engenharia && isObra);
+        if (engenharia && taxaEng != null && taxaEng > 0) {
+          return { valorHora: taxaEng, valorDiaria: null };
+        }
+        if (execucao && taxaExe != null && taxaExe > 0) {
+          return { valorHora: taxaExe, valorDiaria: null };
+        }
+        return membro;
+      });
       return calcularCustoEvento(
         new Date(dataInicio),
         new Date(dataFim),
-        pessoasSelecionadas,
+        equipeCusto,
         Number(custoVeiculo) || 0
       );
     } catch {
       return null;
     }
-  }, [isPrivileged, dataInicio, dataFim, pessoasSelecionadas, custoVeiculo]);
+  }, [
+    isPrivileged,
+    dataInicio,
+    dataFim,
+    pessoasSelecionadas,
+    custoVeiculo,
+    idsEngenharia,
+    idsExecucao,
+    valorHoraEngenharia,
+    valorHoraExecucao,
+    isObra,
+  ]);
+
+  const marcarGrupo = (id: string, grupo: 'ENGENHARIA' | 'EXECUCAO') => {
+    setIdsEngenharia((prev) => (grupo === 'ENGENHARIA' ? [...new Set([...prev, id])] : prev.filter((item) => item !== id)));
+    setIdsExecucao((prev) => (grupo === 'EXECUCAO' ? [...new Set([...prev, id])] : prev.filter((item) => item !== id)));
+  };
 
   const togglePessoa = (pessoa: FuncionarioEquipeResumo) => {
-    setPessoasSelecionadas((prev) => {
-      if (prev.some((p) => p.id === pessoa.id)) {
-        return prev.filter((p) => p.id !== pessoa.id);
-      }
-      return [...prev, pessoa];
-    });
+    const jaSelecionada = pessoasSelecionadas.some((p) => p.id === pessoa.id);
+    if (jaSelecionada) {
+      removerPessoa(pessoa.id);
+      return;
+    }
+    setPessoasSelecionadas((prev) => [...prev, pessoa]);
+    marcarGrupo(pessoa.id, isObra ? grupoAlvo : 'EXECUCAO');
   };
 
   const adicionarEquipePreMontada = async (equipe: EquipePreMontadaResumo) => {
@@ -406,10 +484,15 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
         toast.warning(`Nenhum funcionário do RH vinculado à equipe "${equipeNome}"`);
         return;
       }
-      setPessoasSelecionadas((prev) => {
-        const ids = new Set(prev.map((p) => p.id));
-        return [...prev, ...funcionarios.filter((f) => !ids.has(f.id))];
-      });
+      const novos = funcionarios.filter((f) => !idsPessoasSelecionadas.includes(f.id));
+      if (novos.length > 0) {
+        setPessoasSelecionadas((prev) => {
+          const ids = new Set(prev.map((p) => p.id));
+          return [...prev, ...novos.filter((f) => !ids.has(f.id))];
+        });
+        setIdsEngenharia((eng) => eng.filter((id) => !novos.some((f) => f.id === id)));
+        setIdsExecucao((exe) => [...new Set([...exe, ...novos.map((f) => f.id)])]);
+      }
       if (membrosNaoVinculados && membrosNaoVinculados > 0) {
         toast.info(
           `${funcionarios.length} funcionário(s) adicionado(s). ${membrosNaoVinculados} membro(s) sem vínculo no RH.`
@@ -428,6 +511,17 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
 
   const removerPessoa = (id: string) => {
     setPessoasSelecionadas((prev) => prev.filter((m) => m.id !== id));
+    setIdsEngenharia((prev) => prev.filter((item) => item !== id));
+    setIdsExecucao((prev) => prev.filter((item) => item !== id));
+  };
+
+  const montarListasAlocacao = () => {
+    if (!isObra) return { equipeEngenhariaIds: [] as string[], equipeExecucaoIds: [] as string[] };
+    const ids = pessoasSelecionadas.map((p) => p.id);
+    const eng = idsEngenharia.filter((id) => ids.includes(id));
+    const engSet = new Set(eng);
+    const exe = ids.filter((id) => !engSet.has(id));
+    return { equipeEngenhariaIds: eng, equipeExecucaoIds: exe };
   };
 
   const toggleVeiculo = (veiculo: VeiculoEventoResumo) => {
@@ -501,6 +595,9 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
         orcamentoId,
         projetoId,
         custoVeiculo: Number(custoVeiculo) || 0,
+        ...montarListasAlocacao(),
+        valorHoraEngenharia: isObra ? taxaManual(valorHoraEngenharia) : null,
+        valorHoraExecucao: isObra ? taxaManual(valorHoraExecucao) : null,
         equipeIds: pessoasSelecionadas.map((m) => m.id),
         veiculoIds: veiculosSelecionados.map((v) => v.id),
         snapWorkshift: false,
@@ -542,13 +639,17 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           tipo,
           projetoId,
           orcamentoId,
+          custoVeiculo: Number(custoVeiculo) || 0,
+          ...montarListasAlocacao(),
+          valorHoraEngenharia: isObra ? taxaManual(valorHoraEngenharia) : null,
+          valorHoraExecucao: isObra ? taxaManual(valorHoraExecucao) : null,
           equipeIds: pessoasSelecionadas.map((m) => m.id),
           veiculoIds: veiculosSelecionados.map((v) => v.id),
         });
       }
       const res = await eventosCalendarioService.confirmar(eventoInicial.id);
       if (res.success) {
-        toast.success('Alocação confirmada na OS');
+        toast.success('Previsão mantida. O que vai ser executado foi confirmado na agenda.');
         onSuccess();
         onClose();
       } else {
@@ -759,11 +860,35 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
             </label>
           )}
 
+          {isObra && projetoId && (
+            <OsFatiasTempoBarras projetoId={projetoId} compacto />
+          )}
+
           {/* Alocação: Obra = equipe OU funcionário | Reunião/Visita = apenas pessoas */}
           <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700 dark:text-dark-text">
-              {isObra ? 'Alocação da obra' : 'Participantes'}
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-dark-text">
+                {isObra ? 'Alocação da obra' : 'Participantes'}
+              </label>
+              {isObra && (
+                <div className="flex rounded-lg border border-gray-200 dark:border-dark-border overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setGrupoAlvo('ENGENHARIA')}
+                    className={`px-3 py-1.5 font-semibold ${grupoAlvo === 'ENGENHARIA' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-dark-bg text-gray-600'}`}
+                  >
+                    Marcar engenharia
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGrupoAlvo('EXECUCAO')}
+                    className={`px-3 py-1.5 font-semibold ${grupoAlvo === 'EXECUCAO' ? 'bg-amber-600 text-white' : 'bg-white dark:bg-dark-bg text-gray-600'}`}
+                  >
+                    Marcar execução
+                  </button>
+                </div>
+              )}
+            </div>
 
             {isObra && (
               <div className="flex rounded-xl border border-gray-200 dark:border-dark-border overflow-hidden text-sm w-full sm:w-auto">
@@ -893,24 +1018,38 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               </div>
             )}
 
-            {isObra && modoAlocacaoObra === 'equipe' && pessoasSelecionadas.length > 0 && (
+            {isObra && pessoasSelecionadas.length > 0 && (
               <div className="flex flex-wrap gap-2">
-                {pessoasSelecionadas.map((m) => (
-                  <span
-                    key={m.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-sm border border-blue-200 dark:border-blue-800"
-                  >
-                    {m.nome}
-                    <button
-                      type="button"
-                      onClick={() => removerPessoa(m.id)}
-                      className="hover:text-red-600"
-                      aria-label={`Remover ${m.nome}`}
+                {pessoasSelecionadas.map((m) => {
+                  const grupo = idsEngenharia.includes(m.id) ? 'ENGENHARIA' : 'EXECUCAO';
+                  return (
+                    <span
+                      key={m.id}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm border ${
+                        grupo === 'ENGENHARIA'
+                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
+                          : 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800'
+                      }`}
                     >
-                      ×
-                    </button>
-                  </span>
-                ))}
+                      {m.nome}
+                      <button
+                        type="button"
+                        onClick={() => marcarGrupo(m.id, grupo === 'ENGENHARIA' ? 'EXECUCAO' : 'ENGENHARIA')}
+                        className="text-[10px] font-bold uppercase tracking-wide underline"
+                      >
+                        {grupo === 'ENGENHARIA' ? 'Engenharia' : 'Execução'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removerPessoa(m.id)}
+                        className="hover:text-red-600"
+                        aria-label={`Remover ${m.nome}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -983,20 +1122,66 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-text uppercase tracking-wide">
                 Relatório de custo estimado (Admin)
               </h3>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
-                  Custo do veículo (R$) <span className="font-normal text-gray-500 dark:text-dark-text-secondary">(opcional)</span>
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={custoVeiculo}
-                  onChange={(e) => setCustoVeiculo(e.target.value)}
-                  placeholder="Deixe em branco se não aplicar"
-                  className="w-full sm:w-48 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
+                    Custo do veículo (R$)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={custoVeiculo}
+                    onChange={(e) => setCustoVeiculo(e.target.value)}
+                    placeholder="Opcional"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
+                    Valor hora engenharia (R$)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={valorHoraEngenharia}
+                    onChange={(e) => setValorHoraEngenharia(e.target.value)}
+                    placeholder="Usa a taxa do funcionário"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
+                    Valor hora execução (R$)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={valorHoraExecucao}
+                    onChange={(e) => setValorHoraExecucao(e.target.value)}
+                    placeholder="Usa hora ou diária ÷ 8"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
               </div>
+              {pessoasSelecionadas.length > 0 && (
+                <ul className="text-xs text-gray-600 dark:text-gray-300 space-y-1">
+                  {pessoasSelecionadas.map((membro) => {
+                    const grupo = idsEngenharia.includes(membro.id) ? 'Engenharia' : 'Execução';
+                    const manual = idsEngenharia.includes(membro.id)
+                      ? taxaManual(valorHoraEngenharia)
+                      : taxaManual(valorHoraExecucao);
+                    const hora = manual != null && manual > 0 ? manual : resolverValorHora(membro);
+                    return (
+                      <li key={membro.id}>
+                        {membro.nome} · {grupo} · {hora.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/h
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
               {custoPreview && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                   <div className="bg-white dark:bg-dark-card rounded-xl p-3 border border-gray-100 dark:border-dark-border">
