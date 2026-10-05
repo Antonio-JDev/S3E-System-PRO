@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { EventoStatus } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth';
-import { eventosCalendarioService } from '../services/eventosCalendario.service';
+import { eventosCalendarioService, normalizarHorariosPorDia } from '../services/eventosCalendario.service';
 import { calcularCapacidadeCalendario } from '../services/capacidadeCalendario.service';
 import { ProjetoStatus } from '@prisma/client';
 
@@ -143,6 +143,7 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
       equipeExecucaoIds,
       valorHoraEngenharia,
       valorHoraExecucao,
+      horariosPorDia,
       veiculoIds,
       snapWorkshift,
       alocarPeriodoOs,
@@ -173,6 +174,7 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
         equipeExecucaoIds: listaIds(equipeExecucaoIds) ?? [],
         valorHoraEngenharia: numeroOpcional(valorHoraEngenharia) ?? null,
         valorHoraExecucao: numeroOpcional(valorHoraExecucao) ?? null,
+        horariosPorDia: normalizarHorariosPorDia(horariosPorDia) ?? null,
         veiculoIds: Array.isArray(veiculoIds) ? veiculoIds : [],
         snapWorkshift: Boolean(snapWorkshift),
         alocarPeriodoOs: alocarPeriodoOs === true,
@@ -207,6 +209,7 @@ export const atualizarEventoCalendario = async (req: AuthRequest, res: Response)
       equipeExecucaoIds,
       valorHoraEngenharia,
       valorHoraExecucao,
+      horariosPorDia,
       veiculoIds,
       snapWorkshift,
       alocarPeriodoOs,
@@ -229,6 +232,7 @@ export const atualizarEventoCalendario = async (req: AuthRequest, res: Response)
         equipeExecucaoIds: listaIds(equipeExecucaoIds),
         valorHoraEngenharia: numeroOpcional(valorHoraEngenharia),
         valorHoraExecucao: numeroOpcional(valorHoraExecucao),
+        horariosPorDia: horariosPorDia === undefined ? undefined : normalizarHorariosPorDia(horariosPorDia),
         veiculoIds: veiculoIds !== undefined ? (Array.isArray(veiculoIds) ? veiculoIds : []) : undefined,
         snapWorkshift: snapWorkshift === undefined ? undefined : Boolean(snapWorkshift),
         alocarPeriodoOs: alocarPeriodoOs === undefined ? undefined : alocarPeriodoOs === true,
@@ -262,6 +266,32 @@ export const excluirEventoCalendario = async (req: AuthRequest, res: Response): 
   } catch (error) {
     console.error('Erro ao excluir evento de calendário:', error);
     res.status(500).json({ success: false, error: 'Erro ao excluir evento de calendário' });
+  }
+};
+
+export const executarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const criadoPorId = req.user?.userId;
+    if (!criadoPorId) {
+      res.status(401).json({ success: false, error: 'Usuário não autenticado' });
+      return;
+    }
+    const resultado = await eventosCalendarioService.executar(id, criadoPorId, req.user);
+    if (!resultado) {
+      res.status(404).json({ success: false, error: 'Evento não encontrado' });
+      return;
+    }
+    res.json({ success: true, data: resultado });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao executar OS';
+    const statusCode = message.includes('não encontrad')
+      ? 404
+      : /Executar OS|Vincule|Inclua|cancelad|Não há horas|Não foi possível apontar|não pode ser futura|Apontamento não permitido|Quantidade|inválid|Usuário não autenticado/i.test(message)
+        ? 400
+        : 500;
+    console.error('Erro ao executar OS a partir do calendário:', error);
+    res.status(statusCode).json({ success: false, error: message });
   }
 };
 

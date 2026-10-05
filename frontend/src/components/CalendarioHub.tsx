@@ -440,7 +440,11 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   }, [buscaEvento, rangeAtual, carregarEventos, filtroGerenteId, statusOsAtivos]);
 
   const eventosFiltrados = useMemo(() => {
+    const previsoesSubstituidas = new Set(
+      eventos.map((evento) => evento.eventoOrigemId).filter((id): id is string => Boolean(id)),
+    );
     return eventos.filter((e) => {
+      if (previsoesSubstituidas.has(e.id)) return false;
       if (!tiposAtivos.has(e.tipo)) return false;
       if (!statusAtivos.has(e.status)) return false;
       return true;
@@ -586,6 +590,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     const res = await eventosCalendarioService.atualizar(id, {
       dataInicio: start.toISOString(),
       dataFim: end.toISOString(),
+      horariosPorDia: null,
     });
     if (!res.success || !res.data) {
       info.revert();

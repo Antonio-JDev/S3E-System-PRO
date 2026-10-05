@@ -69,6 +69,7 @@ export interface EventoCalendario {
   equipeExecucaoIds?: string[];
   valorHoraEngenharia?: number | string | null;
   valorHoraExecucao?: number | string | null;
+  horariosPorDia?: Array<{ dia: string; inicio: string; fim: string }> | null;
   eventoOrigemId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -97,6 +98,7 @@ export interface CriarEventoDTO {
   equipeExecucaoIds?: string[];
   valorHoraEngenharia?: number | null;
   valorHoraExecucao?: number | null;
+  horariosPorDia?: Array<{ dia: string; inicio: string; fim: string }> | null;
   veiculoIds?: string[];
   snapWorkshift?: boolean;
   alocarPeriodoOs?: boolean;
@@ -222,6 +224,18 @@ class EventosCalendarioService {
   async confirmar(id: string) {
     return axiosApiService.patch<EventoCalendario>(`${ENDPOINTS.EVENTOS_CALENDARIO}/${id}/confirmar`, {});
   }
+
+  async executar(id: string) {
+    return axiosApiService.patch<ExecutarEventoResultado>(`${ENDPOINTS.EVENTOS_CALENDARIO}/${id}/executar`, {});
+  }
+}
+
+export interface ExecutarEventoResultado {
+  evento: EventoCalendario;
+  diasApontados: string[];
+  diasIgnoradosFuturos: string[];
+  pulados: Array<{ dia: string; pessoa: string; tipo: 'engenharia' | 'execução' }>;
+  falhas: Array<{ pessoa: string; mensagem: string }>;
 }
 
 export const eventosCalendarioService = new EventosCalendarioService();

@@ -1,8 +1,17 @@
 import { EventoStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { calcularCustoEvento, type MembroEquipeCusto } from '../utils/custoEventoCalendario';
+import { ymdDeDataDiaCivil } from '../utils/datetime-sp.util';
+import {
+  diariasDeHorasTotais,
+  horasPorDiaAlocacao,
+  particionarEquipeAlocacao,
+  ymdHojeBrasilia,
+  type MembroAlocacao,
+} from '../utils/horasAlocacaoCalendario';
 import { resolverPeriodoOsDeDatas, deveAlocarPeriodoOs } from '../utils/periodoOs.util';
 import { snapWorkshiftAoDia } from '../utils/workshift.util';
+import { apropriacaoOsService, type ApontamentoItemInput } from './apropriacaoOs.service';
 
 const equipeSelect = {
   id: true,
@@ -63,6 +72,7 @@ export interface CriarEventoInput {
   equipeExecucaoIds?: string[];
   valorHoraEngenharia?: number | null;
   valorHoraExecucao?: number | null;
+  horariosPorDia?: HorarioDiaInput[] | null;
   veiculoIds?: string[];
   snapWorkshift?: boolean;
   /** Somente quando true explicitamente: datas viram o período orçado da OS. */
@@ -119,6 +129,106 @@ function anexarCustoProjetado<
     evento.custoVeiculo != null ? Number(evento.custoVeiculo) : 0
   );
   return { ...evento, ...custo };
+}
+
+export interface HorarioDiaInput {
+  dia: string;
+  inicio: string;
+  fim: string;
+}
+
+export function normalizarHorariosPorDia(value: unknown): HorarioDiaInput[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Array.isArray(value)) return null;
+  const out: HorarioDiaInput[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const dia = String((item as { dia?: unknown }).dia || '');
+    const inicio = String((item as { inicio?: unknown }).inicio || '');
+    const fim = String((item as { fim?: unknown }).fim || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) continue;
+    if (!/^\d{2}:\d{2}$/.test(inicio) || !/^\d{2}:\d{2}$/.test(fim)) continue;
+    if (fim <= inicio) continue;
+    out.push({ dia, inicio, fim });
+  }
+  return out;
+}
+
+function jsonHorarios(
+  value: HorarioDiaInput[] | null | undefined,
+): Prisma.InputJsonValue | typeof Prisma.DbNull | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value.length === 0) return Prisma.DbNull;
+  return value as unknown as Prisma.InputJsonValue;
+}
+
+/** Esconde a previsão quando ainda existe a cópia confirmada legada (eventoOrigemId). */
+export function semPrevisaoSubstituida<T extends { id: string; eventoOrigemId?: string | null }>(
+  eventos: T[],
+): T[] {
+  const origens = new Set(
+    eventos.map((evento) => evento.eventoOrigemId).filter((id): id is string => Boolean(id)),
+  );
+  return eventos.filter((evento) => !origens.has(evento.id));
+}
+
+function emailNorm(value?: string | null): string {
+  return value?.trim().toLowerCase() || '';
+}
+
+async function resolverUsersEngenharia(membros: MembroAlocacao[]): Promise<{
+  userPorFuncionario: Map<string, string>;
+  falhas: Array<{ pessoa: string; mensagem: string }>;
+}> {
+  const userPorFuncionario = new Map<string, string>();
+  const falhas: Array<{ pessoa: string; mensagem: string }> = [];
+  if (membros.length === 0) return { userPorFuncionario, falhas };
+
+  const emails = [...new Set(membros.map((m) => emailNorm(m.email)).filter(Boolean))];
+  const nomes = [...new Set(membros.map((m) => m.nome?.trim()).filter((n): n is string => Boolean(n)))];
+  const users =
+    emails.length || nomes.length
+      ? await prisma.user.findMany({
+          where: {
+            active: true,
+            OR: [
+              ...(emails.length > 0 ? [{ email: { in: emails, mode: 'insensitive' as const } }] : []),
+              ...(nomes.length > 0 ? [{ name: { in: nomes, mode: 'insensitive' as const } }] : []),
+            ],
+          },
+          select: { id: true, email: true, name: true },
+        })
+      : [];
+
+  for (const membro of membros) {
+    const nome = membro.nome?.trim() || 'Funcionário';
+    const email = emailNorm(membro.email);
+    const porEmail = email ? users.filter((u) => emailNorm(u.email) === email) : [];
+    if (porEmail.length === 1) {
+      userPorFuncionario.set(membro.id, porEmail[0].id);
+      continue;
+    }
+    if (porEmail.length > 1) {
+      falhas.push({
+        pessoa: nome,
+        mensagem: `Não foi possível apontar ${nome}: há mais de um usuário ativo com este e-mail.`,
+      });
+      continue;
+    }
+    const nomeKey = emailNorm(membro.nome);
+    const porNome = nomeKey ? users.filter((u) => emailNorm(u.name) === nomeKey) : [];
+    if (porNome.length === 1) {
+      userPorFuncionario.set(membro.id, porNome[0].id);
+      continue;
+    }
+    falhas.push({
+      pessoa: nome,
+      mensagem: `Não foi possível apontar ${nome}: nenhum usuário ativo com o mesmo e-mail ou nome deste funcionário.`,
+    });
+  }
+
+  return { userPorFuncionario, falhas };
 }
 
 function idsLimpos(ids?: string[]): string[] | undefined {
@@ -270,7 +380,7 @@ export class EventosCalendarioService {
       orderBy: { dataInicio: 'asc' },
     });
 
-    return eventos.map((e) => anexarCustoProjetado(e, incluirCusto));
+    return semPrevisaoSubstituida(eventos).map((e) => anexarCustoProjetado(e, incluirCusto));
   }
 
   async buscarPorId(id: string, user?: UsuarioCusto) {
@@ -327,6 +437,7 @@ export class EventosCalendarioService {
         equipeExecucaoIds: alocacao.equipeExecucaoIds ?? [],
         valorHoraEngenharia: data.valorHoraEngenharia ?? null,
         valorHoraExecucao: data.valorHoraExecucao ?? null,
+        horariosPorDia: jsonHorarios(data.horariosPorDia ?? null),
         equipe: equipeIds.length
           ? { connect: equipeIds.map((id) => ({ id })) }
           : undefined,
@@ -418,6 +529,9 @@ export class EventosCalendarioService {
       ...(data.valorHoraExecucao !== undefined && {
         valorHoraExecucao: data.valorHoraExecucao,
       }),
+      ...(data.horariosPorDia !== undefined && {
+        horariosPorDia: jsonHorarios(data.horariosPorDia),
+      }),
       ...(alocacao.equipeIds !== undefined && {
         equipe: { set: alocacao.equipeIds.map((equipeId) => ({ id: equipeId })) },
       }),
@@ -448,72 +562,174 @@ export class EventosCalendarioService {
       include: includePadrao,
     });
     if (!existente) return null;
-    if (existente.status === EventoStatus.VALIDO) {
-      return anexarCustoProjetado(existente, podeVerCustoProjetado(user));
-    }
-    if (existente.tipo === 'OBRA' && !existente.projetoId) {
+    if (existente.tipo === 'OBRA' && !existente.projetoId && existente.status !== EventoStatus.VALIDO) {
       throw new Error('Vincule uma ordem de serviço antes de confirmar');
     }
 
-    const dadosConfirmados = {
-      titulo: existente.titulo,
-      descricao: existente.descricao,
-      dataInicio: existente.dataInicio,
-      dataFim: existente.dataFim,
-      status: EventoStatus.VALIDO,
-      tipo: existente.tipo,
-      orcamentoId: existente.orcamentoId,
-      projetoId: existente.projetoId,
-      custoVeiculo: existente.custoVeiculo ?? 0,
-      equipeEngenhariaIds: existente.equipeEngenhariaIds,
-      equipeExecucaoIds: existente.equipeExecucaoIds,
-      valorHoraEngenharia: existente.valorHoraEngenharia,
-      valorHoraExecucao: existente.valorHoraExecucao,
-      equipe: { set: existente.equipe.map((membro) => ({ id: membro.id })) },
-      veiculos: { set: existente.veiculos.map((veiculo) => ({ id: veiculo.id })) },
-    };
+    await prisma.eventoCalendario.deleteMany({ where: { eventoOrigemId: id } });
 
-    const jaConfirmado = await prisma.eventoCalendario.findUnique({
-      where: { eventoOrigemId: id },
+    if (existente.status === EventoStatus.VALIDO) {
+      return anexarCustoProjetado(existente, podeVerCustoProjetado(user));
+    }
+
+    const evento = await prisma.eventoCalendario.update({
+      where: { id },
+      data: { status: EventoStatus.VALIDO },
+      include: includePadrao,
     });
 
-    const evento = jaConfirmado
-      ? await prisma.eventoCalendario.update({
-          where: { id: jaConfirmado.id },
-          data: dadosConfirmados,
-          include: includePadrao,
-        })
-      : await prisma.eventoCalendario.create({
-          data: {
-            titulo: existente.titulo,
-            descricao: existente.descricao,
-            dataInicio: existente.dataInicio,
-            dataFim: existente.dataFim,
-            status: EventoStatus.VALIDO,
-            tipo: existente.tipo,
-            custoVeiculo: existente.custoVeiculo ?? 0,
-            equipeEngenhariaIds: existente.equipeEngenhariaIds,
-            equipeExecucaoIds: existente.equipeExecucaoIds,
-            valorHoraEngenharia: existente.valorHoraEngenharia,
-            valorHoraExecucao: existente.valorHoraExecucao,
-            eventoOrigem: { connect: { id: existente.id } },
-            ...(existente.orcamentoId
-              ? { orcamento: { connect: { id: existente.orcamentoId } } }
-              : {}),
-            ...(existente.projetoId
-              ? { projeto: { connect: { id: existente.projetoId } } }
-              : {}),
-            ...(existente.equipe.length
-              ? { equipe: { connect: existente.equipe.map((membro) => ({ id: membro.id })) } }
-              : {}),
-            ...(existente.veiculos.length
-              ? { veiculos: { connect: existente.veiculos.map((veiculo) => ({ id: veiculo.id })) } }
-              : {}),
-          },
-          include: includePadrao,
-        });
-
     return anexarCustoProjetado(evento, podeVerCustoProjetado(user));
+  }
+
+  /**
+   * Atalho da agenda: o mesmo evento deixa de ser previsão e o apontamento
+   * das pessoas é gravado no mesmo gesto. Não cria cópia nem eventoOrigemId.
+   */
+  async executar(id: string, criadoPorId: string, user?: UsuarioCusto) {
+    if (!criadoPorId) throw new Error('Usuário não autenticado');
+
+    const existente = await prisma.eventoCalendario.findUnique({
+      where: { id },
+      include: includePadrao,
+    });
+    if (!existente) return null;
+    if (existente.tipo !== 'OBRA') {
+      throw new Error('Executar OS está disponível apenas para alocação de obra');
+    }
+    if (!existente.projetoId) {
+      throw new Error('Vincule uma ordem de serviço antes de executar');
+    }
+    if (!existente.equipe.length) {
+      throw new Error('Inclua ao menos uma pessoa na equipe antes de executar');
+    }
+
+    const projeto = await prisma.projeto.findUnique({
+      where: { id: existente.projetoId },
+      select: { id: true, status: true },
+    });
+    if (!projeto) throw new Error('Ordem de serviço não encontrada');
+    if (projeto.status === 'CANCELADO') {
+      throw new Error('Não é possível executar: a ordem de serviço está cancelada');
+    }
+
+    const manuais = normalizarHorariosPorDia(existente.horariosPorDia);
+    const dias = horasPorDiaAlocacao(
+      new Date(existente.dataInicio),
+      new Date(existente.dataFim),
+      manuais && manuais.length > 0 ? manuais : null,
+    );
+    if (dias.length === 0) {
+      throw new Error('Não há horas no ciclo comercial (07:30–17:30) para apontar nesta alocação');
+    }
+
+    const hoje = ymdHojeBrasilia();
+    const diasIgnoradosFuturos = dias.filter((d) => d.dia > hoje).map((d) => d.dia);
+    const elegiveis = dias.filter((d) => d.dia <= hoje && d.horas > 0);
+
+    const { engenharia, execucao } = particionarEquipeAlocacao(
+      existente.equipe,
+      existente.equipeEngenhariaIds,
+      existente.equipeExecucaoIds,
+    );
+    const { userPorFuncionario, falhas } = await resolverUsersEngenharia(engenharia);
+
+    const existentes = elegiveis.length
+      ? await prisma.apontamentoOsItem.findMany({
+          where: { apontamento: { projetoId: existente.projetoId } },
+          select: {
+            tipoRecurso: true,
+            userId: true,
+            funcionarioId: true,
+            apontamento: { select: { dataApontamento: true } },
+          },
+        })
+      : [];
+    const jaApontados = new Set(
+      existentes
+        .map((item) => {
+          const dia = ymdDeDataDiaCivil(item.apontamento.dataApontamento);
+          if (!dia) return null;
+          if (item.tipoRecurso === 'HORA_ENGENHARIA' && item.userId) {
+            return `${dia}|HORA_ENGENHARIA|${item.userId}`;
+          }
+          if (item.tipoRecurso === 'DIARIA_EQUIPE' && item.funcionarioId) {
+            return `${dia}|DIARIA_EQUIPE|${item.funcionarioId}`;
+          }
+          return null;
+        })
+        .filter((chave): chave is string => Boolean(chave)),
+    );
+
+    const pulados: Array<{ dia: string; pessoa: string; tipo: 'engenharia' | 'execução' }> = [];
+    const diasApontados: string[] = [];
+    const observacoes = `Apontamento gerado pelo calendário (evento ${existente.id}).`;
+
+    for (const dia of elegiveis) {
+      const itens: ApontamentoItemInput[] = [];
+
+      for (const membro of engenharia) {
+        const userId = userPorFuncionario.get(membro.id);
+        if (!userId) continue;
+        const chave = `${dia.dia}|HORA_ENGENHARIA|${userId}`;
+        if (jaApontados.has(chave)) {
+          pulados.push({ dia: dia.dia, pessoa: membro.nome || 'Engenharia', tipo: 'engenharia' });
+          continue;
+        }
+        itens.push({
+          tipoRecurso: 'HORA_ENGENHARIA',
+          quantidade: dia.horas,
+          userId,
+        });
+        jaApontados.add(chave);
+      }
+
+      const diarias = diariasDeHorasTotais(dia.horas);
+      for (const membro of execucao) {
+        if (diarias <= 0) continue;
+        const chave = `${dia.dia}|DIARIA_EQUIPE|${membro.id}`;
+        if (jaApontados.has(chave)) {
+          pulados.push({ dia: dia.dia, pessoa: membro.nome || 'Execução', tipo: 'execução' });
+          continue;
+        }
+        itens.push({
+          tipoRecurso: 'DIARIA_EQUIPE',
+          quantidade: diarias,
+          funcionarioId: membro.id,
+        });
+        jaApontados.add(chave);
+      }
+
+      if (itens.length === 0) continue;
+
+      await apropriacaoOsService.criarApontamento(existente.projetoId, criadoPorId, {
+        dataApontamento: dia.dia,
+        observacoes,
+        itens,
+      });
+      diasApontados.push(dia.dia);
+    }
+
+    if (diasApontados.length === 0 && falhas.length > 0 && pulados.length === 0 && elegiveis.length > 0) {
+      throw new Error(falhas.map((f) => f.mensagem).join(' '));
+    }
+
+    let evento = existente;
+    if (existente.status !== EventoStatus.VALIDO) {
+      await prisma.eventoCalendario.deleteMany({ where: { eventoOrigemId: id } });
+      evento = await prisma.eventoCalendario.update({
+        where: { id },
+        data: { status: EventoStatus.VALIDO },
+        include: includePadrao,
+      });
+    }
+
+    return {
+      evento: anexarCustoProjetado(evento, podeVerCustoProjetado(user)),
+      diasApontados,
+      diasIgnoradosFuturos,
+      pulados,
+      falhas,
+    };
   }
 
   async listarFuncionariosAlocacao() {

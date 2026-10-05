@@ -12,9 +12,17 @@ import {
   type OrcamentoPreenchido,
 } from '../services/eventosCalendarioService';
 import { calcularCustoEvento, resolverValorHora } from '../utils/custoEventoCalendario';
-import { particionarEquipe } from '../utils/fatiasTempoOs';
+import {
+  horasPorDiaLocal,
+  intervalosNoCicloComercial,
+  lerHorariosPorDia,
+  particionarEquipe,
+  ymdLocal,
+  type HorarioDiaAlocacao,
+} from '../utils/fatiasTempoOs';
 import OsFatiasTempoBarras from './os/OsFatiasTempoBarras';
 import { isAdmin, isDeveloper } from '../utils/permissions';
+import { formatDateDisplay } from '../utils/date';
 import { ordemServicosService } from '../services/ordemServicosService';
 import { veiculosService } from '../services/gerenciamentoService';
 import type { VeiculoEventoResumo } from '../services/eventosCalendarioService';
@@ -73,6 +81,19 @@ function defaultFim(inicio: string): string {
   const d = new Date(inicio);
   d.setHours(d.getHours() + 2);
   return toDatetimeLocal(d);
+}
+
+function hmLocal(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function labelDiaAlocacao(ymd: string): string {
+  const [ano, mes, dia] = ymd.split('-').map(Number);
+  return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  });
 }
 
 
@@ -141,14 +162,19 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
   const [tipo, setTipo] = useState<EventoTipo>('REUNIAO');
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
+  const [ajustesDia, setAjustesDia] = useState<Record<string, { inicio?: string; fim?: string }>>({});
   const [status, setStatus] = useState<EventoStatus>('PREVISAO');
   const [orcamentoId, setOrcamentoId] = useState<string | null>(null);
   const [projetoId, setProjetoId] = useState<string | null>(null);
+  const [prazoOs, setPrazoOs] = useState<{ inicio: string; fim: string; dias: number } | null>(null);
+  const [prazoOsAusente, setPrazoOsAusente] = useState(false);
   const [osLabel, setOsLabel] = useState('');
   const [buscaOs, setBuscaOs] = useState('');
   const [sugestoesOs, setSugestoesOs] = useState<Array<{ id: string; titulo: string; numeroOs?: string | null; cliente?: { nome: string } | null }>>([]);
   const [dropdownOsAberto, setDropdownOsAberto] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
+  const [executando, setExecutando] = useState(false);
+  const [fatiasVersao, setFatiasVersao] = useState(0);
   const [custoVeiculo, setCustoVeiculo] = useState('');
   const [pessoasSelecionadas, setPessoasSelecionadas] = useState<FuncionarioEquipeResumo[]>([]);
   const [modoAlocacaoObra, setModoAlocacaoObra] = useState<ModoAlocacaoObra>('equipe');
@@ -175,6 +201,85 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
   const equipePreMontadaRef = useRef<HTMLDivElement>(null);
 
   const isObra = tipo === 'OBRA';
+
+  useEffect(() => {
+    if (!isOpen || !isObra || !projetoId) {
+      setPrazoOs(null);
+      setPrazoOsAusente(false);
+      return;
+    }
+    let cancelado = false;
+    setPrazoOs(null);
+    setPrazoOsAusente(false);
+    void ordemServicosService.buscar(projetoId).then((res) => {
+      if (cancelado) return;
+      if (!res.success || !res.data) {
+        setPrazoOsAusente(true);
+        return;
+      }
+      const os = res.data as {
+        dataInicio?: string | null;
+        dataPrevisao?: string | null;
+        dataFim?: string | null;
+        orcamento?: { previsaoInicio?: string | null; previsaoTermino?: string | null };
+      };
+      const inicioRaw = os.dataInicio || os.orcamento?.previsaoInicio;
+      const fimRaw = os.dataPrevisao || os.dataFim || os.orcamento?.previsaoTermino;
+      if (!inicioRaw || !fimRaw) {
+        setPrazoOsAusente(true);
+        return;
+      }
+      const inicio = new Date(inicioRaw);
+      const fim = new Date(fimRaw);
+      if (Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime()) || fim < inicio) {
+        setPrazoOsAusente(true);
+        return;
+      }
+      const dias = Math.max(
+        1,
+        Math.floor(
+          (Date.UTC(fim.getFullYear(), fim.getMonth(), fim.getDate()) -
+            Date.UTC(inicio.getFullYear(), inicio.getMonth(), inicio.getDate())) /
+            86400000,
+        ) + 1,
+      );
+      setPrazoOs({
+        inicio: formatDateDisplay(inicioRaw),
+        fim: formatDateDisplay(fimRaw),
+        dias,
+      });
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [isOpen, isObra, projetoId]);
+
+  const horariosPorDia = useMemo<HorarioDiaAlocacao[]>(() => {
+    if (!isObra || !dataInicio || !dataFim) return [];
+    return intervalosNoCicloComercial(new Date(dataInicio), new Date(dataFim)).map((slot) => {
+      const ajuste = ajustesDia[slot.dia];
+      return {
+        dia: slot.dia,
+        inicio: ajuste?.inicio || slot.inicio,
+        fim: ajuste?.fim || slot.fim,
+      };
+    });
+  }, [isObra, dataInicio, dataFim, ajustesDia]);
+
+  const planoApontamento = useMemo(() => {
+    if (!isObra || !dataInicio || !dataFim) {
+      return { dias: [] as string[], futuros: [] as string[] };
+    }
+    const hoje = ymdLocal(new Date());
+    const slices = horasPorDiaLocal(new Date(dataInicio), new Date(dataFim), horariosPorDia).filter(
+      (dia) => dia.horas > 0,
+    );
+    return {
+      dias: slices.filter((dia) => dia.dia <= hoje).map((dia) => dia.dia),
+      futuros: slices.filter((dia) => dia.dia > hoje).map((dia) => dia.dia),
+    };
+  }, [isObra, dataInicio, dataFim, horariosPorDia]);
+
   const isReuniaoOuVisita = tipo === 'REUNIAO' || tipo === 'VISITA';
 
   useEscapeKey(isOpen, onClose);
@@ -289,6 +394,10 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       setTipo((eventoInicial.tipo as EventoTipo) || 'REUNIAO');
       setDataInicio(toDatetimeLocal(eventoInicial.dataInicio));
       setDataFim(toDatetimeLocal(eventoInicial.dataFim));
+      const salvos = lerHorariosPorDia(eventoInicial.horariosPorDia) ?? [];
+      const mapa: Record<string, { inicio?: string; fim?: string }> = {};
+      for (const horario of salvos) mapa[horario.dia] = { inicio: horario.inicio, fim: horario.fim };
+      setAjustesDia(mapa);
       setStatus(eventoInicial.status);
       setOrcamentoId(eventoInicial.orcamentoId || null);
       setProjetoId(eventoInicial.projetoId || eventoInicial.projeto?.id || null);
@@ -335,6 +444,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       setTipo('OBRA');
       setDataInicio(inicioDrop);
       setDataFim(fimDrop);
+      setAjustesDia({});
       setStatus('PREVISAO');
       setProjetoId(osDrop.projetoId);
       setOsLabel(`${osDrop.numeroOs || osDrop.titulo}`);
@@ -381,6 +491,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     setTipo(orcamentoPreenchido ? 'OBRA' : 'REUNIAO');
     setDataInicio(inicio);
     setDataFim(fim);
+    setAjustesDia({});
     setStatus('PREVISAO');
     setOrcamentoId(orcamentoPreenchido?.id || null);
     setProjetoId(null);
@@ -557,6 +668,47 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     }
   };
 
+  const datasDoFormulario = () => {
+    if (isObra && horariosPorDia.length > 0) {
+      const primeiro = horariosPorDia[0];
+      const ultimo = horariosPorDia[horariosPorDia.length - 1];
+      return {
+        dataInicio: new Date(`${primeiro.dia}T${primeiro.inicio}`).toISOString(),
+        dataFim: new Date(`${ultimo.dia}T${ultimo.fim}`).toISOString(),
+        horariosPorDia,
+      };
+    }
+    return {
+      dataInicio: new Date(dataInicio).toISOString(),
+      dataFim: new Date(dataFim).toISOString(),
+      horariosPorDia: null as HorarioDiaAlocacao[] | null,
+    };
+  };
+
+  const marcarAjusteDia = (valor: string, campo: 'inicio' | 'fim') => {
+    const data = new Date(valor);
+    if (Number.isNaN(data.getTime())) return;
+    const dia = ymdLocal(data);
+    const hm = hmLocal(data);
+    setAjustesDia((prev) => ({
+      ...prev,
+      [dia]: { ...prev[dia], [campo]: hm },
+    }));
+  };
+
+  const alterarHorarioDia = (dia: string, campo: 'inicio' | 'fim', valor: string) => {
+    setAjustesDia((prev) => ({
+      ...prev,
+      [dia]: { ...prev[dia], [campo]: valor },
+    }));
+    if (campo === 'inicio' && horariosPorDia[0]?.dia === dia) {
+      setDataInicio(`${dia}T${valor}`);
+    }
+    if (campo === 'fim' && horariosPorDia[horariosPorDia.length - 1]?.dia === dia) {
+      setDataFim(`${dia}T${valor}`);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!titulo.trim()) {
@@ -585,11 +737,13 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
         return;
       }
 
+      const datas = datasDoFormulario();
       const payload = {
         titulo: titulo.trim(),
         descricao: descricao.trim() || null,
-        dataInicio: new Date(dataInicio).toISOString(),
-        dataFim: new Date(dataFim).toISOString(),
+        dataInicio: datas.dataInicio,
+        dataFim: datas.dataFim,
+        horariosPorDia: datas.horariosPorDia,
         status,
         tipo,
         orcamentoId,
@@ -631,11 +785,13 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     setConfirmando(true);
     try {
       if (projetoId || titulo) {
+        const datas = datasDoFormulario();
         await eventosCalendarioService.atualizar(eventoInicial.id, {
           titulo: titulo.trim(),
           descricao: descricao.trim() || null,
-          dataInicio: new Date(dataInicio).toISOString(),
-          dataFim: new Date(dataFim).toISOString(),
+          dataInicio: datas.dataInicio,
+          dataFim: datas.dataFim,
+          horariosPorDia: datas.horariosPorDia,
           tipo,
           projetoId,
           orcamentoId,
@@ -649,7 +805,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
       }
       const res = await eventosCalendarioService.confirmar(eventoInicial.id);
       if (res.success) {
-        toast.success('Previsão mantida. O que vai ser executado foi confirmado na agenda.');
+        toast.success('Alocação confirmada na agenda.');
         onSuccess();
         onClose();
       } else {
@@ -662,12 +818,88 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
     }
   };
 
+  const handleExecutar = async () => {
+    if (!eventoInicial || !projetoId || pessoasSelecionadas.length === 0) return;
+    const pessoas = pessoasSelecionadas.length;
+    const dias = planoApontamento.dias.length;
+    const futuros = planoApontamento.futuros.length;
+    const avisoFuturo =
+      futuros > 0
+        ? `\n${futuros} dia${futuros > 1 ? 's' : ''} futuro${futuros > 1 ? 's' : ''} não entra${futuros > 1 ? 'm' : ''} no apontamento.`
+        : '';
+    const texto =
+      dias > 0
+        ? `Executar a OS e apontar ${pessoas} pessoa${pessoas > 1 ? 's' : ''} em ${dias} dia${dias > 1 ? 's' : ''}?${avisoFuturo}`
+        : `Nenhum dia até hoje para apontar.${avisoFuturo}\nA agenda será marcada como executada. Continuar?`;
+    if (!window.confirm(texto)) return;
+
+    setExecutando(true);
+    try {
+      const datas = datasDoFormulario();
+      const salvo = await eventosCalendarioService.atualizar(eventoInicial.id, {
+        titulo: titulo.trim(),
+        descricao: descricao.trim() || null,
+        dataInicio: datas.dataInicio,
+        dataFim: datas.dataFim,
+        horariosPorDia: datas.horariosPorDia,
+        tipo,
+        projetoId,
+        orcamentoId,
+        custoVeiculo: Number(custoVeiculo) || 0,
+        ...montarListasAlocacao(),
+        valorHoraEngenharia: isObra ? taxaManual(valorHoraEngenharia) : null,
+        valorHoraExecucao: isObra ? taxaManual(valorHoraExecucao) : null,
+        equipeIds: pessoasSelecionadas.map((m) => m.id),
+        veiculoIds: veiculosSelecionados.map((v) => v.id),
+      });
+      if (!salvo.success) {
+        toast.error(salvo.error || 'Erro ao salvar o evento antes de executar');
+        return;
+      }
+
+      const res = await eventosCalendarioService.executar(eventoInicial.id);
+      if (!res.success || !res.data) {
+        toast.error(res.error || 'Erro ao executar OS');
+        return;
+      }
+
+      const { diasApontados, diasIgnoradosFuturos, pulados, falhas } = res.data;
+      if (falhas.length > 0) {
+        toast.warning(falhas.map((falha) => falha.mensagem).join(' '));
+      }
+      const partes = ['OS executada na agenda.'];
+      if (diasApontados.length > 0) {
+        partes.push(
+          `Apontamento gravado em ${diasApontados.length} dia${diasApontados.length > 1 ? 's' : ''}.`,
+        );
+      }
+      if (diasIgnoradosFuturos.length > 0) {
+        partes.push(
+          `Dia${diasIgnoradosFuturos.length > 1 ? 's' : ''} futuro${diasIgnoradosFuturos.length > 1 ? 's' : ''} ignorado${diasIgnoradosFuturos.length > 1 ? 's' : ''}: ${diasIgnoradosFuturos.join(', ')}.`,
+        );
+      }
+      if (pulados.length > 0) {
+        partes.push(
+          `${pulados.length} lançamento${pulados.length > 1 ? 's' : ''} já existia${pulados.length > 1 ? 'm' : ''} e foi mantido${pulados.length > 1 ? 's' : ''}.`,
+        );
+      }
+      toast.success(partes.join(' '));
+      setStatus('VALIDO');
+      setFatiasVersao((versao) => versao + 1);
+      onSuccess();
+    } catch {
+      toast.error('Erro ao executar OS');
+    } finally {
+      setExecutando(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-lg sm:max-w-2xl min-[1092px]:w-[90vw] min-[1092px]:max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b border-blue-500/30 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-blue-500/30 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold">
               {eventoInicial ? 'Editar Evento' : osDrop ? 'Planejar execução da OS' : 'Criar Evento'}
@@ -678,19 +910,48 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
                 : 'Calendário e previsão de alocação'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-            aria-label="Fechar"
-          >
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="submit"
+              form="form-evento-alocacao"
+              disabled={salvando || excluindo || confirmando || executando}
+              className="px-4 py-2 rounded-lg bg-white text-blue-700 text-sm font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
+            >
+              {salvando ? 'Salvando...' : eventoInicial ? 'Confirmar alterações' : 'Criar evento'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+              aria-label="Fechar"
+            >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+        {isObra && projetoId && (
+          <div className="px-6 py-3 border-b border-amber-200 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-100">
+            {prazoOs ? (
+              <p className="text-sm">
+                <span className="font-semibold">Prazo do cronograma</span>
+                {' '}
+                {prazoOs.inicio} → {prazoOs.fim}
+                <span className="text-amber-800 dark:text-amber-200">
+                  {' '}· {prazoOs.dias} dia{prazoOs.dias > 1 ? 's' : ''}
+                </span>
+              </p>
+            ) : prazoOsAusente ? (
+              <p className="text-sm">Esta OS ainda não tem data inicial e data final de cronograma.</p>
+            ) : (
+              <p className="text-sm">Carregando prazo da OS...</p>
+            )}
+          </div>
+        )}
+
+        <form id="form-evento-alocacao" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-1">
               Nome do evento
@@ -737,7 +998,10 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               <input
                 type="datetime-local"
                 value={dataInicio}
-                onChange={(e) => setDataInicio(e.target.value)}
+                onChange={(e) => {
+                  setDataInicio(e.target.value);
+                  if (isObra) marcarAjusteDia(e.target.value, 'inicio');
+                }}
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
@@ -746,11 +1010,48 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               <input
                 type="datetime-local"
                 value={dataFim}
-                onChange={(e) => setDataFim(e.target.value)}
+                onChange={(e) => {
+                  setDataFim(e.target.value);
+                  if (isObra) marcarAjusteDia(e.target.value, 'fim');
+                }}
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
           </div>
+
+          {isObra && horariosPorDia.length > 0 && (
+            <div className="rounded-xl border border-gray-200 dark:border-dark-border p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-gray-800 dark:text-dark-text">Horário de cada dia</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  O arraste conta 07:30–17:30 em cada dia, sem a madrugada. Ajuste o fim do dia aqui se a obra passar disso — o horário gravado entra na conta e não volta sozinho para o ciclo.
+                </p>
+              </div>
+              <ul className="space-y-2">
+                {horariosPorDia.map((horario) => (
+                  <li key={horario.dia} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 items-center">
+                    <span className="text-sm capitalize text-gray-700 dark:text-gray-200">
+                      {labelDiaAlocacao(horario.dia)}
+                    </span>
+                    <input
+                      type="time"
+                      aria-label={`Início em ${labelDiaAlocacao(horario.dia)}`}
+                      value={horario.inicio}
+                      onChange={(e) => alterarHorarioDia(horario.dia, 'inicio', e.target.value)}
+                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg"
+                    />
+                    <input
+                      type="time"
+                      aria-label={`Fim em ${labelDiaAlocacao(horario.dia)}`}
+                      value={horario.fim}
+                      onChange={(e) => alterarHorarioDia(horario.dia, 'fim', e.target.value)}
+                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {orcamentoId && (
             <div className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-2">
@@ -861,7 +1162,7 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           )}
 
           {isObra && projetoId && (
-            <OsFatiasTempoBarras projetoId={projetoId} compacto />
+            <OsFatiasTempoBarras projetoId={projetoId} compacto atualizacao={fatiasVersao} />
           )}
 
           {/* Alocação: Obra = equipe OU funcionário | Reunião/Visita = apenas pessoas */}
@@ -1216,14 +1517,14 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
               <button
                 type="button"
                 onClick={handleExcluir}
-                disabled={excluindo || salvando}
+                disabled={excluindo || salvando || executando}
                 className="px-5 py-2.5 rounded-xl border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 dark:border-red-800 dark:text-red-400 disabled:opacity-50 transition-colors"
               >
                 {excluindo ? 'Excluindo...' : 'Excluir evento'}
               </button>
             )}
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -1231,22 +1532,41 @@ const ModalCriarEvento: React.FC<ModalCriarEventoProps> = ({
           >
             Cancelar
           </button>
-          <button
-            type="submit"
-            onClick={handleSubmit}
-            disabled={salvando || excluindo || confirmando}
-            className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-50 transition-colors"
-          >
-            {salvando ? 'Salvando...' : eventoInicial ? 'Salvar alterações' : 'Criar evento'}
-          </button>
+          {isObra && (
+            <button
+              type="button"
+              onClick={handleExecutar}
+              disabled={
+                !eventoInicial ||
+                !projetoId ||
+                pessoasSelecionadas.length === 0 ||
+                salvando ||
+                excluindo ||
+                confirmando ||
+                executando
+              }
+              title={
+                !eventoInicial
+                  ? 'Salve o evento antes de executar'
+                  : !projetoId
+                    ? 'Vincule uma ordem de serviço'
+                    : pessoasSelecionadas.length === 0
+                      ? 'Inclua a equipe da obra'
+                      : 'Grava o apontamento e marca a alocação como executada'
+              }
+              className="px-6 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-semibold disabled:opacity-50 transition-colors"
+            >
+              {executando ? 'Executando...' : 'Executar OS'}
+            </button>
+          )}
           {eventoInicial && status === 'PREVISAO' && (
             <button
               type="button"
               onClick={handleConfirmar}
-              disabled={salvando || excluindo || confirmando}
+              disabled={salvando || excluindo || confirmando || executando}
               className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
             >
-              {confirmando ? 'Confirmando...' : 'Confirmar'}
+              {confirmando ? 'Confirmando...' : 'Confirmar alocação'}
             </button>
           )}
           </div>

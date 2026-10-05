@@ -11,6 +11,7 @@ import {
   atualizarEventoCalendario,
   excluirEventoCalendario,
   confirmarEventoCalendario,
+  executarEventoCalendario,
   listarFuncionariosAlocacaoCalendario,
   obterCapacidadeCalendario,
 } from '../controllers/eventosCalendarioController';
@@ -29,6 +30,7 @@ router.get('/:id', checkPermission('view_projetos'), buscarEventoCalendario);
 router.post('/', checkPermission('create_projeto'), criarEventoCalendario);
 router.put('/:id', checkPermission('update_projeto'), atualizarEventoCalendario);
 router.patch('/:id/confirmar', checkPermission('update_projeto'), confirmarEventoCalendario);
+router.patch('/:id/executar', checkPermission('update_projeto'), executarEventoCalendario);
 router.patch('/:id', checkPermission('update_projeto'), atualizarEventoCalendario);
 router.delete('/:id', checkPermission('delete_projeto'), excluirEventoCalendario);
 
