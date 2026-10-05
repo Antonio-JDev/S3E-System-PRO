@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
+import { projetosService } from '../services/projetosService';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
@@ -52,8 +53,42 @@ const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+const MOTIVO_DEVOLUCAO_OS = "Devolução de OS";
+const MOTIVOS_SAIDA_COM_OS = ["Alocação para OS", "Uso em Instalação", "Aplicação em Serviço"];
+
+type OsBusca = {
+    id: string;
+    titulo: string;
+    numeroOs?: string | null;
+    status: string;
+    cliente?: { nome: string } | null;
+    obra?: { id: string; nomeObra: string; status: string } | null;
+};
+
+const rotuloOs = (os: OsBusca) =>
+    `${os.numeroOs ? `${os.numeroOs} · ` : ''}${os.titulo}${os.cliente?.nome ? ` · ${os.cliente.nome}` : ''}`;
+
+const TEMA_MODAL = {
+    [MovementType.Entrada]: {
+        header: 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/40 dark:to-emerald-950/20',
+        icone: 'from-green-600 to-green-700 ring-green-100 dark:ring-green-900/60',
+        foco: 'focus:ring-green-500 focus:border-green-500 dark:focus:ring-green-500/30 dark:focus:border-green-500',
+        selecionado: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300',
+        hoverItem: 'hover:bg-green-50 dark:hover:bg-green-900/20',
+        botao: 'from-green-600 to-green-500 hover:from-green-700 hover:to-green-600',
+    },
+    [MovementType.Saida]: {
+        header: 'bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-950/40 dark:to-red-950/20',
+        icone: 'from-orange-600 to-orange-700 ring-orange-100 dark:ring-orange-900/60',
+        foco: 'focus:ring-orange-500 focus:border-orange-500 dark:focus:ring-orange-500/30 dark:focus:border-orange-500',
+        selecionado: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-300',
+        hoverItem: 'hover:bg-orange-50 dark:hover:bg-orange-900/20',
+        botao: 'from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600',
+    },
+} as const;
+
 const entryReasons = [
-    "Devolução de Obra",
+    MOTIVO_DEVOLUCAO_OS,
     "Devolução de Cliente",
     "Sobra de Projeto",
     "Material em Excesso",
@@ -63,9 +98,7 @@ const entryReasons = [
 ];
 
 const exitReasons = [
-    "Alocação para Obra/Projeto",
-    "Uso em Instalação",
-    "Aplicação em Serviço",
+    ...MOTIVOS_SAIDA_COM_OS,
     "Perda ou Avaria",
     "Furto/Roubo",
     "Material com Defeito",
@@ -131,10 +164,14 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
     const [responsible, setResponsible] = useState('Admin');
     const [notes, setNotes] = useState('');
     const [dataMovimentacao, setDataMovimentacao] = useState(new Date().toISOString().split('T')[0]);
-    const [obraVinculada, setObraVinculada] = useState('');
-    const [obras, setObras] = useState<any[]>([]);
+    const [osSelecionada, setOsSelecionada] = useState<OsBusca | null>(null);
+    const [osBusca, setOsBusca] = useState('');
+    const [osOpcoes, setOsOpcoes] = useState<OsBusca[]>([]);
+    const [isOsListOpen, setIsOsListOpen] = useState(false);
+    const [buscandoOs, setBuscandoOs] = useState(false);
     
     const materialDropdownRef = useRef<HTMLDivElement>(null);
+    const osDropdownRef = useRef<HTMLDivElement>(null);
 
     // Carregar dados da API
     const loadData = async () => {
@@ -227,30 +264,41 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
 
     useEffect(() => {
         loadData();
-        loadObras();
     }, []);
 
-    const loadObras = async () => {
-        try {
-            console.log('🏗️ Carregando obras...');
-            const response = await axiosApiService.get<any>('/api/obras/kanban');
-            
-            if (response.success && response.data) {
-                // Consolidar todas as obras de todos os status
-                const todasObras = [
-                    ...(response.data.BACKLOG || []),
-                    ...(response.data.A_FAZER || []),
-                    ...(response.data.ANDAMENTO || []),
-                    ...(response.data.CONCLUIDO || [])
-                ];
-                setObras(todasObras);
-                console.log(`✅ ${todasObras.length} obras carregadas`);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao carregar obras:', error);
-            setObras([]);
+    useEffect(() => {
+        if (osSelecionada) return;
+        const termo = osBusca.trim();
+        if (termo.length < 1) {
+            setOsOpcoes([]);
+            return;
         }
-    };
+        let cancelado = false;
+        const t = window.setTimeout(async () => {
+            setBuscandoOs(true);
+            try {
+                const res = await projetosService.buscarPorTermo(termo, 20);
+                if (!cancelado) setOsOpcoes(res.success && Array.isArray(res.data) ? res.data : []);
+            } finally {
+                if (!cancelado) setBuscandoOs(false);
+            }
+        }, 300);
+        return () => {
+            cancelado = true;
+            window.clearTimeout(t);
+        };
+    }, [osBusca, osSelecionada]);
+
+    useEffect(() => {
+        if (!isMaterialListOpen && !isOsListOpen) return;
+        const fecharAoClicarFora = (e: MouseEvent) => {
+            const alvo = e.target as Node;
+            if (materialDropdownRef.current && !materialDropdownRef.current.contains(alvo)) setIsMaterialListOpen(false);
+            if (osDropdownRef.current && !osDropdownRef.current.contains(alvo)) setIsOsListOpen(false);
+        };
+        document.addEventListener('mousedown', fecharAoClicarFora);
+        return () => document.removeEventListener('mousedown', fecharAoClicarFora);
+    }, [isMaterialListOpen, isOsListOpen]);
 
     // Filtros
     const filteredMovements = useMemo(() => {
@@ -309,9 +357,15 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
         setReason('');
         setNotes('');
         setDataMovimentacao(new Date().toISOString().split('T')[0]);
-        setObraVinculada('');
+        setOsSelecionada(null);
+        setOsBusca('');
+        setOsOpcoes([]);
+        setIsOsListOpen(false);
         setIsMaterialListOpen(false);
     };
+
+    const exigeOs = (type: MovementType, motivo: string) =>
+        type === MovementType.Entrada ? motivo === MOTIVO_DEVOLUCAO_OS : MOTIVOS_SAIDA_COM_OS.includes(motivo);
 
     const handleDeleteMovimentacao = async () => {
         if (!movimentacaoToDelete) return;
@@ -342,6 +396,13 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        if (type === MovementType.Saida && exigeOs(type, reason) && !osSelecionada) {
+            toast.error('❌ Selecione a OS de destino', {
+                description: 'Busque pelo número da OS, título ou cliente.'
+            });
+            return;
+        }
+
         try {
             const quantidadeNum = parseFloat(quantity);
             if (isNaN(quantidadeNum) || quantidadeNum <= 0) {
@@ -351,13 +412,19 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                 return;
             }
 
+            const osDaMovimentacao = exigeOs(type, reason) ? osSelecionada : null;
+            const observacoes = osDaMovimentacao
+                ? `${osDaMovimentacao.numeroOs || 'OS'} · ${osDaMovimentacao.titulo}${notes.trim() ? ` — ${notes.trim()}` : ''}`
+                : notes || undefined;
+
             const movimentacaoData = {
                 materialId: selectedMaterial.id,
                 tipo: type === MovementType.Entrada ? 'ENTRADA' : 'SAIDA' as 'ENTRADA' | 'SAIDA',
                 quantidade: quantidadeNum,
                 motivo: reason,
-                observacoes: notes || undefined,
-                referencia: obraVinculada || undefined
+                observacoes,
+                // Relatórios de material por obra filtram por referencia = obraId
+                referencia: osDaMovimentacao ? osDaMovimentacao.obra?.id || osDaMovimentacao.id : undefined
             };
 
             const response = await movimentacoesService.criar(movimentacaoData);
@@ -402,6 +469,228 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
         setIsSaidaModalOpen(false);
         resetForm();
     });
+
+    const renderModalMovimentacao = (type: MovementType.Entrada | MovementType.Saida) => {
+        const entrada = type === MovementType.Entrada;
+        const tema = TEMA_MODAL[type];
+        const campo = `input-field ${tema.foco}`;
+        const label = 'block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2';
+        const mostrarOs = exigeOs(type, reason);
+        const estoqueInsuficiente = !entrada && !!(selectedMaterial && quantity && parseFloat(quantity) > (selectedMaterial.stock ?? 0));
+        const fechar = () => {
+            if (entrada) setIsEntradaModalOpen(false);
+            else setIsSaidaModalOpen(false);
+            resetForm();
+        };
+        const Icone = entrada ? ArrowDownTrayIcon : ArrowUpTrayIcon;
+
+        return (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className={`relative p-6 border-b border-gray-100 dark:border-dark-border rounded-t-xl ${tema.header}`}>
+                        <div className="flex items-center gap-4">
+                            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-medium ring-2 ${tema.icone}`}>
+                                <Icone className="w-7 h-7 text-white" />
+                            </div>
+                            <div className="flex-1">
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">
+                                    {entrada ? 'Devolução de Estoque' : 'Realizar Baixa de Estoque'}
+                                </h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+                                    {entrada ? 'Registrar entrada de material no estoque' : 'Registrar saída de material do estoque'}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={fechar}
+                            className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 dark:text-dark-text-secondary dark:hover:text-dark-text hover:bg-white/80 dark:hover:bg-dark-hover rounded-xl"
+                        >
+                            <XMarkIcon className="w-6 h-6" />
+                        </button>
+                    </div>
+
+                    <div className="p-6 space-y-5">
+                        <div>
+                            <label className={label}>Material/Item *</label>
+                            <div className="relative" ref={materialDropdownRef}>
+                                <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-dark-text-secondary pointer-events-none" />
+                                <input
+                                    type="search"
+                                    value={selectedMaterial ? `${selectedMaterial.name} (SKU: ${selectedMaterial.sku})` : materialSearchTerm}
+                                    onChange={(e) => {
+                                        setMaterialSearchTerm(e.target.value);
+                                        setIsMaterialListOpen(true);
+                                        if (selectedMaterial) setSelectedMaterial(null);
+                                    }}
+                                    onFocus={() => setIsMaterialListOpen(true)}
+                                    placeholder="Digite para buscar material por nome ou SKU..."
+                                    className={`${campo} pl-10`}
+                                />
+                                {isMaterialListOpen && !selectedMaterial && filteredMaterials.length > 0 && (
+                                    <div className="absolute z-20 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                        {filteredMaterials.slice(0, 50).map((material) => (
+                                            <button
+                                                key={material.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedMaterial(material);
+                                                    setIsMaterialListOpen(false);
+                                                    setMaterialSearchTerm('');
+                                                }}
+                                                className={`w-full text-left px-4 py-3 border-b border-gray-100 dark:border-dark-border last:border-0 ${tema.hoverItem}`}
+                                            >
+                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{material.name}</p>
+                                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary">SKU: {material.sku} | Estoque: {material.stock}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            {selectedMaterial && (
+                                <div className={`mt-2 p-3 border rounded-lg ${tema.selecionado}`}>
+                                    <p className="text-sm">
+                                        <strong>Selecionado:</strong> {selectedMaterial.name} | Estoque atual: {selectedMaterial.stock} unidades
+                                    </p>
+                                    {!entrada && (selectedMaterial.stock ?? 0) <= 0 && (
+                                        <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-semibold">
+                                            ⚠️ Atenção: Estoque atual está zerado!
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className={label}>Quantidade *</label>
+                            <input
+                                type="number"
+                                value={quantity}
+                                onChange={(e) => setQuantity(e.target.value)}
+                                min="1"
+                                max={entrada ? undefined : selectedMaterial?.stock || 999999}
+                                step="1"
+                                placeholder={entrada ? 'Ex: 10' : 'Ex: 5'}
+                                className={campo}
+                            />
+                            {!entrada && selectedMaterial && (
+                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
+                                    Disponível em estoque: {selectedMaterial.stock} unidades
+                                </p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className={label}>{entrada ? 'Motivo da Devolução *' : 'Motivo da Baixa *'}</label>
+                            <select
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                                className={`select-field ${tema.foco}`}
+                            >
+                                <option value="">Selecione o motivo</option>
+                                {(entrada ? entryReasons : exitReasons).map((r) => (
+                                    <option key={r} value={r}>{r}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {mostrarOs && (
+                            <div>
+                                <label className={label}>{entrada ? 'OS de Origem' : 'OS de Destino *'}</label>
+                                <div className="relative" ref={osDropdownRef}>
+                                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-dark-text-secondary pointer-events-none" />
+                                    <input
+                                        type="search"
+                                        value={osSelecionada ? rotuloOs(osSelecionada) : osBusca}
+                                        onChange={(e) => {
+                                            setOsBusca(e.target.value);
+                                            setIsOsListOpen(true);
+                                            if (osSelecionada) setOsSelecionada(null);
+                                        }}
+                                        onFocus={() => setIsOsListOpen(true)}
+                                        placeholder="Buscar OS por número, título ou cliente..."
+                                        className={`${campo} pl-10`}
+                                    />
+                                    {isOsListOpen && !osSelecionada && osBusca.trim() && (
+                                        <div className="absolute z-20 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                            {buscandoOs ? (
+                                                <p className="px-4 py-3 text-sm text-gray-500 dark:text-dark-text-secondary">Buscando…</p>
+                                            ) : osOpcoes.length === 0 ? (
+                                                <p className="px-4 py-3 text-sm text-gray-500 dark:text-dark-text-secondary">Nenhuma OS encontrada.</p>
+                                            ) : (
+                                                osOpcoes.map((os) => (
+                                                    <button
+                                                        key={os.id}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setOsSelecionada(os);
+                                                            setIsOsListOpen(false);
+                                                        }}
+                                                        className={`w-full text-left px-4 py-3 border-b border-gray-100 dark:border-dark-border last:border-0 ${tema.hoverItem}`}
+                                                    >
+                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">
+                                                            {os.numeroOs ? `${os.numeroOs} · ` : ''}{os.titulo}
+                                                        </p>
+                                                        <p className="text-sm text-gray-500 dark:text-dark-text-secondary">
+                                                            {os.cliente?.nome || 'Sem cliente'} · {os.status}
+                                                            {os.obra ? ` · Obra: ${os.obra.nomeObra}` : ''}
+                                                        </p>
+                                                    </button>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <div>
+                            <label className={label}>{entrada ? 'Data da Devolução *' : 'Data da Baixa *'}</label>
+                            <input
+                                type="date"
+                                value={dataMovimentacao}
+                                onChange={(e) => setDataMovimentacao(e.target.value)}
+                                max={new Date().toISOString().split('T')[0]}
+                                className={`${campo} dark:[color-scheme:dark]`}
+                            />
+                        </div>
+
+                        <div>
+                            <label className={label}>Observações</label>
+                            <textarea
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                                rows={3}
+                                placeholder={entrada ? 'Informações adicionais sobre a devolução...' : 'Informações adicionais sobre a baixa (ex: descrição do uso...)'}
+                                className={`${campo} resize-y`}
+                            />
+                        </div>
+
+                        {estoqueInsuficiente && (
+                            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded">
+                                <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                                    ⚠️ ATENÇÃO: Quantidade solicitada maior que o estoque disponível!
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 dark:border-dark-border">
+                            <button onClick={fechar} className="btn-secondary px-6 py-3 rounded-xl">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={() => handleSubmitMovement(type)}
+                                disabled={estoqueInsuficiente}
+                                className={`px-8 py-3 bg-gradient-to-r text-white rounded-xl transition-all shadow-medium font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${tema.botao}`}
+                            >
+                                <Icone className="w-5 h-5" />
+                                {entrada ? 'Registrar Devolução' : 'Realizar Baixa'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     if (loading) {
         return (
@@ -700,382 +989,9 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                 </div>
             )}
 
-            {/* MODAL DE DEVOLUÇÃO ESTOQUE (ENTRADA) */}
-            {isEntradaModalOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
-                        {/* Header */}
-                        <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-green-50 to-emerald-50">
-                            <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-green-600 to-green-700 flex items-center justify-center shadow-medium ring-2 ring-green-100">
-                                    <ArrowDownTrayIcon className="w-7 h-7 text-white" />
-                                </div>
-                                <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900">Devolução de Estoque</h2>
-                                    <p className="text-sm text-gray-600 mt-1">Registrar entrada de material no estoque</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => { setIsEntradaModalOpen(false); resetForm(); }}
-                                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
+            {isEntradaModalOpen && renderModalMovimentacao(MovementType.Entrada)}
 
-                        <div className="p-6 space-y-5">
-                            {/* Seleção de Material */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Material/Item *
-                                </label>
-                                <div className="relative" ref={materialDropdownRef}>
-                                    <input
-                                        type="text"
-                                        value={selectedMaterial ? `${selectedMaterial.name} (SKU: ${selectedMaterial.sku})` : materialSearchTerm}
-                                        onChange={(e) => {
-                                            setMaterialSearchTerm(e.target.value);
-                                            setIsMaterialListOpen(true);
-                                            if (selectedMaterial) setSelectedMaterial(null);
-                                        }}
-                                        onFocus={() => setIsMaterialListOpen(true)}
-                                        placeholder="Digite para buscar material..."
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                    />
-                                    {isMaterialListOpen && filteredMaterials.length > 0 && (
-                                        <div className="absolute z-10 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                                            {filteredMaterials.map((material) => (
-                                                <button
-                                                    key={material.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedMaterial(material);
-                                                        setIsMaterialListOpen(false);
-                                                        setMaterialSearchTerm('');
-                                                    }}
-                                                    className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                                                >
-                                                    <p className="font-semibold text-gray-900">{material.name}</p>
-                                                    <p className="text-sm text-gray-500">SKU: {material.sku} | Estoque: {material.stock}</p>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                {selectedMaterial && (
-                                    <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                                        <p className="text-sm text-green-800">
-                                            <strong>Selecionado:</strong> {selectedMaterial.name} | Estoque atual: {selectedMaterial.stock} unidades
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Quantidade */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Quantidade *
-                                </label>
-                                <input
-                                    type="number"
-                                    value={quantity}
-                                    onChange={(e) => setQuantity(e.target.value)}
-                                    min="1"
-                                    step="1"
-                                    placeholder="Ex: 10"
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                />
-                            </div>
-
-                            {/* Motivo */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Motivo da Devolução *
-                                </label>
-                                <select
-                                    value={reason}
-                                    onChange={(e) => setReason(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                >
-                                    <option value="">Selecione o motivo</option>
-                                    {entryReasons.map((r) => (
-                                        <option key={r} value={r}>{r}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Obra Vinculada */}
-                            {reason === 'Devolução de Obra' && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Obra de Origem
-                                    </label>
-                                    <select
-                                        value={obraVinculada}
-                                        onChange={(e) => setObraVinculada(e.target.value)}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                    >
-                                        <option value="">Nenhuma obra selecionada</option>
-                                        {obras.map((obra) => (
-                                            <option key={obra.id} value={obra.id}>
-                                                {obra.nomeObra} - {obra.status}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
-                            {/* Data */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Data da Devolução *
-                                </label>
-                                <input
-                                    type="date"
-                                    value={dataMovimentacao}
-                                    onChange={(e) => setDataMovimentacao(e.target.value)}
-                                    max={new Date().toISOString().split('T')[0]}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                />
-                            </div>
-
-                            {/* Observações */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Observações
-                                </label>
-                                <textarea
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    rows={3}
-                                    placeholder="Informações adicionais sobre a devolução..."
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
-                                <button
-                                    onClick={() => { setIsEntradaModalOpen(false); resetForm(); }}
-                                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={() => handleSubmitMovement(MovementType.Entrada)}
-                                    className="px-8 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold flex items-center gap-2"
-                                >
-                                    <ArrowDownTrayIcon className="w-5 h-5" />
-                                    Registrar Devolução
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL DE BAIXA ESTOQUE (SAÍDA) */}
-            {isSaidaModalOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
-                        {/* Header */}
-                        <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-red-50">
-                            <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-600 to-orange-700 flex items-center justify-center shadow-medium ring-2 ring-orange-100">
-                                    <ArrowUpTrayIcon className="w-7 h-7 text-white" />
-                                </div>
-                                <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900">Realizar Baixa de Estoque</h2>
-                                    <p className="text-sm text-gray-600 mt-1">Registrar saída de material do estoque</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => { setIsSaidaModalOpen(false); resetForm(); }}
-                                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
-
-                        <div className="p-6 space-y-5">
-                            {/* Seleção de Material */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Material/Item *
-                                </label>
-                                <div className="relative" ref={materialDropdownRef}>
-                                    <input
-                                        type="text"
-                                        value={selectedMaterial ? `${selectedMaterial.name} (SKU: ${selectedMaterial.sku})` : materialSearchTerm}
-                                        onChange={(e) => {
-                                            setMaterialSearchTerm(e.target.value);
-                                            setIsMaterialListOpen(true);
-                                            if (selectedMaterial) setSelectedMaterial(null);
-                                        }}
-                                        onFocus={() => setIsMaterialListOpen(true)}
-                                        placeholder="Digite para buscar material..."
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                    />
-                                    {isMaterialListOpen && filteredMaterials.length > 0 && (
-                                        <div className="absolute z-10 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                                            {filteredMaterials.map((material) => (
-                                                <button
-                                                    key={material.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedMaterial(material);
-                                                        setIsMaterialListOpen(false);
-                                                        setMaterialSearchTerm('');
-                                                    }}
-                                                    className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                                                >
-                                                    <p className="font-semibold text-gray-900">{material.name}</p>
-                                                    <p className="text-sm text-gray-500">SKU: {material.sku} | Estoque: {material.stock}</p>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                {selectedMaterial && (
-                                    <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                                        <p className="text-sm text-orange-800">
-                                            <strong>Selecionado:</strong> {selectedMaterial.name} | Estoque atual: {selectedMaterial.stock} unidades
-                                        </p>
-                                        {selectedMaterial.stock <= 0 && (
-                                            <p className="text-xs text-red-600 mt-1 font-semibold">
-                                                ⚠️ Atenção: Estoque atual está zerado!
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Quantidade */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Quantidade *
-                                </label>
-                                <input
-                                    type="number"
-                                    value={quantity}
-                                    onChange={(e) => setQuantity(e.target.value)}
-                                    min="1"
-                                    max={selectedMaterial?.stock || 999999}
-                                    step="1"
-                                    placeholder="Ex: 5"
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                />
-                                {selectedMaterial && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        Disponível em estoque: {selectedMaterial.stock} unidades
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Motivo */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Motivo da Baixa *
-                                </label>
-                                <select
-                                    value={reason}
-                                    onChange={(e) => setReason(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                >
-                                    <option value="">Selecione o motivo</option>
-                                    {exitReasons.map((r) => (
-                                        <option key={r} value={r}>{r}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Obra Destino */}
-                            {(reason === 'Alocação para Obra/Projeto' || reason === 'Uso em Instalação' || reason === 'Aplicação em Serviço') && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Alocar para Obra *
-                                    </label>
-                                    <select
-                                        value={obraVinculada}
-                                        onChange={(e) => setObraVinculada(e.target.value)}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                    >
-                                        <option value="">Selecione a obra de destino</option>
-                                        {obras.filter(o => o.status === 'ANDAMENTO' || o.status === 'A_FAZER').map((obra) => (
-                                            <option key={obra.id} value={obra.id}>
-                                                {obra.nomeObra} - {obra.clienteNome} ({obra.status})
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {obras.filter(o => o.status === 'ANDAMENTO' || o.status === 'A_FAZER').length === 0 && (
-                                        <p className="text-xs text-yellow-600 mt-1">
-                                            ⚠️ Nenhuma obra em andamento ou planejada
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Data */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Data da Baixa *
-                                </label>
-                                <input
-                                    type="date"
-                                    value={dataMovimentacao}
-                                    onChange={(e) => setDataMovimentacao(e.target.value)}
-                                    max={new Date().toISOString().split('T')[0]}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                />
-                            </div>
-
-                            {/* Observações */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Observações
-                                </label>
-                                <textarea
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    rows={3}
-                                    placeholder="Informações adicionais sobre a baixa (ex: número de OS, descrição do uso...)"
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                />
-                            </div>
-
-                            {/* Alerta de estoque baixo */}
-                            {selectedMaterial && quantity && parseFloat(quantity) > selectedMaterial.stock && (
-                                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                                    <div className="flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                        </svg>
-                                        <p className="text-sm font-semibold text-red-800">
-                                            ⚠️ ATENÇÃO: Quantidade solicitada maior que o estoque disponível!
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
-                                <button
-                                    onClick={() => { setIsSaidaModalOpen(false); resetForm(); }}
-                                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={() => handleSubmitMovement(MovementType.Saida)}
-                                    disabled={!!(selectedMaterial && quantity && parseFloat(quantity) > selectedMaterial.stock)}
-                                    className="px-8 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <ArrowUpTrayIcon className="w-5 h-5" />
-                                    Realizar Baixa
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {isSaidaModalOpen && renderModalMovimentacao(MovementType.Saida)}
         </div>
     );
 };
