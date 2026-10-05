@@ -467,6 +467,8 @@ model Material {
   id            String  @id @default(uuid())
   nome          String
   sku           String  @unique
+  /// SKU alfanumérico anterior à padronização numérica (referência para etiquetas/planilhas antigas)
+  skuAnterior   String?
   tipo          String // Tipo do material
   categoria     String // MaterialEletrico, Insumo, Ferramenta
   descricao     String?
@@ -731,7 +733,9 @@ model EventoCalendario {
   valorHoraEngenharia Decimal? @db.Decimal(12, 2)
   /// Custo manual R$/h de execução neste evento. Vazio usa valorHora ou diária/8 do funcionário.
   valorHoraExecucao   Decimal? @db.Decimal(12, 2)
-  /// Evento VALIDO gerado a partir de uma previsão. A previsão original permanece.
+  /// Horários efetivos por dia civil ({ dia, inicio, fim }). Vazio: cada dia do intervalo é recortado ao ciclo 07:30–17:30.
+  horariosPorDia      Json?
+  /// Legado: cópia VALIDO de uma previsão. Confirmações novas atualizam o próprio evento.
   eventoOrigemId      String?  @unique
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -895,6 +899,7 @@ model Projeto {
   engenharia   ProjetoEngenharia? // Aba Projetos de Engenharia (Notion)
   compras          Compra[] // Compras avulsas classificadas para esta OS
   reservasMaterial ReservaMaterialProjeto[]
+  previsoesChegada PrevisaoChegadaMaterialOs[]
   iniciadoSemEstoquePor User? @relation("OsInicioSemEstoque", fields: [iniciadoSemEstoquePorId], references: [id], onDelete: SetNull)
   apontamentos         ApontamentoOs[]
   historicoReprovacoesVistoria HistoricoReprovacaoVistoria[]
@@ -1259,6 +1264,16 @@ model CompraItem {
   unidadeEmbalagem      String? // Unidade da embalagem: "cx", "pct", "fardo", etc.
   fracionamentoAplicado Boolean @default(false) // Marca se o fracionamento já foi aplicado ao estoque
   destinoEstoque        Boolean @default(true) // false = item segue destinoTipo da compra (obra/OS)
+  // Unidade comercial (km, m, cm, un...) e auditoria de conversão de unidade (ex.: cabo comprado em km -> m)
+  unidadeMedida           String?
+  unidadeOriginal         String?
+  quantidadeOriginal      Float?
+  valorUnitOriginal       Float?
+  conversaoUnidadeEm      DateTime?
+  conversaoUnidadePorId   String?
+  conversaoUnidadePorNome String?
+  /// AUTOMATICA_IMPORTACAO | REVISAO | MANUAL
+  conversaoUnidadeOrigem  String?
 
   compra     Compra      @relation(fields: [compraId], references: [id], onDelete: Cascade)
   material   Material?   @relation(fields: [materialId], references: [id])
@@ -1287,6 +1302,30 @@ model ReservaMaterialProjeto {
   @@index([projetoId])
   @@index([materialId])
   @@map("reservas_material_projeto")
+}
+
+/// Previsão de chegada de compra por linha da BOM da OS.
+/// itemKey = id da linha na aba Materiais (item do orçamento ou componente de kit expandido).
+model PrevisaoChegadaMaterialOs {
+  id              String   @id @default(uuid())
+  projetoId       String
+  itemKey         String
+  descricao       String?
+  materialId      String?
+  dataChegada     DateTime @db.Date
+  /// ORCAMENTO | PEDIDO_COMPRA | NF
+  tipoReferencia  String?
+  referencia      String?
+  definidoPorId   String?
+  definidoPorNome String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@unique([projetoId, itemKey])
+  @@index([projetoId])
+  @@map("previsoes_chegada_material_os")
 }
 
 // ============================================
