@@ -29,10 +29,15 @@ export const buscarProjetos = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    const numeroOs = /^(os[-\s#]*)?\d+$/i.test(q) ? Number(q.replace(/\D/g, '')) : null;
+
     const projetos = await prisma.projeto.findMany({
       where: {
         status: { not: 'CANCELADO' },
         OR: [
+          ...(numeroOs && Number.isSafeInteger(numeroOs)
+            ? [{ orcamento: { numeroSequencial: numeroOs } }]
+            : []),
           { titulo: { contains: q, mode: 'insensitive' } },
           { descricao: { contains: q, mode: 'insensitive' } },
           { cliente: { nome: { contains: q, mode: 'insensitive' } } },
@@ -50,14 +55,11 @@ export const buscarProjetos = async (req: Request, res: Response): Promise<void>
       orderBy: { updatedAt: 'desc' },
     });
 
-    const qLower = q.toLowerCase();
     const filtrados = projetos
-      .filter((p) => {
-        const osNum = p.orcamento?.numeroSequencial
-          ? `os-${p.orcamento.numeroSequencial}`.toLowerCase()
-          : '';
-        if (osNum.includes(qLower.replace(/\s/g, ''))) return true;
-        return true;
+      .sort((a, b) => {
+        const aExato = numeroOs !== null && a.orcamento?.numeroSequencial === numeroOs ? 0 : 1;
+        const bExato = numeroOs !== null && b.orcamento?.numeroSequencial === numeroOs ? 0 : 1;
+        return aExato - bExato;
       })
       .slice(0, limit);
 
