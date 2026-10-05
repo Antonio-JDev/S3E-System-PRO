@@ -2686,6 +2686,19 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             return;
         }
 
+        if (!formState.previsaoInicio || !formState.previsaoTermino) {
+            toast.error('Cronograma obrigatório', {
+                description: 'Informe a previsão de início e a previsão de término'
+            });
+            return;
+        }
+        if (formState.previsaoTermino < formState.previsaoInicio) {
+            toast.error('Previsão de término inválida', {
+                description: 'A data final deve ser igual ou posterior à previsão de início'
+            });
+            return;
+        }
+
         try {
             setSalvando(true);
 
@@ -3172,10 +3185,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                Previsão de Início
+                                Previsão de Início *
                             </label>
                             <input
                                 type="date"
+                                required
                                 value={formState.previsaoInicio}
                                 onChange={(e) => setFormState(prev => ({ ...prev, previsaoInicio: e.target.value }))}
                                 className="input-field"
@@ -3184,10 +3198,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                Previsão de Término
+                                Previsão de Término *
                             </label>
                             <input
                                 type="date"
+                                required
                                 value={formState.previsaoTermino}
                                 onChange={(e) => setFormState(prev => ({ ...prev, previsaoTermino: e.target.value }))}
                                 className="input-field"

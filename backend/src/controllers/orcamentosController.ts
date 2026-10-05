@@ -345,6 +345,27 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
       contatoLeadId: contatoLeadIdBody,
     } = req.body;
 
+    if (!previsaoInicio || !previsaoTermino) {
+      res.status(400).json({
+        success: false,
+        error: 'Informe a previsão de início e a previsão de término do cronograma',
+      });
+      return;
+    }
+    const inicioCronograma = new Date(previsaoInicio);
+    const fimCronograma = new Date(previsaoTermino);
+    if (
+      Number.isNaN(inicioCronograma.getTime()) ||
+      Number.isNaN(fimCronograma.getTime()) ||
+      fimCronograma < inicioCronograma
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'A previsão de término deve ser igual ou posterior à previsão de início',
+      });
+      return;
+    }
+
     let contatoLeadIdFk: string | null = null;
     if (contatoLeadIdBody != null && String(contatoLeadIdBody).trim() !== '') {
       const idLead = String(contatoLeadIdBody).trim();
@@ -1292,6 +1313,31 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       res.status(404).json({
         success: false,
         error: 'Orçamento não encontrado'
+      });
+      return;
+    }
+
+    const inicioCronograma = previsaoInicio
+      ? new Date(previsaoInicio)
+      : orcamentoExistente.previsaoInicio;
+    const fimCronograma = previsaoTermino
+      ? new Date(previsaoTermino)
+      : orcamentoExistente.previsaoTermino;
+    if (!inicioCronograma || !fimCronograma) {
+      res.status(400).json({
+        success: false,
+        error: 'Informe a previsão de início e a previsão de término do cronograma',
+      });
+      return;
+    }
+    if (
+      Number.isNaN(inicioCronograma.getTime()) ||
+      Number.isNaN(fimCronograma.getTime()) ||
+      fimCronograma < inicioCronograma
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'A previsão de término deve ser igual ou posterior à previsão de início',
       });
       return;
     }
