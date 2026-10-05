@@ -16,7 +16,7 @@ router.get('/estatisticas', DashboardController.getEstatisticas);
 
 /**
  * @route GET /api/dashboard/cards-metricas
- * @desc Cards do dashboard com valores e tendências reais
+ * @desc Cards do dashboard com valores e tendências do período (?periodo=monthly|bimonthly|quarterly|semester|annual)
  */
 router.get('/cards-metricas', DashboardController.getCardsMetricas);
 
@@ -49,7 +49,7 @@ router.get('/evolucao-obras', DashboardController.getEvolucaoObras);
 
 /**
  * @route GET /api/dashboard/graficos-executivo
- * @desc Evoluções (orçamentos, OS, obras, vendas), comparativo e categorias de venda
+ * @desc Evoluções (orçamentos, OS, vendas), comparativo (somente admin/desenvolvedor)
  * @access Authenticated
  */
 router.get('/graficos-executivo', DashboardController.getGraficosExecutivo);

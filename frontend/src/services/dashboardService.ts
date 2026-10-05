@@ -95,10 +95,12 @@ export interface MetricaCardComTendencia {
     fonte?: string;
 }
 
+export type PeriodoDashboard = 'monthly' | 'bimonthly' | 'quarterly' | 'semester' | 'annual';
+
 export interface DashboardCardsMetricas {
-    obrasAtivas: MetricaCardComTendencia;
+    periodo?: PeriodoDashboard;
+    orcamentosAprovados: MetricaCardComTendencia;
     osEmAndamento: MetricaCardComTendencia;
-    equipesAtivas: MetricaCardComTendencia;
     quadrosProduzidos: MetricaCardComTendencia;
     clientesAtendidos: MetricaCardComTendencia;
 }
@@ -107,13 +109,13 @@ class DashboardService {
     /**
      * Carrega todas as estatísticas do dashboard
      */
-    async getCardsMetricas(): Promise<{
+    async getCardsMetricas(periodo: PeriodoDashboard = 'monthly'): Promise<{
         success: boolean;
         data?: DashboardCardsMetricas;
         error?: string;
     }> {
         try {
-            const response = await axiosApiService.get('/api/dashboard/cards-metricas');
+            const response = await axiosApiService.get(`/api/dashboard/cards-metricas?periodo=${periodo}`);
             if (response.success && response.data) {
                 return { success: true, data: response.data as DashboardCardsMetricas };
             }
@@ -126,7 +128,7 @@ class DashboardService {
 
     async getDetalheKpis(params: {
         grafico: string;
-        periodo?: string;
+        periodo?: PeriodoDashboard;
         bucket?: string;
     }): Promise<{ success: boolean; data?: unknown; error?: string }> {
         try {
@@ -377,18 +379,16 @@ class DashboardService {
     }
 
     /**
-     * Gráficos executivo: evoluções, comparativo mensal, categorias de venda (forma de pagamento)
+     * Gráficos executivo: evoluções e comparativo por período
      */
-    async getGraficosExecutivo(periodo: 'monthly' | 'semester' | 'annual' = 'monthly'): Promise<{
+    async getGraficosExecutivo(periodo: PeriodoDashboard = 'monthly'): Promise<{
         success: boolean;
         data?: {
             periodo: string;
             evolucaoOrcamentos: any[];
             evolucaoOrdensServico: any[];
-            evolucaoObrasKanban: any[];
             evolucaoPedidosVendas: any[];
             comparativoMensal: any[];
-            categoriasVendas: { name: string; value: number }[];
         };
         error?: string;
     }> {

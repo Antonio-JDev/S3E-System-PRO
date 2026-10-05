@@ -15,16 +15,14 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell,
-  ComposedChart
+  Cell
 } from 'recharts';
 import {
   TrendingUp,
   TrendingDown,
-  Users,
   Package,
   AlertTriangle,
-  Building2,
+  CheckCircle2,
   Zap,
   Download,
   FileText,
@@ -49,11 +47,13 @@ import {
   dashboardService,
   type DashboardCardsMetricas,
   type DashboardCompleto,
+  type PeriodoDashboard,
 } from '../services/dashboardService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { CHART_ACCENT, CHART_SERIES_COLORS, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 import { useAuth } from '../hooks/useAuth';
+import { isAdmin, isDeveloper } from '../utils/permissions';
 
 interface DashboardModernoProps {
   toggleSidebar: () => void;
@@ -70,21 +70,26 @@ interface MetricCard {
   hint?: string;
 }
 
+const PERIODO_OPCOES: Array<{ value: PeriodoDashboard; label: string }> = [
+  { value: 'monthly', label: 'Mensal' },
+  { value: 'bimonthly', label: 'Bimestral' },
+  { value: 'quarterly', label: 'Trimestral' },
+  { value: 'semester', label: 'Semestral' },
+  { value: 'annual', label: 'Anual' },
+];
+
 const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNavigate }) => {
   const [dashboardData, setDashboardData] = useState<DashboardCompleto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState<'monthly' | 'semester' | 'annual'>('monthly');
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodoDashboard>('monthly');
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [quadrosData, setQuadrosData] = useState<any[]>([]);
   const [graficosExec, setGraficosExec] = useState<{
     evolucaoOrcamentos: any[];
     evolucaoOrdensServico: any[];
-    evolucaoObrasKanban: any[];
     evolucaoPedidosVendas: any[];
     comparativoMensal: any[];
-    categoriasVendas: { name: string; value: number }[];
   } | null>(null);
-  const [pieActiveIndex, setPieActiveIndex] = useState(0);
   const [piePedidosActiveIndex, setPiePedidosActiveIndex] = useState(0);
   const [materiaisCriticos, setMateriaisCriticos] = useState<any[]>([]);
   const [exportando, setExportando] = useState(false);
@@ -112,11 +117,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   // Pegar usuário logado
   const { user } = useAuth();
   const userName = user?.name?.split(' ')[0] || 'Usuário';
+  const podeVerComparativo = isAdmin(user) || isDeveloper(user);
 
   // Carregar dados do dashboard
-  const loadCardsMetricas = async () => {
+  const loadCardsMetricas = async (periodo: PeriodoDashboard) => {
     try {
-      const result = await dashboardService.getCardsMetricas();
+      const result = await dashboardService.getCardsMetricas(periodo);
       if (result.success && result.data) {
         setCardsMetricas(result.data);
       }
@@ -131,11 +137,9 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     setKpiModalBucket(bucket || '');
     setKpiModalData(null);
     try {
-      const periodoApi =
-        selectedPeriod === 'annual' ? 'annual' : selectedPeriod === 'semester' ? 'semester' : 'monthly';
       const result = await dashboardService.getDetalheKpis({
         grafico,
-        periodo: periodoApi,
+        periodo: selectedPeriod,
         bucket,
       });
       if (result.success && result.data) {
@@ -173,17 +177,15 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     }
   };
 
-  const loadGraficosExec = async (periodo: 'monthly' | 'semester' | 'annual') => {
+  const loadGraficosExec = async (periodo: PeriodoDashboard) => {
     try {
       const result = await dashboardService.getGraficosExecutivo(periodo);
       if (result.success && result.data) {
         setGraficosExec({
           evolucaoOrcamentos: result.data.evolucaoOrcamentos || [],
           evolucaoOrdensServico: result.data.evolucaoOrdensServico || [],
-          evolucaoObrasKanban: result.data.evolucaoObrasKanban || [],
           evolucaoPedidosVendas: result.data.evolucaoPedidosVendas || [],
-          comparativoMensal: result.data.comparativoMensal || [],
-          categoriasVendas: result.data.categoriasVendas || []
+          comparativoMensal: result.data.comparativoMensal || []
         });
       }
     } catch (err) {
@@ -262,8 +264,8 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         
         // Estatísticas
         estatisticas: {
-          obrasAtivas: dashboardData?.estatisticas?.projetos?.ativos || 0,
-          equipesAtivas: dashboardData?.estatisticas?.equipes?.ativas || 0,
+          orcamentosAprovadosMes: cardsMetricas?.orcamentosAprovados?.valor ?? 0,
+          osEmAndamento: cardsMetricas?.osEmAndamento?.valor ?? 0,
           quadrosProduzidos: quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0),
           clientesAtivos: dashboardData?.estatisticas?.clientes?.ativos || 0,
           fornecedores: dashboardData?.estatisticas?.fornecedores?.ativos || 0,
@@ -271,7 +273,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           materiaisBaixo: dashboardData?.estatisticas?.estoque?.materiaisBaixo || 0,
         },
         
-        // Evolução de obras
         graficosExecutivo: graficosExec,
         
         producaoQuadros: {
@@ -710,12 +711,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             <h2>📊 Métricas Principais</h2>
             <div class="metrics">
               <div class="metric-card">
-                <div class="value">${dashboardData?.estatisticas?.projetos?.ativos || 0}</div>
-                <div class="label">Obras Ativas</div>
+                <div class="value">${cardsMetricas?.orcamentosAprovados?.valor ?? 0}</div>
+                <div class="label">Orçamentos Aprovados (mês)</div>
               </div>
               <div class="metric-card">
-                <div class="value">${dashboardData?.estatisticas?.equipes?.ativas || 0}</div>
-                <div class="label">Equipes Ativas</div>
+                <div class="value">${cardsMetricas?.osEmAndamento?.valor ?? 0}</div>
+                <div class="label">OS em Andamento</div>
               </div>
               <div class="metric-card">
                 <div class="value">${quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0)}</div>
@@ -728,16 +729,15 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             </div>
           </div>
 
+          ${podeVerComparativo ? `
           <div class="section">
-            <h2>📈 Comparativo (${selectedPeriod === 'monthly' ? 'Mensal' : selectedPeriod === 'semester' ? 'Semestral' : 'Anual'})</h2>
+            <h2>📈 Comparativo (${PERIODO_OPCOES.find((p) => p.value === selectedPeriod)?.label ?? ''})</h2>
             <table>
               <thead>
                 <tr>
                   <th>Período</th>
                   <th>Orçamentos</th>
-                  <th>OS</th>
-                  <th>Obras</th>
-                  <th>Pedidos</th>
+                  <th>Pedidos de venda</th>
                 </tr>
               </thead>
               <tbody>
@@ -745,14 +745,13 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                   <tr>
                     <td>${item.name}</td>
                     <td>${item.orcamentos}</td>
-                    <td>${item.ordensServico}</td>
-                    <td>${item.obras}</td>
                     <td>${item.pedidosVendas}</td>
                   </tr>
                 `).join('')}
               </tbody>
             </table>
           </div>
+          ` : ''}
 
           <div class="section">
             <h2>🔧 Produção de Quadros (referência mensal)</h2>
@@ -835,14 +834,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
   useEffect(() => {
     loadDashboardData();
-    loadCardsMetricas();
     loadQuadrosData('monthly');
     loadMateriaisCriticos();
     loadFornecedores();
 
     const interval = setInterval(() => {
       loadDashboardData();
-      loadCardsMetricas();
       loadMateriaisCriticos();
     }, 5 * 60 * 1000);
 
@@ -852,6 +849,14 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
   useEffect(() => {
     loadGraficosExec(selectedPeriod);
+    loadCardsMetricas(selectedPeriod);
+
+    const interval = setInterval(() => {
+      loadCardsMetricas(selectedPeriod);
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriod]);
 
   const PIE_COLORS = [...CHART_SERIES_COLORS];
@@ -883,16 +888,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   // Métricas principais — valores e tendências da API /api/dashboard/cards-metricas
   const metricsData: MetricCard[] = [
     {
-      title: 'Obras Ativas',
-      value: (
-        cardsMetricas?.obrasAtivas.valor ??
-        dashboardData?.estatisticas?.projetos?.ativos ??
-        0
-      ).toString(),
-      change: cardsMetricas?.obrasAtivas.tendencia ?? 0,
-      icon: <Building2 className="w-5 h-5" />,
-      trend: tendenciaDir(cardsMetricas?.obrasAtivas.tendencia ?? 0),
-      hint: 'OS com status Em Execução',
+      title: 'Orçamentos aprovados',
+      value: (cardsMetricas?.orcamentosAprovados?.valor ?? 0).toString(),
+      change: cardsMetricas?.orcamentosAprovados?.tendencia ?? 0,
+      icon: <CheckCircle2 className="w-5 h-5" />,
+      trend: tendenciaDir(cardsMetricas?.orcamentosAprovados?.tendencia ?? 0),
+      hint: cardsMetricas?.orcamentosAprovados?.descricao ?? 'Orçamentos aprovados no período',
     },
     {
       title: 'OS em andamento',
@@ -901,17 +902,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       icon: <ClipboardList className="w-5 h-5" />,
       trend: tendenciaDir(cardsMetricas?.osEmAndamento.tendencia ?? 0),
       hint: cardsMetricas?.osEmAndamento.descricao ?? 'Progresso entre 1% e 99% (barra da OS)',
-    },
-    {
-      title: 'Equipes Ativas',
-      value: (
-        cardsMetricas?.equipesAtivas.valor ??
-        dashboardData?.estatisticas?.equipes?.ativas ??
-        0
-      ).toString(),
-      change: cardsMetricas?.equipesAtivas.tendencia ?? 0,
-      icon: <Users className="w-5 h-5" />,
-      trend: tendenciaDir(cardsMetricas?.equipesAtivas.tendencia ?? 0),
     },
     {
       title: 'Quadros produzidos',
@@ -924,15 +914,11 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       trend: tendenciaDir(cardsMetricas?.quadrosProduzidos.tendencia ?? 0),
       hint:
         cardsMetricas?.quadrosProduzidos.fonte ??
-        'OS criadas no mês com Quadro/Painel no título',
+        'OS do tipo Quadros e Painéis em execução ou concluídas',
     },
     {
       title: 'Clientes atendidos',
-      value: (
-        cardsMetricas?.clientesAtendidos.valor ??
-        dashboardData?.estatisticas?.clientes?.ativos ??
-        0
-      ).toString(),
+      value: (cardsMetricas?.clientesAtendidos.valor ?? 0).toString(),
       change: cardsMetricas?.clientesAtendidos.tendencia ?? 0,
       icon: <Star className="w-5 h-5" />,
       trend: tendenciaDir(cardsMetricas?.clientesAtendidos.tendencia ?? 0),
@@ -985,8 +971,27 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         </div>
       </div>
 
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-2 text-gray-700 dark:text-dark-text-secondary">
+          <LayoutGrid className="w-5 h-5 text-brand-blue" />
+          <span className="font-medium">Período dos cards e gráficos</span>
+        </div>
+        <Select value={selectedPeriod} onValueChange={(v: PeriodoDashboard) => setSelectedPeriod(v)}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PERIODO_OPCOES.map((opcao) => (
+              <SelectItem key={opcao.value} value={opcao.value}>
+                {opcao.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Métricas principais */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6 mb-8 items-stretch">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8 items-stretch">
         {metricsData.map((metric, index) => (
           <Card key={index} className="hover:shadow-lg transition-shadow h-full">
             <CardContent className="p-6 h-full flex flex-col">
@@ -1115,25 +1120,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           )}
         </DialogContent>
       </Dialog>
-
-      {/* Painel analítico — período global */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-2 text-gray-700 dark:text-dark-text-secondary">
-          <LayoutGrid className="w-5 h-5 text-brand-blue" />
-          <span className="font-medium">Período dos gráficos</span>
-        </div>
-        <Select value={selectedPeriod} onValueChange={(v: 'monthly' | 'semester' | 'annual') => setSelectedPeriod(v)}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="monthly">Mensal (ano atual)</SelectItem>
-            <SelectItem value="semester">Semestral</SelectItem>
-            <SelectItem value="annual">Anual</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <Card>
           <CardHeader className="pb-2">
@@ -1224,7 +1210,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     position="top"
                     fontSize={10}
                     fill={isDark ? '#E2E8F0' : '#475569'}
-                    formatter={(v: number) => (v > 0 ? v : '')}
+                    formatter={(v: React.ReactNode) => (Number(v) > 0 ? v : '')}
                   />
                 </Line>
                 <Line type="monotone" dataKey="comProgresso" name="Com progresso (1–99%)" stroke={CHART_ACCENT} strokeWidth={2} dot={{ r: 3, fill: CHART_ACCENT }}>
@@ -1234,7 +1220,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     offset={12}
                     fontSize={10}
                     fill={isDark ? '#E2E8F0' : '#475569'}
-                    formatter={(v: number) => (v > 0 ? v : '')}
+                    formatter={(v: React.ReactNode) => (Number(v) > 0 ? v : '')}
                   />
                 </Line>
                 <Line type="monotone" dataKey="aguardando" name="Aguardando (0%)" stroke="#10B981" strokeWidth={2} dot={{ r: 3, fill: '#10B981' }}>
@@ -1244,7 +1230,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     offset={24}
                     fontSize={10}
                     fill={isDark ? '#E2E8F0' : '#475569'}
-                    formatter={(v: number) => (v > 0 ? v : '')}
+                    formatter={(v: React.ReactNode) => (Number(v) > 0 ? v : '')}
                   />
                 </Line>
               </LineChart>
@@ -1252,197 +1238,37 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <CardTitle className="text-lg">Evolução de obras (Kanban)</CardTitle>
-                <CardDescription>Obras de campo por status (cadastro no período)</CardDescription>
-              </div>
-              <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1 text-xs" disabled title="Em breve">
-                <Table2 className="w-3.5 h-3.5" />
-                KPIs
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={graficosExec?.evolucaoObrasKanban ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
-                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
-                <YAxis stroke={ct.axis} fontSize={11} allowDecimals={false} />
-                <Tooltip
-                  cursor={{ stroke: ct.axis, strokeWidth: 1, strokeDasharray: '4 4' }}
-                  content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null;
-                    return (
-                      <div
-                        className="rounded-xl px-3 py-2.5 shadow-lg min-w-[200px]"
-                        style={chartTooltipStyle(!!isDark)}
-                      >
-                        <p className="font-bold text-sm mb-2 pb-1.5 border-b" style={{ borderColor: ct.grid }}>
-                          {label}
-                        </p>
-                        <ul className="space-y-1.5 text-xs">
-                          {payload.map((p: any) => (
-                            <li key={String(p.dataKey)} className="flex items-center justify-between gap-4">
-                              <span className="flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
-                                <span className="opacity-90">{p.name}</span>
-                              </span>
-                              <span className="font-semibold tabular-nums">{p.value}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Area type="monotone" dataKey="backlog" name="Backlog" stroke="#94A3B8" fill="#94A3B833" strokeWidth={2} />
-                <Area type="monotone" dataKey="aFazer" name="A fazer" stroke="#F59E0B" fill="#F59E0B33" strokeWidth={2} />
-                <Area type="monotone" dataKey="andamento" name="Andamento" stroke={CHART_ACCENT} fill={`${CHART_ACCENT}33`} strokeWidth={2} />
-                <Area type="monotone" dataKey="concluidas" name="Concluídas" stroke="#10B981" fill="#10B98133" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Evolução de pedidos de venda</CardTitle>
-            <CardDescription>Quantidade e valor total por período — barras agrupadas</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={graficosExec?.evolucaoPedidosVendas ?? []} barGap={4} barCategoryGap="18%">
-                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
-                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
-                <YAxis
-                  yAxisId="left"
-                  stroke={ct.axis}
-                  fontSize={11}
-                  allowDecimals={false}
-                  label={{ value: 'Qtd. pedidos', angle: -90, position: 'insideLeft', fill: ct.axis, fontSize: 10 }}
-                />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  stroke={ct.axis}
-                  fontSize={11}
-                  tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
-                  label={{ value: 'Valor', angle: 90, position: 'insideRight', fill: ct.axis, fontSize: 10 }}
-                />
-                <Tooltip
-                  contentStyle={chartTooltipStyle(!!isDark)}
-                  formatter={(value: number, name: string) =>
-                    name === 'Valor (R$)' ? [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), name] : [value, name]
-                  }
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar yAxisId="left" dataKey="quantidade" name="Pedidos (qtd.)" fill="#0EA5E9" radius={[6, 6, 0, 0]} maxBarSize={40} />
-                <Bar yAxisId="right" dataKey="valor" name="Valor (R$)" fill="#A855F7" radius={[6, 6, 0, 0]} maxBarSize={40} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
       </div>
 
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Comparativo — volume por período</CardTitle>
-          <CardDescription>Orçamentos, OS (projetos), obras e pedidos criados no intervalo</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={320}>
-            <BarChart data={graficosExec?.comparativoMensal ?? []} barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
-              <XAxis dataKey="name" stroke={ct.axis} />
-              <YAxis stroke={ct.axis} allowDecimals={false} />
-              <Tooltip
-                contentStyle={chartTooltipStyle(!!isDark)}
-              />
-              <Legend />
-              <Bar dataKey="orcamentos" name="Orçamentos" fill={CHART_ACCENT} radius={[4, 4, 0, 0]} />
-              <Bar dataKey="ordensServico" name="Ordens de serviço" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="obras" name="Obras" fill="#10B981" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="pedidosVendas" name="Pedidos de venda" fill="#F59E0B" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Categorias de venda</CardTitle>
-            <CardDescription>Distribuição por forma de pagamento (pedidos no período)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row items-center gap-6">
+        {podeVerComparativo && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Comparativo — orçamentos x pedidos de venda</CardTitle>
+              <CardDescription>Orçamentos e pedidos de venda criados no intervalo</CardDescription>
+            </CardHeader>
+            <CardContent>
               <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={
-                      graficosExec?.categoriasVendas?.length
-                        ? graficosExec.categoriasVendas
-                        : [{ name: 'Sem dados', value: 1 }]
-                    }
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={56}
-                    outerRadius={96}
-                    paddingAngle={2}
-                    dataKey="value"
-                    nameKey="name"
-                    onMouseEnter={(_, i) => setPieActiveIndex(i)}
-                  >
-                    {(graficosExec?.categoriasVendas?.length
-                      ? graficosExec.categoriasVendas
-                      : [{ name: 'Sem dados', value: 1 }]
-                    ).map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={PIE_COLORS[i % PIE_COLORS.length]}
-                        stroke={isDark ? ct.cardBg : '#fff'}
-                        strokeWidth={pieActiveIndex === i ? 3 : 1}
-                        style={{ cursor: 'pointer', opacity: pieActiveIndex === i ? 1 : 0.88 }}
-                      />
-                    ))}
-                  </Pie>
+                <BarChart data={graficosExec?.comparativoMensal ?? []} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                  <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
+                  <YAxis stroke={ct.axis} fontSize={11} allowDecimals={false} />
                   <Tooltip
                     contentStyle={chartTooltipStyle(!!isDark)}
                   />
-                </PieChart>
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="orcamentos" name="Orçamentos" fill={CHART_ACCENT} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="pedidosVendas" name="Pedidos de venda" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
-              <div className="flex-1 space-y-2 w-full">
-                <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Destaque (interativo)</p>
-                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                  Passe o mouse ou clique nas fatias para destacar. A legenda reflete a forma de pagamento cadastrada no pedido.
-                </p>
-                <div className="rounded-lg bg-gray-50 dark:bg-slate-800/80 p-3 text-sm">
-                  {graficosExec?.categoriasVendas?.[pieActiveIndex] ? (
-                    <>
-                      <p className="font-medium text-gray-900 dark:text-dark-text">
-                        {graficosExec.categoriasVendas[pieActiveIndex].name}
-                      </p>
-                      <p className="text-brand-blue font-bold text-lg">
-                        {graficosExec.categoriasVendas[pieActiveIndex].value} pedido(s)
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-gray-500">Sem vendas no período selecionado.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card>
+        <Card className={podeVerComparativo ? undefined : 'lg:col-span-2'}>
           <CardHeader>
             <CardTitle>Pedidos de venda por fatia (pizza)</CardTitle>
-            <CardDescription>Distribuição da quantidade de pedidos entre os períodos do gráfico de evolução — destaque interativo</CardDescription>
+            <CardDescription>Distribuição da quantidade de pedidos entre os períodos — destaque interativo</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col md:flex-row items-center gap-6">

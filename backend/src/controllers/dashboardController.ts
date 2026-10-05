@@ -1,15 +1,21 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import type { AuthRequest } from '../middlewares/auth';
 import {
   OS_STATUS_LABEL,
   agregarOsBucket,
   buildProgressoMapForProjetos,
   calcularTendenciaPct,
   classificarOsPorProgresso,
-  contarClientesComOrcamentoAprovado,
   contarOsEmAndamento,
-  contarQuadrosProduzidosMesAtual,
+  contarQuadrosProduzidosEntre,
 } from '../services/dashboardMetrics.service';
+import {
+  ROTULO_PERIODO_ATUAL,
+  bucketsGraficoDashboard,
+  parsePeriodoDashboard,
+  periodoAtualEAnterior,
+} from '../utils/dashboardPeriodo.util';
 
 function inRange(d: Date, b: { start: Date; end: Date }): boolean {
   const t = new Date(d).getTime();
@@ -98,80 +104,50 @@ export class DashboardController {
   }
 
   /**
-   * Métricas dos cards do dashboard + tendências reais (mês atual vs mês anterior).
-   * GET /api/dashboard/cards-metricas
+   * Métricas dos cards do dashboard + tendências (período atual vs período anterior).
+   * GET /api/dashboard/cards-metricas?periodo=monthly|bimonthly|quarterly|semester|annual
    */
   static async getCardsMetricas(req: Request, res: Response): Promise<void> {
     try {
-      const agora = new Date();
-      const mesAtualIni = new Date(agora.getFullYear(), agora.getMonth(), 1);
-      const mesAnteriorIni = new Date(agora.getFullYear(), agora.getMonth() - 1, 1);
-      const mesAnteriorFim = new Date(agora.getFullYear(), agora.getMonth(), 0, 23, 59, 59, 999);
+      const periodo = parsePeriodoDashboard(req.query.periodo);
+      const { atual, anterior } = periodoAtualEAnterior(periodo, new Date());
+      const rotulo = ROTULO_PERIODO_ATUAL[periodo];
+
+      const whereOrcamentoAprovadoEntre = (gte: Date, lte: Date) => ({
+        OR: [
+          { aprovedAt: { gte, lte } },
+          {
+            aprovedAt: null,
+            status: { contains: 'aprovado', mode: 'insensitive' as const },
+            updatedAt: { gte, lte },
+          },
+        ],
+      });
 
       const [
-        obrasAtivas,
-        obrasAtivasMesAnterior,
-        equipesAtivas,
-        equipesAtivasMesAnterior,
+        orcamentosAprovadosAtual,
+        orcamentosAprovadosAnterior,
         osEmAndamento,
-        clientesAtendidos,
-        clientesAprovadosMesAtual,
-        clientesAprovadosMesAnterior,
-        quadrosMesAtual,
-        quadrosMesAnterior,
-        osAtualizadasMesAtual,
-        osAtualizadasMesAnterior,
+        clientesAprovadosAtual,
+        clientesAprovadosAnterior,
+        quadrosAtual,
+        quadrosAnterior,
       ] = await Promise.all([
-        prisma.projeto.count({ where: { status: 'EXECUCAO' } }),
-        prisma.projeto.count({
-          where: {
-            status: 'EXECUCAO',
-            updatedAt: { lte: mesAnteriorFim },
-          },
-        }),
-        prisma.equipe.count({ where: { ativa: true } }),
-        prisma.equipe.count({
-          where: { ativa: true, updatedAt: { lte: mesAnteriorFim } },
-        }),
+        prisma.orcamento.count({ where: whereOrcamentoAprovadoEntre(atual.start, atual.end) }),
+        prisma.orcamento.count({ where: whereOrcamentoAprovadoEntre(anterior.start, anterior.end) }),
         contarOsEmAndamento(),
-        contarClientesComOrcamentoAprovado(),
         prisma.orcamento.findMany({
-          where: {
-            status: { contains: 'aprovado', mode: 'insensitive' },
-            updatedAt: { gte: mesAtualIni },
-          },
+          where: whereOrcamentoAprovadoEntre(atual.start, atual.end),
           select: { clienteId: true },
           distinct: ['clienteId'],
         }),
         prisma.orcamento.findMany({
-          where: {
-            status: { contains: 'aprovado', mode: 'insensitive' },
-            updatedAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
-          },
+          where: whereOrcamentoAprovadoEntre(anterior.start, anterior.end),
           select: { clienteId: true },
           distinct: ['clienteId'],
         }),
-        contarQuadrosProduzidosMesAtual(),
-        prisma.projeto.count({
-          where: {
-            createdAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
-            status: { in: ['EXECUCAO', 'CONCLUIDO'] },
-            OR: [
-              { titulo: { contains: 'Quadro', mode: 'insensitive' } },
-              { titulo: { contains: 'Painel', mode: 'insensitive' } },
-              { descricao: { contains: 'Quadro', mode: 'insensitive' } },
-            ],
-          },
-        }),
-        prisma.projeto.count({
-          where: { status: { not: 'CANCELADO' }, updatedAt: { gte: mesAtualIni } },
-        }),
-        prisma.projeto.count({
-          where: {
-            status: { not: 'CANCELADO' },
-            updatedAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
-          },
-        }),
+        contarQuadrosProduzidosEntre(atual.start, atual.end),
+        contarQuadrosProduzidosEntre(anterior.start, anterior.end),
       ]);
 
       const projetosAtivos = await prisma.projeto.findMany({
@@ -179,44 +155,37 @@ export class DashboardController {
         select: { id: true, status: true, updatedAt: true },
       });
       const progressoMap = await buildProgressoMapForProjetos(projetosAtivos);
-      const osComProgressoMesAnterior = projetosAtivos.filter((p) => {
-        if (p.updatedAt > mesAnteriorFim) return false;
+      const osComProgressoAnterior = projetosAtivos.filter((p) => {
+        if (p.updatedAt > anterior.end) return false;
         const pct = progressoMap[p.id]?.percentual ?? 0;
         return classificarOsPorProgresso(p.status, pct) === 'comProgresso';
       }).length;
 
       const data = {
-        obrasAtivas: {
-          valor: obrasAtivas,
-          tendencia: calcularTendenciaPct(obrasAtivas, obrasAtivasMesAnterior),
+        periodo,
+        orcamentosAprovados: {
+          valor: orcamentosAprovadosAtual,
+          tendencia: calcularTendenciaPct(orcamentosAprovadosAtual, orcamentosAprovadosAnterior),
+          descricao: `Orçamentos aprovados ${rotulo}`,
         },
         osEmAndamento: {
           valor: osEmAndamento,
-          tendencia: calcularTendenciaPct(osEmAndamento, osComProgressoMesAnterior),
+          tendencia: calcularTendenciaPct(osEmAndamento, osComProgressoAnterior),
           descricao:
             'OS com barra de progresso entre 1% e 99% (mesma regra da página Ordem de Serviços)',
         },
-        equipesAtivas: {
-          valor: equipesAtivas,
-          tendencia: calcularTendenciaPct(equipesAtivas, equipesAtivasMesAnterior),
-        },
         quadrosProduzidos: {
-          valor: quadrosMesAtual,
-          tendencia: calcularTendenciaPct(quadrosMesAtual, quadrosMesAnterior),
-          fonte:
-            'OS (projetos) criadas no mês com status Em Execução ou Concluído e título/descrição contendo "Quadro" ou "Painel"',
+          valor: quadrosAtual,
+          tendencia: calcularTendenciaPct(quadrosAtual, quadrosAnterior),
+          fonte: `OS do tipo Quadros e Painéis em execução ou concluídas, criadas ${rotulo}`,
         },
         clientesAtendidos: {
-          valor: clientesAtendidos,
+          valor: clientesAprovadosAtual.length,
           tendencia: calcularTendenciaPct(
-            clientesAprovadosMesAtual.length,
-            clientesAprovadosMesAnterior.length,
+            clientesAprovadosAtual.length,
+            clientesAprovadosAnterior.length,
           ),
-          descricao: 'Clientes distintos com pelo menos um orçamento aprovado',
-        },
-        osAtividadeMensal: {
-          mesAtual: osAtualizadasMesAtual,
-          mesAnterior: osAtualizadasMesAnterior,
+          descricao: `Clientes distintos com orçamento aprovado ${rotulo}`,
         },
       };
 
@@ -233,16 +202,13 @@ export class DashboardController {
 
   /**
    * Detalhamento dos KPIs de um gráfico (modal).
-   * GET /api/dashboard/detalhe-kpis?grafico=ordens-servico|orcamentos|obras-kanban|pedidos-vendas&periodo=monthly&bucket=Mai
+   * GET /api/dashboard/detalhe-kpis?grafico=ordens-servico&periodo=monthly&bucket=Mai
    */
   static async getDetalheKpis(req: Request, res: Response): Promise<void> {
     try {
       const grafico = String(req.query.grafico || 'ordens-servico');
-      const periodo = String(req.query.periodo || 'monthly');
+      const periodo = parsePeriodoDashboard(req.query.periodo);
       const bucket = String(req.query.bucket || '').trim();
-      const hoje = new Date();
-      const anoAtual = hoje.getFullYear();
-      const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
       if (grafico === 'ordens-servico') {
         const projetos = await prisma.projeto.findMany({
@@ -259,17 +225,9 @@ export class DashboardController {
 
         let filtrados = projetos;
         if (bucket) {
-          if (periodo === 'monthly') {
-            const mesIdx = mesesNomes.indexOf(bucket);
-            if (mesIdx >= 0) {
-              filtrados = projetos.filter((p) => {
-                const d = new Date(p.createdAt);
-                return d.getFullYear() === anoAtual && d.getMonth() === mesIdx;
-              });
-            }
-          } else if (periodo === 'annual' && /^\d{4}$/.test(bucket)) {
-            const ano = parseInt(bucket, 10);
-            filtrados = projetos.filter((p) => new Date(p.createdAt).getFullYear() === ano);
+          const intervalo = bucketsGraficoDashboard(periodo, new Date()).find((b) => b.label === bucket);
+          if (intervalo) {
+            filtrados = projetos.filter((p) => inRange(p.createdAt, intervalo));
           }
         }
 
@@ -339,7 +297,7 @@ export class DashboardController {
 
       res.status(400).json({
         success: false,
-        message: 'grafico inválido. Use: ordens-servico, orcamentos, obras-kanban, pedidos-vendas',
+        message: 'grafico inválido. Use: ordens-servico',
       });
     } catch (error: any) {
       console.error('Erro detalhe KPIs:', error);
@@ -712,16 +670,10 @@ export class DashboardController {
           dataInicio.setHours(0, 0, 0, 0);
       }
 
-      // Buscar dados de produção de quadros
-      // Vamos usar projetos do tipo "Quadro Elétrico" ou orçamentos com categoria específica
       const quadrosProduzidos = await prisma.projeto.findMany({
         where: {
           createdAt: { gte: dataInicio },
-          OR: [
-            { titulo: { contains: 'Quadro', mode: 'insensitive' } },
-            { titulo: { contains: 'Painel', mode: 'insensitive' } },
-            { descricao: { contains: 'Quadro Elétrico', mode: 'insensitive' } }
-          ]
+          tipo: 'QUADROS_PAINEIS'
         },
         select: {
           id: true,
@@ -1038,38 +990,24 @@ export class DashboardController {
   }
 
   /**
-   * Gráficos do dashboard executivo: evoluções, comparativo e categorias de venda.
-   * GET /api/dashboard/graficos-executivo?periodo=monthly|semester|annual
+   * Gráficos do dashboard executivo: evoluções e comparativo.
+   * GET /api/dashboard/graficos-executivo?periodo=monthly|bimonthly|quarterly|semester|annual
    */
   static async getGraficosExecutivo(req: Request, res: Response): Promise<void> {
     try {
-      const { periodo = 'monthly' } = req.query;
-      const hoje = new Date();
-      const anoAtual = hoje.getFullYear();
+      const periodo = parsePeriodoDashboard(req.query.periodo);
+      const buckets = bucketsGraficoDashboard(periodo, new Date());
+      const dataInicio = buckets[0].start;
+      const dataFim = buckets[buckets.length - 1].end;
+      const authUser = (req as AuthRequest).user;
+      const roleLower = String(authUser?.role || '').toLowerCase();
+      const podeVerComparativo =
+        authUser?.isAdmin === true ||
+        roleLower === 'admin' ||
+        roleLower === 'administrador' ||
+        roleLower === 'desenvolvedor';
 
-      let dataInicio: Date;
-      let dataFim: Date;
-      let modo: 'month' | 'semester' | 'year';
-
-      switch (periodo) {
-        case 'semester':
-          dataInicio = new Date(anoAtual - 2, 0, 1);
-          dataFim = hoje;
-          modo = 'semester';
-          break;
-        case 'annual':
-          dataInicio = new Date(anoAtual - 5, 0, 1);
-          dataFim = hoje;
-          modo = 'year';
-          break;
-        case 'monthly':
-        default:
-          dataInicio = new Date(anoAtual, 0, 1);
-          dataFim = new Date(anoAtual, 11, 31, 23, 59, 59, 999);
-          modo = 'month';
-      }
-
-      const [orcamentos, projetos, obras, vendas] = await Promise.all([
+      const [orcamentos, projetos, vendas] = await Promise.all([
         prisma.orcamento.findMany({
           where: { createdAt: { gte: dataInicio, lte: dataFim } },
           select: { createdAt: true, status: true }
@@ -1078,178 +1016,28 @@ export class DashboardController {
           where: { createdAt: { gte: dataInicio, lte: dataFim } },
           select: { id: true, createdAt: true, status: true, semObra: true }
         }),
-        prisma.obra.findMany({
-          where: { createdAt: { gte: dataInicio, lte: dataFim } },
-          select: { createdAt: true, status: true }
-        }),
         prisma.venda.findMany({
           where: { createdAt: { gte: dataInicio, lte: dataFim } },
-          select: { createdAt: true, valorTotal: true, formaPagamento: true }
+          select: { createdAt: true, valorTotal: true }
         })
       ]);
 
-      const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-
-      let evolucaoOrcamentos: any[] = [];
-      let evolucaoOrdensServico: any[] = [];
-      let evolucaoObrasKanban: any[] = [];
-      let evolucaoPedidosVendas: any[] = [];
-      let comparativoMensal: any[] = [];
-      let categoriasVendas: { name: string; value: number }[] = [];
-
       const progressoMapOs = await buildProgressoMapForProjetos(projetos);
 
-      if (modo === 'month') {
-        for (let mes = 0; mes < 12; mes++) {
-          const oM = orcamentos.filter((o) => {
-            const d = new Date(o.createdAt);
-            return d.getFullYear() === anoAtual && d.getMonth() === mes;
-          });
-          const pM = projetos.filter((p) => {
-            const d = new Date(p.createdAt);
-            return d.getFullYear() === anoAtual && d.getMonth() === mes;
-          });
-          const obM = obras.filter((o) => {
-            const d = new Date(o.createdAt);
-            return d.getFullYear() === anoAtual && d.getMonth() === mes;
-          });
-          const vM = vendas.filter((v) => {
-            const d = new Date(v.createdAt);
-            return d.getFullYear() === anoAtual && d.getMonth() === mes;
-          });
-
-          evolucaoOrcamentos.push({
-            name: mesesNomes[mes],
-            criados: oM.length,
-            aprovados: oM.filter((o) => /aprovado/i.test(o.status || '')).length,
-            emAnalise: oM.filter(
-              (o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')
-            ).length
-          });
-
-          evolucaoOrdensServico.push(
-            agregarOsBucket(pM, progressoMapOs, mesesNomes[mes]),
-          );
-
-          evolucaoObrasKanban.push({
-            name: mesesNomes[mes],
-            backlog: obM.filter((o) => o.status === 'BACKLOG').length,
-            aFazer: obM.filter((o) => o.status === 'A_FAZER').length,
-            andamento: obM.filter((o) => o.status === 'ANDAMENTO').length,
-            concluidas: obM.filter((o) => o.status === 'CONCLUIDO').length
-          });
-
-          const valorVendas = vM.reduce((s, v) => s + (v.valorTotal || 0), 0);
-          evolucaoPedidosVendas.push({
-            name: mesesNomes[mes],
-            quantidade: vM.length,
-            valor: valorVendas
-          });
-
-          comparativoMensal.push({
-            name: mesesNomes[mes],
-            orcamentos: oM.length,
-            ordensServico: pM.length,
-            obras: obM.length,
-            pedidosVendas: vM.length
-          });
-        }
-
-        const mapaCat = new Map<string, number>();
-        vendas.forEach((v) => {
-          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
-          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
-        });
-        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
-      } else if (modo === 'semester') {
-        const anoBase = dataInicio.getFullYear();
-        const buckets: { start: Date; end: Date; label: string }[] = [];
-        for (let i = 0; i < 4; i++) {
-          const anoSem = Math.floor(anoBase + i / 2);
-          const semestre = (i % 2) + 1;
-          const start = new Date(anoSem, semestre === 1 ? 0 : 6, 1);
-          const end = new Date(anoSem, semestre === 1 ? 5 : 11, semestre === 1 ? 30 : 31, 23, 59, 59, 999);
-          buckets.push({
-            start: start < dataInicio ? dataInicio : start,
-            end: end > dataFim ? dataFim : end,
-            label: `${semestre}º Sem ${anoSem}`
-          });
-        }
-        evolucaoOrcamentos = buckets.map((b) =>
-          DashboardController.fillBucketOrcamentos(orcamentos, b)
-        );
-        evolucaoOrdensServico = buckets.map((b) => {
-          const pB = projetos.filter((p) => inRange(p.createdAt, b));
-          return agregarOsBucket(pB, progressoMapOs, b.label);
-        });
-        evolucaoObrasKanban = buckets.map((b) => DashboardController.fillBucketObras(obras, b));
-        evolucaoPedidosVendas = buckets.map((b) => DashboardController.fillBucketVendas(vendas, b));
-        comparativoMensal = buckets.map((b) => {
-          const oB = orcamentos.filter((x) => inRange(x.createdAt, b));
-          const pB = projetos.filter((x) => inRange(x.createdAt, b));
-          const obB = obras.filter((x) => inRange(x.createdAt, b));
-          const vB = vendas.filter((x) => inRange(x.createdAt, b));
-          return {
+      const evolucaoOrcamentos = buckets.map((b) =>
+        DashboardController.fillBucketOrcamentos(orcamentos, b)
+      );
+      const evolucaoOrdensServico = buckets.map((b) =>
+        agregarOsBucket(projetos.filter((p) => inRange(p.createdAt, b)), progressoMapOs, b.label)
+      );
+      const evolucaoPedidosVendas = buckets.map((b) => DashboardController.fillBucketVendas(vendas, b));
+      const comparativoMensal = podeVerComparativo
+        ? buckets.map((b) => ({
             name: b.label,
-            orcamentos: oB.length,
-            ordensServico: pB.length,
-            obras: obB.length,
-            pedidosVendas: vB.length
-          };
-        });
-        const mapaCat = new Map<string, number>();
-        vendas.forEach((v) => {
-          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
-          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
-        });
-        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
-      } else {
-        const anoIni = dataInicio.getFullYear();
-        const anoFim = dataFim.getFullYear();
-        for (let ano = anoIni; ano <= anoFim; ano++) {
-          const oY = orcamentos.filter((o) => new Date(o.createdAt).getFullYear() === ano);
-          const pY = projetos.filter((p) => new Date(p.createdAt).getFullYear() === ano);
-          const obY = obras.filter((o) => new Date(o.createdAt).getFullYear() === ano);
-          const vY = vendas.filter((v) => new Date(v.createdAt).getFullYear() === ano);
-
-          evolucaoOrcamentos.push({
-            name: String(ano),
-            criados: oY.length,
-            aprovados: oY.filter((o) => /aprovado/i.test(o.status || '')).length,
-            emAnalise: oY.filter(
-              (o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')
-            ).length
-          });
-          evolucaoOrdensServico.push(
-            agregarOsBucket(pY, progressoMapOs, String(ano)),
-          );
-          evolucaoObrasKanban.push({
-            name: String(ano),
-            backlog: obY.filter((o) => o.status === 'BACKLOG').length,
-            aFazer: obY.filter((o) => o.status === 'A_FAZER').length,
-            andamento: obY.filter((o) => o.status === 'ANDAMENTO').length,
-            concluidas: obY.filter((o) => o.status === 'CONCLUIDO').length
-          });
-          evolucaoPedidosVendas.push({
-            name: String(ano),
-            quantidade: vY.length,
-            valor: vY.reduce((s, v) => s + (v.valorTotal || 0), 0)
-          });
-          comparativoMensal.push({
-            name: String(ano),
-            orcamentos: oY.length,
-            ordensServico: pY.length,
-            obras: obY.length,
-            pedidosVendas: vY.length
-          });
-        }
-        const mapaCat = new Map<string, number>();
-        vendas.forEach((v) => {
-          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
-          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
-        });
-        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
-      }
+            orcamentos: orcamentos.filter((x) => inRange(x.createdAt, b)).length,
+            pedidosVendas: vendas.filter((x) => inRange(x.createdAt, b)).length
+          }))
+        : [];
 
       res.status(200).json({
         success: true,
@@ -1257,10 +1045,8 @@ export class DashboardController {
           periodo,
           evolucaoOrcamentos,
           evolucaoOrdensServico,
-          evolucaoObrasKanban,
           evolucaoPedidosVendas,
-          comparativoMensal,
-          categoriasVendas
+          comparativoMensal
         }
       });
     } catch (error: any) {
@@ -1298,20 +1084,6 @@ export class DashboardController {
       planejadas: pB.filter((p) =>
         ['PROPOSTA', 'APROVADO'].includes(String(p.status)) || String(p.status) === 'VALIDADO'
       ).length
-    };
-  }
-
-  private static fillBucketObras(
-    obras: { createdAt: Date; status: string }[],
-    b: { start: Date; end: Date; label: string }
-  ) {
-    const obB = obras.filter((o) => inRange(o.createdAt, b));
-    return {
-      name: b.label,
-      backlog: obB.filter((o) => o.status === 'BACKLOG').length,
-      aFazer: obB.filter((o) => o.status === 'A_FAZER').length,
-      andamento: obB.filter((o) => o.status === 'ANDAMENTO').length,
-      concluidas: obB.filter((o) => o.status === 'CONCLUIDO').length
     };
   }
 

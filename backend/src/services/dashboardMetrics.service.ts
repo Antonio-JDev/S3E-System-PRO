@@ -119,26 +119,13 @@ export async function contarOsEmAndamento(): Promise<number> {
   }).length;
 }
 
-export async function contarClientesComOrcamentoAprovado(): Promise<number> {
-  const rows = await prisma.orcamento.findMany({
-    where: { status: { contains: 'aprovado', mode: 'insensitive' } },
-    select: { clienteId: true },
-    distinct: ['clienteId'],
-  });
-  return rows.length;
-}
-
-export async function contarQuadrosProduzidosMesAtual(): Promise<number> {
-  const inicio = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+/** OS do tipo Quadros e Painéis em execução ou concluídas, criadas no intervalo. */
+export async function contarQuadrosProduzidosEntre(inicio: Date, fim: Date): Promise<number> {
   return prisma.projeto.count({
     where: {
-      createdAt: { gte: inicio },
+      tipo: 'QUADROS_PAINEIS',
       status: { in: ['EXECUCAO', 'CONCLUIDO'] },
-      OR: [
-        { titulo: { contains: 'Quadro', mode: 'insensitive' } },
-        { titulo: { contains: 'Painel', mode: 'insensitive' } },
-        { descricao: { contains: 'Quadro', mode: 'insensitive' } },
-      ],
+      createdAt: { gte: inicio, lte: fim },
     },
   });
 }
