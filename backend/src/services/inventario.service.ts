@@ -45,6 +45,7 @@ export class InventarioService {
       where.OR = [
         { nome: { contains: termo, mode: 'insensitive' } },
         { sku: { contains: termo, mode: 'insensitive' } },
+        { skuAnterior: { contains: termo, mode: 'insensitive' } },
         { localizacao: { contains: termo, mode: 'insensitive' } },
         { aliasesFornecedor: { some: { ean: { contains: termo, mode: 'insensitive' } } } },
         {

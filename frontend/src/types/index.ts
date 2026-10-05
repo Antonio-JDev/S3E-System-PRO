@@ -152,6 +152,8 @@ export interface MaterialItem {
     nome: string;
     name: string; // Alias para compatibilidade
     sku?: string;
+    /** SKU alfanumérico anterior à padronização numérica */
+    skuAnterior?: string;
     tipo?: string;
     type?: string; // Alias para compatibilidade
     categoria?: string;

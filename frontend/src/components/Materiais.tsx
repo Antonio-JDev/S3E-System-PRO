@@ -245,6 +245,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         nome: material.nome || material.descricao || '',
                         name: material.nome || material.descricao || '',
                         sku: material.sku || material.codigo || 'N/A',
+                        skuAnterior: (material as Material & { skuAnterior?: string | null }).skuAnterior || undefined,
                         type: material.tipo || material.categoria || 'Material',
                         category: (material.categoria as MaterialCategory) || MaterialCategory.ELETRICO,
                         description: material.descricao ?? '',
@@ -337,6 +338,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             filtered = filtered.filter(material =>
                 matchCrossSearch(searchTerm, material.name || '') ||
                 (material.sku?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                (material.skuAnterior?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                 (material.type?.toLowerCase() || '').includes(searchTerm.toLowerCase())
             );
         }
@@ -420,7 +422,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             setItemToEdit(item);
             setFormState({
                 name: item.nome ?? item.name ?? '',
-                sku: item.sku || 'N/A',
+                sku: item.sku && /^\d+$/.test(item.sku) ? item.sku : '',
                 type: item.type ?? '',
                 category: (item.category as MaterialCategory) ?? MaterialCategory.ELETRICO,
                 description: item.description ?? '',
@@ -1769,7 +1771,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <div>
                             <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Valor Total</p>
                             <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                                R$ {stats.totalValue.toLocaleString('pt-BR')}
+                                R$ {stats.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                         </div>
                     </div>
@@ -2110,10 +2112,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     </label>
                                     <input
                                         type="text"
+                                        inputMode="numeric"
                                         value={formState.sku}
-                                        onChange={(e) => setFormState({...formState, sku: e.target.value})}
-                                        className="input-field"
-                                        placeholder="Ex: CAB-2.5-FLEX"
+                                        onChange={(e) => setFormState({...formState, sku: e.target.value.replace(/\D/g, '')})}
+                                        className="input-field font-mono"
+                                        placeholder="Vazio = gerado automaticamente (somente números)"
                                     />
                                 </div>
 
@@ -2466,7 +2469,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <div className="w-full bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 p-3 rounded-xl">
                                         <p className="text-sm font-medium text-teal-800 dark:text-teal-300">Valor Total em Estoque:</p>
                                         <p className="text-lg font-bold text-teal-900 dark:text-teal-200">
-                                            R$ {((parseFloat(formState.stock) || 0) * (parseFloat(formState.price) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {((parseFloat(formState.stock) || 0) * (parseFloat(formState.price) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
                                     </div>
                                 </div>
@@ -3034,7 +3037,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                                             R$ {parseFloat(compra.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm font-bold text-green-600 text-right">
-                                                            R$ {parseFloat(compra.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            R$ {parseFloat(compra.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </td>
                                                         <td className="px-4 py-3 text-center">
                                                             <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${
@@ -3138,6 +3141,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">SKU</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">{materialParaVisualizar.sku}</p>
+                                    {materialParaVisualizar.skuAnterior && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono">
+                                            SKU anterior: {materialParaVisualizar.skuAnterior}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl md:col-span-2">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">EAN(s)</h3>
@@ -3323,7 +3331,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">📦 Valor Total em Estoque</h3>
                                     <p className="text-3xl font-bold text-green-700 dark:text-green-400">
-                                        R$ {((materialParaVisualizar.stock ?? 0) * (materialParaVisualizar.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {((materialParaVisualizar.stock ?? 0) * (materialParaVisualizar.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>

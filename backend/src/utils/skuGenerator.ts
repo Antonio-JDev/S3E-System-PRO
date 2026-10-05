@@ -32,92 +32,53 @@ function gerarCodigoAleatorio(length: number = 8): string {
     return resultado;
 }
 
+/** SKU de material: somente dígitos (sequencial a partir de 100001). */
+export const SKU_INICIAL = 100001;
+const REGEX_SKU_NUMERICO = /^\d+$/;
+
+export function isSkuNumerico(sku: unknown): boolean {
+    return typeof sku === 'string' && REGEX_SKU_NUMERICO.test(sku.trim());
+}
+
+async function proximoValorSequenciaSku(tx: any): Promise<number> {
+    try {
+        const linhas: Array<{ valor: bigint | number }> = await tx.$queryRaw`SELECT nextval('material_sku_seq') AS valor`;
+        return Number(linhas[0].valor);
+    } catch (error) {
+        // Banco sem a sequence (migration ainda não aplicada): usa o maior SKU numérico de 6 dígitos + 1
+        console.warn('⚠️ Sequence material_sku_seq indisponível, usando MAX(sku)+1:', (error as Error)?.message);
+        const linhas: Array<{ maximo: bigint | number | null }> = await tx.$queryRaw`
+            SELECT MAX(sku::bigint) AS maximo FROM materiais WHERE sku ~ '^[0-9]{1,6}$'`;
+        return Math.max(SKU_INICIAL - 1, Number(linhas[0]?.maximo ?? 0)) + 1;
+    }
+}
+
 /**
- * Gera um SKU único e aleatório para materiais
- * Formato: XXXXXX (6 caracteres alfanuméricos)
- * 
- * Esta função garante que cada material terá um SKU único, mesmo quando há muitos
- * materiais com nomes parecidos. A aleatoriedade é alta para evitar colisões.
- * 
- * IMPORTANTE: O NCM fornecido NÃO é alterado - ele é apenas usado como referência
- * opcional. O NCM original do material deve ser salvo separadamente no campo 'ncm' do material.
- * 
+ * Gera o próximo SKU sequencial e numérico para materiais (100001, 100002, ...).
+ * A sequence do Postgres garante que cadastros simultâneos não recebam o mesmo número;
+ * números já usados manualmente são pulados.
+ *
  * @param prismaTransaction - Transação do Prisma (opcional, usa prisma padrão se não fornecido)
- * @param ncm - NCM do material (opcional, não usado mais no SKU - mantido apenas para compatibilidade)
- * @param maxTentativas - Número máximo de tentativas para gerar SKU único (padrão: 20)
- * @returns SKU único e válido com 6 caracteres
+ * @param _ncm - mantido apenas para compatibilidade de assinatura (não entra no SKU)
+ * @param maxTentativas - quantos números ocupados podem ser pulados antes de desistir
  */
 export async function gerarSKUUnico(
     prismaTransaction?: any,
-    ncm?: string | null,
-    maxTentativas: number = 20
+    _ncm?: string | null,
+    maxTentativas: number = 50
 ): Promise<string> {
     const tx = prismaTransaction || prisma;
-    let tentativas = 0;
-    
-    // Adicionar um pequeno delay aleatório entre tentativas para aumentar variabilidade
-    const delayAleatorio = () => new Promise(resolve => setTimeout(resolve, Math.random() * 10));
-    
-    while (tentativas < maxTentativas) {
-        // Gerar 6 caracteres aleatórios alfanuméricos
-        // Isso gera 36^6 = 2.176 bilhões de combinações possíveis
-        const skuGerado = gerarCodigoAleatorio(6);
-        
-        // Verificar se já existe no banco
+
+    for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
+        const sku = String(await proximoValorSequenciaSku(tx));
         const existe = await tx.material.findUnique({
-            where: { sku: skuGerado },
+            where: { sku },
             select: { id: true }
         });
-        
-        if (!existe) {
-            if (tentativas > 0) {
-                console.log(`✅ SKU único gerado após ${tentativas + 1} tentativa(s): ${skuGerado}`);
-            }
-            return skuGerado;
-        }
-        
-        tentativas++;
-        
-        // Pequeno delay para aumentar variabilidade entre tentativas
-        if (tentativas < maxTentativas) {
-            await delayAleatorio();
-        }
+        if (!existe) return sku;
     }
-    
-    // Se não conseguiu em maxTentativas, usar timestamp + aleatório como fallback
-    // Isso garante unicidade absoluta mesmo em casos extremos
-    const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos do timestamp
-    const parteAleatoria = gerarCodigoAleatorio(3);
-    const skuFallback = `${timestamp}${parteAleatoria}`.slice(0, 6); // Garantir exatamente 6 caracteres
-    
-    // Verificar uma última vez se o fallback não existe (extremamente improvável)
-    const existeFallback = await tx.material.findUnique({
-        where: { sku: skuFallback },
-        select: { id: true }
-    });
-    
-    if (existeFallback) {
-        // Último recurso: usar apenas aleatório com mais tentativas
-        let ultimoRecurso = '';
-        for (let i = 0; i < 10; i++) {
-            ultimoRecurso = gerarCodigoAleatorio(6);
-            const existeUltimo = await tx.material.findUnique({
-                where: { sku: ultimoRecurso },
-                select: { id: true }
-            });
-            if (!existeUltimo) {
-                console.warn(`⚠️ SKU fallback duplicado! Usando último recurso: ${ultimoRecurso}`);
-                return ultimoRecurso;
-            }
-        }
-        // Se ainda assim não conseguir, usar timestamp completo
-        ultimoRecurso = Date.now().toString().slice(-6);
-        console.warn(`⚠️ Usando timestamp como último recurso: ${ultimoRecurso}`);
-        return ultimoRecurso;
-    }
-    
-    console.warn(`⚠️ Usando SKU com timestamp como fallback após ${maxTentativas} tentativas: ${skuFallback}`);
-    return skuFallback;
+
+    throw new Error(`Não foi possível gerar um SKU numérico livre após ${maxTentativas} tentativas`);
 }
 
 /**

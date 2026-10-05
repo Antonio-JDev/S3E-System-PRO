@@ -6,7 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { classificarMaterialPorNome, normalizarCategoria, isCategoriaValida } from '../utils/materialClassifier';
-import { gerarSKUUnico } from '../utils/skuGenerator';
+import { gerarSKUUnico, isSkuNumerico } from '../utils/skuGenerator';
 import { recalcularCustoUnitarioMaterial, listarCandidatosRecalculo } from '../services/recalculoCustoUnitario.service';
 import {
   combinaFamiliaEBitola,
@@ -186,10 +186,12 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
       console.log(`🔍 Categoria auto-classificada: "${categoria}" para "${nomeFinal}"`);
     }
     
-    // Gerar SKU único e aleatório se não fornecido
-    let skuFinal = sku;
-    if (!skuFinal || skuFinal.trim() === '') {
-      console.log('🔧 SKU não fornecido. Gerando SKU único e aleatório...');
+    let skuFinal = typeof sku === 'string' ? sku.trim() : sku != null ? String(sku).trim() : '';
+    if (skuFinal && !isSkuNumerico(skuFinal)) {
+      res.status(400).json({ error: 'SKU deve conter somente números' });
+      return;
+    }
+    if (!skuFinal) {
       skuFinal = await gerarSKUUnico(prisma, ncm || null);
       console.log(`✅ SKU gerado: ${skuFinal}`);
     }
@@ -284,6 +286,15 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
       ...rest
     } = req.body;
     const cProdBody = codigoFornecedor ?? cProd;
+    if (rest.sku === null || (typeof rest.sku === 'string' && rest.sku.trim() === '')) {
+      delete rest.sku;
+    } else if (rest.sku !== undefined) {
+      rest.sku = String(rest.sku).trim();
+      if (!isSkuNumerico(rest.sku)) {
+        res.status(400).json({ error: 'SKU deve conter somente números' });
+        return;
+      }
+    }
     const eanInformado = Object.prototype.hasOwnProperty.call(req.body, 'ean');
     const cprodInformado =
       Object.prototype.hasOwnProperty.call(req.body, 'codigoFornecedor') ||
@@ -1251,10 +1262,6 @@ export const atualizarSKUsENCMs = async (req: Request, res: Response): Promise<v
     let ncmsAtualizados = 0;
     const erros: string[] = [];
 
-    // Padrões de SKU antigo para identificar
-    const padroesSKUAntigo = /^(NCM-|AUTO-)/i;
-    const padraoSKUCorreto = /^SKU-/;
-
     for (const material of materiais) {
       try {
         let precisaAtualizarSKU = false;
@@ -1262,10 +1269,7 @@ export const atualizarSKUsENCMs = async (req: Request, res: Response): Promise<v
         let novoSKU: string | null = null;
         let novoNCM: string | null = material.ncm || null;
 
-        // Verificar se precisa atualizar SKU
-        if (!material.sku || 
-            padroesSKUAntigo.test(material.sku) || 
-            !padraoSKUCorreto.test(material.sku)) {
+        if (!isSkuNumerico(material.sku)) {
           precisaAtualizarSKU = true;
           novoSKU = await gerarSKUUnico(prisma, material.ncm || null);
           skusGerados++;
@@ -1299,7 +1303,9 @@ export const atualizarSKUsENCMs = async (req: Request, res: Response): Promise<v
           await prisma.material.update({
             where: { id: material.id },
             data: {
-              ...(precisaAtualizarSKU && novoSKU ? { sku: novoSKU } : {}),
+              ...(precisaAtualizarSKU && novoSKU
+                ? { sku: novoSKU, ...(material.sku ? { skuAnterior: material.sku } : {}) }
+                : {}),
               ...(precisaAtualizarNCM && novoNCM ? { ncm: novoNCM } : {}),
               updatedAt: new Date(),
             },
@@ -1639,8 +1645,12 @@ export const importarMateriais = async (req: Request, res: Response): Promise<vo
         if (!categoria || !isCategoriaValida(categoria)) {
           categoria = classificarMaterialPorNome(nomeFinal || '');
         }
-        let skuFinal = sku;
-        if (!skuFinal || String(skuFinal).trim() === '') {
+        let skuFinal = sku != null ? String(sku).trim() : '';
+        if (skuFinal && !isSkuNumerico(skuFinal)) {
+          resultados.mensagens.push(`Item ${i + 1} (${nomeFinal}): SKU "${skuFinal}" não é numérico; gerado um novo SKU.`);
+          skuFinal = '';
+        }
+        if (!skuFinal) {
           skuFinal = await gerarSKUUnico(prisma, ncm || null);
         }
         const unidadeMedidaFinal = unidadeMedida || unidade || 'un';
