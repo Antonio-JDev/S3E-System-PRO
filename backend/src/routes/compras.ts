@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getCompras, getCompraById, createCompra, updateCompra, updateCompraStatus, receberRemessaParcial, receberComAssociacoes, parseXML, ajustarCompraComXML, deleteCompra, cancelarCompra, atualizarFracionamentoItem, vincularItemAoMaterial } from '../controllers/comprasController';
+import { getCompras, getCompraById, createCompra, updateCompra, updateCompraStatus, receberRemessaParcial, receberComAssociacoes, parseXML, ajustarCompraComXML, deleteCompra, cancelarCompra, atualizarFracionamentoItem, vincularItemAoMaterial, converterUnidadeItem, getSugestoesConversao } from '../controllers/comprasController';
 import { FracionamentoEstoqueController } from '../controllers/fracionamentoEstoqueController';
 import { authenticate, authorize } from '../middlewares/auth';
 
@@ -8,6 +8,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getCompras);
+router.get('/:id/sugestoes-conversao', getSugestoesConversao);
 router.get('/:id', getCompraById);
 router.post('/', createCompra);
 router.put('/:id', updateCompra); // Editar compra completa
@@ -25,6 +26,11 @@ router.get('/fracionamento/pendentes', FracionamentoEstoqueController.buscarComp
 router.post('/fracionamento/processar', FracionamentoEstoqueController.processarAtualizacoes);
 router.put('/:compraId/items/:itemId/fracionamento', atualizarFracionamentoItem);
 router.put('/:compraId/items/:itemId/vincular-material', vincularItemAoMaterial);
+router.post(
+  '/:compraId/items/:itemId/converter-unidade',
+  authorize('admin', 'administrador', 'desenvolvedor'),
+  converterUnidadeItem
+);
 
 export default router;
 

@@ -8,45 +8,20 @@ import {
   ajustarCompraComXml,
   AjustarCompraXmlError,
 } from '../services/ajustarCompraXml.service';
+import {
+  calcularConversao,
+  detectarConversaoKmParaM,
+  normalizarUnidade,
+} from '../utils/conversaoUnidadeCompra.util';
+import {
+  converterUnidadeCompraItem,
+  ConverterUnidadeError,
+  sugerirConversoesCompra,
+} from '../services/converterUnidadeCompraItem.service';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_'
 });
-
-/**
- * Detecta se um produto é um cabo/fio de 750V ou 1kV com bitola de 1,00mm até 120,00mm
- * @param nomeProduto Nome do produto
- * @returns true se for um cabo/fio específico que deve ser convertido de KM para metros
- */
-function isCaboFioEspecifico(nomeProduto: string): boolean {
-  if (!nomeProduto) return false;
-  
-  const nomeLower = nomeProduto.toLowerCase();
-  
-  // Verificar se contém palavras-chave de cabo/fio
-  const temCaboFio = nomeLower.includes('cabo') || nomeLower.includes('fio');
-  if (!temCaboFio) return false;
-  
-  // Verificar se contém tensão 750V ou 1kV
-  const temTensao = nomeLower.includes('750') || 
-                    nomeLower.includes('1kv') || 
-                    nomeLower.includes('1 kv') ||
-                    nomeLower.includes('1000v');
-  if (!temTensao) return false;
-  
-  // Verificar se contém bitola entre 1,00mm e 120,00mm
-  // Padrões: 1mm, 1,00mm, 1.00mm, 1,5mm, 2,5mm, 10mm, 25mm, 50mm, 95mm, 120mm, etc.
-  const bitolaPattern = /(\d+[,.]?\d*)\s*mm/i;
-  const match = nomeLower.match(bitolaPattern);
-  
-  if (match) {
-    const bitola = parseFloat(match[1].replace(',', '.'));
-    // Verificar se está entre 1,00mm e 120,00mm
-    return bitola >= 1.0 && bitola <= 120.0;
-  }
-  
-  return false;
-}
 
 // Listar compras
 export const getCompras = async (req: Request, res: Response): Promise<void> => {
@@ -183,7 +158,11 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const resultado = await ComprasService.registrarCompra(compraData);
+    const usuarioReq = (req as any).user;
+    const resultado = await ComprasService.registrarCompra(
+      compraData,
+      usuarioReq?.userId ? { id: usuarioReq.userId, nome: usuarioReq.name } : undefined,
+    );
     const estatisticas = (resultado as any).estatisticas;
 
     res.status(201).json({
@@ -457,54 +436,53 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         const materialMatch = match?.material || null;
         
         // Extrair unidade de medida do XML (uCom = unidade comercial, uTrib = unidade tributável)
-        const unidadeMedida = item.prod.uCom || item.prod.uTrib || 'un';
-        
-        // Normalizar unidade de medida para minúsculas e tratar variações comuns
-        let unidadeMedidaNormalizada = unidadeMedida.toLowerCase().trim();
-        
-        // Normalizar variações de quilômetro
-        if (unidadeMedidaNormalizada === 'km' || 
-            unidadeMedidaNormalizada === 'kilometro' || 
-            unidadeMedidaNormalizada === 'quilometro' ||
-            unidadeMedidaNormalizada === 'kilômetro' ||
-            unidadeMedidaNormalizada === 'quilômetro') {
-          unidadeMedidaNormalizada = 'km';
-        }
-        
-        // Normalizar variações de metro
-        if (unidadeMedidaNormalizada === 'm' || 
-            unidadeMedidaNormalizada === 'metro' || 
-            unidadeMedidaNormalizada === 'metros') {
-          unidadeMedidaNormalizada = 'm';
-        }
-        
-        // Normalizar variações de centímetro
-        if (unidadeMedidaNormalizada === 'cm' || 
-            unidadeMedidaNormalizada === 'centimetro' || 
-            unidadeMedidaNormalizada === 'centímetro' ||
-            unidadeMedidaNormalizada === 'centimetros' ||
-            unidadeMedidaNormalizada === 'centímetros') {
-          unidadeMedidaNormalizada = 'cm';
-        }
-        
-        // Verificar se é um cabo/fio específico que precisa de conversão
-        const isCaboEspecifico = isCaboFioEspecifico(nomeProduto);
-        const precisaConversao = isCaboEspecifico && (unidadeMedidaNormalizada === 'km' || unidadeMedidaNormalizada === 'kilometro' || unidadeMedidaNormalizada === 'quilometro');
-        
+        const unidadeMedidaNormalizada = normalizarUnidade(item.prod.uCom || item.prod.uTrib || 'un');
+        const quantidadeXml = parseFloat(item.prod.qCom || '0');
+        const valorUnitXml = parseFloat(item.prod.vUnCom || '0');
+        const valorTotalXml = parseFloat(item.prod.vProd || '0');
+
         const itemData: any = {
           nomeProduto,
           ncm: ncmString,
-          quantidade: parseFloat(item.prod.qCom || '0'),
-          valorUnit: parseFloat(item.prod.vUnCom || '0'),
-          valorTotal: parseFloat(item.prod.vProd || '0'),
+          quantidade: quantidadeXml,
+          valorUnit: valorUnitXml,
+          valorTotal: valorTotalXml,
           sku: codigoFornecedor || ean || undefined,
           codigoFornecedor: codigoFornecedor || undefined,
           ean: ean || undefined,
           unidadeMedida: unidadeMedidaNormalizada,
           materialId,
-          precisaConversao: precisaConversao,
+          precisaConversao: false,
           matchTipo: match?.tipo || null,
         };
+
+        const deteccao = detectarConversaoKmParaM({
+          nomeProduto,
+          unidadeMedida: unidadeMedidaNormalizada,
+          quantidade: quantidadeXml,
+          valorUnit: valorUnitXml,
+          valorTotal: valorTotalXml,
+          precoMaterialPorMetro: (materialMatch as any)?.preco ?? null,
+        });
+        if (deteccao.converter) {
+          const convertido = calcularConversao(
+            { quantidade: quantidadeXml, valorUnit: valorUnitXml, valorTotal: valorTotalXml },
+            'km',
+            'm'
+          );
+          itemData.quantidade = convertido.quantidade;
+          itemData.valorUnit = convertido.valorUnit;
+          itemData.unidadeMedida = convertido.unidade;
+          itemData.conversaoAutomatica = {
+            de: 'km',
+            para: 'm',
+            unidadeOriginal: unidadeMedidaNormalizada,
+            quantidadeOriginal: quantidadeXml,
+            valorUnitOriginal: valorUnitXml,
+            motivo: deteccao.motivo,
+            descricao: deteccao.descricao,
+          };
+        }
         
         if (materialMatch) {
           (itemData as any).materialVinculado = materialMatch;
@@ -997,6 +975,66 @@ export const vincularItemAoMaterial = async (req: Request, res: Response): Promi
     res.status(500).json({
       success: false,
       error: error.message || 'Erro ao vincular item ao estoque',
+    });
+  }
+};
+
+/**
+ * Converte a unidade de um item de compra já salvo (ex.: cabo em km -> m), preservando o valor total.
+ * POST /api/compras/:compraId/items/:itemId/converter-unidade
+ * Body: { de: 'km', para: 'm', origem?: 'MANUAL' | 'REVISAO' }
+ */
+export const converterUnidadeItem = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { compraId, itemId } = req.params;
+    const { de, para, origem } = req.body || {};
+    const authUser = (req as any).user as { userId?: string; name?: string } | undefined;
+
+    const resultado = await converterUnidadeCompraItem({
+      compraId,
+      itemId,
+      de,
+      para,
+      origem: origem === 'REVISAO' ? 'REVISAO' : 'MANUAL',
+      usuario: { id: authUser?.userId ?? null, nome: authUser?.name ?? null },
+    });
+    const compra = await ComprasService.buscarCompra(compraId);
+
+    res.json({
+      success: true,
+      message: `Unidade convertida: ${resultado.quantidadeAnterior} -> ${resultado.quantidade} ${resultado.unidade}`,
+      data: { resultado, compra },
+    });
+  } catch (error) {
+    if (error instanceof ConverterUnidadeError) {
+      res.status(error.status).json({ success: false, error: error.message });
+      return;
+    }
+    console.error('Erro ao converter unidade do item da compra:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Erro ao converter unidade',
+    });
+  }
+};
+
+/**
+ * Sugestões automáticas de conversão km -> m para cabos da compra.
+ * GET /api/compras/:id/sugestoes-conversao
+ */
+export const getSugestoesConversao = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const data = await sugerirConversoesCompra(req.params.id);
+    res.json({ success: true, data });
+  } catch (error) {
+    if (error instanceof ConverterUnidadeError) {
+      res.status(error.status).json({ success: false, error: error.message });
+      return;
+    }
+    console.error('Erro ao sugerir conversões de unidade:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Erro ao sugerir conversões',
     });
   }
 };

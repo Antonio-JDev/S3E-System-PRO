@@ -14,7 +14,7 @@ import { buildCrudActions } from '../utils/buildCrudActions';
 import { AuthContext } from '../contexts/AuthContext';
 import EditarFracionamentoModal from './EditarFracionamentoModal';
 import MaterialDetailsModal, { type MaterialDetailsItem } from './modals/MaterialDetailsModal';
-import { canDelete } from '../utils/permissions';
+import { canDelete, isAdmin, isDeveloper } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses } from '../utils/responsiveNav';
@@ -32,6 +32,12 @@ import {
     type CompraItemEditDraft
 } from '../utils/compraItemList.util';
 import { roundMoney } from '../utils/financeiroValor';
+import {
+    camposItemImportadoXml,
+    registrarConversaoManual,
+    desfazerConversaoAutomatica,
+    camposConversaoPayload,
+} from '../utils/conversaoUnidadeItemCompra.util';
 import {
     classificacaoVaiParaEstoque,
     itemPrecisaVinculoEstoque,
@@ -381,8 +387,16 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         unitCost?: number;
         totalCost?: number;
         unidadeMedida?: string;
+        /** Item de compra já salva: a conversão é gravada via endpoint */
+        compraItemId?: string;
     } | null>(null);
     const [targetUnit, setTargetUnit] = useState<'km' | 'm' | 'cm'>('m');
+    const [origemUnitSalva, setOrigemUnitSalva] = useState<'km' | 'm' | 'cm'>('km');
+    const [convertendoUnidadeSalva, setConvertendoUnidadeSalva] = useState(false);
+    const [sugestoesConversao, setSugestoesConversao] = useState<any[] | null>(null);
+    const [carregandoSugestoes, setCarregandoSugestoes] = useState(false);
+    const [aplicandoSugestaoId, setAplicandoSugestaoId] = useState<string | null>(null);
+    const podeConverterUnidadeSalva = isAdmin(user) || isDeveloper(user);
     
     // Estados para busca de material do estoque
     const [materiais, setMateriais] = useState<any[]>([]);
@@ -463,6 +477,89 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             toast.error(error?.response?.data?.error || error?.message || 'Erro ao vincular ao estoque');
         } finally {
             setVincularDetalheLoading(false);
+        }
+    };
+
+    const recarregarCompraEmVisualizacao = async (compraId: string) => {
+        const refreshed = await comprasService.getCompraById(compraId);
+        setPurchaseToView(refreshed);
+        await loadPurchaseOrders();
+    };
+
+    const abrirConversaoItemSalvo = (item: any) => {
+        const unidadeAtual = String(item.unidadeItem || '').toLowerCase();
+        setOrigemUnitSalva(unidadeAtual === 'm' || unidadeAtual === 'cm' ? (unidadeAtual as 'm' | 'cm') : 'km');
+        setTargetUnit('m');
+        setItemUnidadeEditando({
+            index: -1,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            totalCost: item.totalCost,
+            unidadeMedida: item.unidadeItem || undefined,
+            compraItemId: item.id,
+        });
+        setUnitConversionModalOpen(true);
+    };
+
+    const converterUnidadeItemSalvo = async (
+        compraItemId: string,
+        de: string,
+        para: string,
+        origem: 'MANUAL' | 'REVISAO'
+    ): Promise<boolean> => {
+        if (!purchaseToView?.id) return false;
+        const resp = await comprasService.converterUnidadeItem(purchaseToView.id, compraItemId, { de, para, origem });
+        if ((resp as any)?.success === false) {
+            toast.error((resp as any)?.error || 'Não foi possível converter a unidade');
+            return false;
+        }
+        const resultado = (resp as any)?.data?.resultado;
+        const extras: string[] = [];
+        if (resultado?.precoMaterialCorrigido) extras.push('preço do material corrigido');
+        if (resultado?.estoqueAjustado) extras.push('estoque ajustado');
+        if (resultado?.destinoAjustado) extras.push('obra/OS ajustada');
+        toast.success(`Item convertido de ${de} para ${para}`, {
+            description: extras.length ? extras.join(' · ') : undefined,
+        });
+        return true;
+    };
+
+    const revisarUnidadesCompra = async () => {
+        if (!purchaseToView?.id) return;
+        setCarregandoSugestoes(true);
+        try {
+            const resp = await comprasService.sugestoesConversao(purchaseToView.id);
+            if ((resp as any)?.success === false) {
+                toast.error((resp as any)?.error || 'Não foi possível revisar as unidades');
+                return;
+            }
+            const lista = Array.isArray((resp as any)?.data) ? (resp as any).data : [];
+            setSugestoesConversao(lista);
+            if (lista.length === 0) toast.success('Nenhum cabo com unidade suspeita nesta compra.');
+        } catch (error: any) {
+            toast.error(error?.response?.data?.error || error?.message || 'Erro ao revisar unidades');
+        } finally {
+            setCarregandoSugestoes(false);
+        }
+    };
+
+    const aplicarSugestoesConversao = async (sugestoes: any[]) => {
+        if (!purchaseToView?.id || sugestoes.length === 0) return;
+        const compraId = purchaseToView.id;
+        setAplicandoSugestaoId(sugestoes.length > 1 ? '__todas__' : sugestoes[0].itemId);
+        const aplicadas: string[] = [];
+        try {
+            for (const s of sugestoes) {
+                const ok = await converterUnidadeItemSalvo(s.itemId, s.de, s.para, 'REVISAO');
+                if (ok) aplicadas.push(s.itemId);
+            }
+        } catch (error: any) {
+            toast.error(error?.response?.data?.error || error?.message || 'Erro ao aplicar conversão');
+        } finally {
+            setSugestoesConversao((prev) => (prev ? prev.filter((s) => !aplicadas.includes(s.itemId)) : prev));
+            setAplicandoSugestaoId(null);
+            if (aplicadas.length) await recarregarCompraEmVisualizacao(compraId);
         }
     };
 
@@ -781,6 +878,10 @@ const filteredPurchases = useMemo(() => {
             setObservacoesDetalheDraft(purchaseToView.notes || purchaseToView.observacoes || '');
         }
     }, [purchaseToView]);
+
+    useEffect(() => {
+        setSugestoesConversao(null);
+    }, [purchaseToView?.id]);
 
     useEffect(() => {
         try {
@@ -1328,10 +1429,11 @@ const filteredPurchases = useMemo(() => {
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
-                    valorUnit: roundMoney(it.unitCost),
+                    valorUnit: (it as any).conversaoUnidade ? it.unitCost : roundMoney(it.unitCost),
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: (it as any).unidadeMedida || 'un',
+                    ...camposConversaoPayload(it as any),
                     materialId: (it as ExtendedItem).materialId,
                     codigoFornecedor: (it as ExtendedItem).codigoFornecedor,
                     ean: (it as ExtendedItem).ean,
@@ -1476,17 +1578,12 @@ const filteredPurchases = useMemo(() => {
             console.log('📦 Items do XML:', data.items);
             setPurchaseItems(
                 (data.items || []).map((it: any) => {
-                    const quantity = it.quantidade || 0;
-                    const unitCost = roundMoney(it.valorUnit || 0);
                     return {
                         productId: it.materialId || '',
                         productName: it.nomeProduto || '',
-                        quantity,
-                        unitCost,
-                        totalCost: calcItemTotalCost(quantity, unitCost),
+                        ...camposItemImportadoXml(it),
                         ncm: it.ncm || '',
                         sku: it.sku || '',
-                        unidadeMedida: it.unidadeMedida || 'un',
                         materialId: it.materialId,
                         materialVinculado: it.materialVinculado,
                         matchAutomatico: !!it.matchAutomatico,
@@ -1498,6 +1595,11 @@ const filteredPurchases = useMemo(() => {
                 })
             );
             
+            const convertidosAuto = (data.items || []).filter((it: any) => it.conversaoAutomatica).length;
+            if (convertidosAuto > 0) {
+                toast.info(`${convertidosAuto} cabo(s) convertido(s) automaticamente de km para m. Confira os itens marcados.`);
+            }
+
             // Log dos matches automáticos
             const matchesAutomaticos = (data.items || []).filter((it: any) => it.matchAutomatico).length;
             const pendentes = (data.items || []).filter((it: any) => !it.materialId).length;
@@ -2777,6 +2879,28 @@ const filteredPurchases = useMemo(() => {
                                                                                     📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
                                                                                 </p>
                                                                             )}
+                                                                            {(item as any).conversaoUnidade?.origem === 'AUTOMATICA_IMPORTACAO' && (
+                                                                                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                                                                                    <span
+                                                                                        className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300"
+                                                                                        title={(item as any).conversaoUnidade.descricao || undefined}
+                                                                                    >
+                                                                                        📏 Convertido automaticamente de {(item as any).conversaoUnidade.de} para {(item as any).conversaoUnidade.para}
+                                                                                        {` (NF: ${(item as any).conversaoUnidade.quantidadeOriginal} ${(item as any).conversaoUnidade.de})`}
+                                                                                    </span>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            setPurchaseItems((prev) =>
+                                                                                                prev.map((row, i) => (i === index ? desfazerConversaoAutomatica(row as any) : row))
+                                                                                            )
+                                                                                        }
+                                                                                        className="text-xs text-purple-700 hover:text-purple-900 dark:text-purple-300 underline"
+                                                                                    >
+                                                                                        Desfazer
+                                                                                    </button>
+                                                                                </div>
+                                                                            )}
                                                                             {/* Indicadores de vinculação */}
                                                                             <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                                                 {(() => {
@@ -3710,10 +3834,78 @@ const filteredPurchases = useMemo(() => {
                             {/* Itens da Compra */}
                             {purchaseToView.items && purchaseToView.items.length > 0 && (
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
-                                        <span className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">📦</span>
-                                        Itens da Compra ({purchaseToView.items.length})
-                                    </h3>
+                                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text flex items-center gap-2">
+                                            <span className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">📦</span>
+                                            Itens da Compra ({purchaseToView.items.length})
+                                        </h3>
+                                        {podeConverterUnidadeSalva && purchaseToView.status !== PurchaseStatus.Cancelado && (
+                                            <button
+                                                type="button"
+                                                onClick={revisarUnidadesCompra}
+                                                disabled={carregandoSugestoes}
+                                                className="px-3 py-2 text-sm font-semibold rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:hover:bg-purple-900/60 transition-colors disabled:opacity-50"
+                                                title="Procura cabos lançados em km (ou com preço por km) e sugere a conversão para metros"
+                                            >
+                                                {carregandoSugestoes ? 'Revisando…' : '📏 Revisar unidades'}
+                                            </button>
+                                        )}
+                                    </div>
+                                    {sugestoesConversao && sugestoesConversao.length > 0 && (
+                                        <div className="mb-4 p-4 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 space-y-3">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold text-purple-900 dark:text-purple-200">
+                                                    {sugestoesConversao.length} item(ns) parecem estar em km. Conferir e converter para metros:
+                                                </p>
+                                                <div className="flex gap-2">
+                                                    {sugestoesConversao.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={!!aplicandoSugestaoId}
+                                                            onClick={() => aplicarSugestoesConversao(sugestoesConversao)}
+                                                            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                                                        >
+                                                            {aplicandoSugestaoId === '__todas__' ? 'Aplicando…' : 'Aplicar todas'}
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        disabled={!!aplicandoSugestaoId}
+                                                        onClick={() => setSugestoesConversao(null)}
+                                                        className="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                                    >
+                                                        Fechar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {sugestoesConversao.map((s) => (
+                                                <div
+                                                    key={s.itemId}
+                                                    className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-white dark:bg-dark-card border border-purple-100 dark:border-purple-900/40"
+                                                >
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{s.nomeProduto}</p>
+                                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{s.descricao}</p>
+                                                        <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 font-mono">
+                                                            {Number(s.atual.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 3 })} × R$ {Number(s.atual.valorUnit).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                                            {' → '}
+                                                            {Number(s.convertido.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 3 })} m × R$ {Number(s.convertido.valorUnit).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}/m
+                                                            {' · total R$ '}
+                                                            {Number(s.convertido.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        disabled={!!aplicandoSugestaoId}
+                                                        onClick={() => aplicarSugestoesConversao([s])}
+                                                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                                                    >
+                                                        {aplicandoSugestaoId === s.itemId ? 'Aplicando…' : 'Aplicar'}
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <div className="border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden">
                                         <div className="overflow-x-auto">
                                             <table className="w-full">
@@ -3790,8 +3982,24 @@ const filteredPurchases = useMemo(() => {
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-600 dark:text-gray-400 font-medium text-sm">
-                                                                    {(item as any).unidadeMedida || 'un'}
+                                                                    {(item as any).unidadeItem || (item as any).unidadeMedida || 'un'}
                                                                 </span>
+                                                                {(item as any).unidadeOriginal && (
+                                                                    <span
+                                                                        className="block mt-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded text-[11px] font-semibold whitespace-nowrap"
+                                                                        title={`Original: ${(item as any).quantidadeOriginal ?? '-'} ${(item as any).unidadeOriginal} × R$ ${Number((item as any).valorUnitOriginal ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                                                    >
+                                                                        {(() => {
+                                                                            const it = item as any;
+                                                                            const quando = it.conversaoUnidadeEm ? formatDateBR(it.conversaoUnidadeEm) : '';
+                                                                            if (it.conversaoUnidadeOrigem === 'AUTOMATICA_IMPORTACAO') {
+                                                                                return `Convertido de ${it.unidadeOriginal} (automático)`;
+                                                                            }
+                                                                            const quem = it.conversaoUnidadePorNome ? ` por ${it.conversaoUnidadePorNome}` : '';
+                                                                            return `Convertido de ${it.unidadeOriginal}${quem}${quando ? ` em ${quando}` : ''}`;
+                                                                        })()}
+                                                                    </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-4 text-right">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">
@@ -3893,6 +4101,20 @@ const filteredPurchases = useMemo(() => {
                                                                         >
                                                                             📦
                                                                         </button>
+                                                                        {podeConverterUnidadeSalva &&
+                                                                            itemId &&
+                                                                            purchaseToView.status !== PurchaseStatus.Cancelado &&
+                                                                            !(item as any).unidadeOriginal &&
+                                                                            !(item as any).quantidadeFracionada && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => abrirConversaoItemSalvo(item)}
+                                                                                    className="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:hover:bg-purple-900/60 transition-colors font-semibold"
+                                                                                    title="Converter unidade (ex.: km para m) — ajusta preço, estoque e obra/OS se já recebido"
+                                                                                >
+                                                                                    📏
+                                                                                </button>
+                                                                            )}
                                                                     </div>
                                                                 </div>
                                                             </td>
@@ -4598,7 +4820,10 @@ const filteredPurchases = useMemo(() => {
                         </div>
 
                         {(() => {
-                            const currentUnit = (itemUnidadeEditando.unidadeMedida || 'un').toLowerCase();
+                            const compraItemIdSalvo = itemUnidadeEditando.compraItemId;
+                            const currentUnit = compraItemIdSalvo
+                                ? origemUnitSalva
+                                : (itemUnidadeEditando.unidadeMedida || 'un').toLowerCase();
                             const quantity = itemUnidadeEditando.quantity ?? 0;
                             const unitCost = itemUnidadeEditando.unitCost ?? 0;
                             const totalCost =
@@ -4633,6 +4858,26 @@ const filteredPurchases = useMemo(() => {
                                             {itemUnidadeEditando.productName || 'Item sem nome'}
                                         </p>
                                     </div>
+
+                                    {compraItemIdSalvo && (
+                                        <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 space-y-2">
+                                            <p className="text-xs text-amber-800 dark:text-amber-300">
+                                                Compra já salva: a conversão fica registrada com seu nome. Se o item já foi recebido, o estoque e a obra/OS são ajustados pela diferença; o preço do material é corrigido se ainda estiver com o valor antigo.
+                                            </p>
+                                            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                                Unidade em que o item foi lançado
+                                            </label>
+                                            <select
+                                                value={origemUnitSalva}
+                                                onChange={(e) => setOrigemUnitSalva(e.target.value as 'km' | 'm' | 'cm')}
+                                                className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 dark:bg-dark-bg dark:text-white"
+                                            >
+                                                <option value="km">km (quilômetro)</option>
+                                                <option value="m">m (metro)</option>
+                                                <option value="cm">cm (centímetro)</option>
+                                            </select>
+                                        </div>
+                                    )}
 
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="p-3 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg">
@@ -4742,7 +4987,27 @@ const filteredPurchases = useMemo(() => {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => {
+                                                disabled={convertendoUnidadeSalva || (!!compraItemIdSalvo && currentUnit === targetUnit)}
+                                                onClick={async () => {
+                                                    if (compraItemIdSalvo) {
+                                                        if (!purchaseToView?.id) return;
+                                                        const compraId = purchaseToView.id;
+                                                        setConvertendoUnidadeSalva(true);
+                                                        try {
+                                                            const ok = await converterUnidadeItemSalvo(compraItemIdSalvo, currentUnit, targetUnit, 'MANUAL');
+                                                            if (!ok) return;
+                                                            setUnitConversionModalOpen(false);
+                                                            setItemUnidadeEditando(null);
+                                                            setSugestoesConversao((prev) => (prev ? prev.filter((s) => s.itemId !== compraItemIdSalvo) : prev));
+                                                            await recarregarCompraEmVisualizacao(compraId);
+                                                        } catch (error: any) {
+                                                            toast.error(error?.response?.data?.error || error?.message || 'Erro ao converter unidade');
+                                                        } finally {
+                                                            setConvertendoUnidadeSalva(false);
+                                                        }
+                                                        return;
+                                                    }
+
                                                     setPurchaseItems((prev) =>
                                                         prev.map((item, idx) => {
                                                             if (
@@ -4752,13 +5017,12 @@ const filteredPurchases = useMemo(() => {
                                                                 return item;
                                                             }
 
-                                                            return {
-                                                                ...item,
+                                                            return registrarConversaoManual(item as any, {
+                                                                unidade: targetUnit,
                                                                 quantity: newQuantity,
                                                                 unitCost: newUnitCost,
                                                                 totalCost,
-                                                                unidadeMedida: targetUnit
-                                                            };
+                                                            });
                                                         })
                                                     );
 
@@ -4769,9 +5033,9 @@ const filteredPurchases = useMemo(() => {
                                                     setUnitConversionModalOpen(false);
                                                     setItemUnidadeEditando(null);
                                                 }}
-                                                className="px-5 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                                                className="px-5 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
                                             >
-                                                Aplicar conversão
+                                                {convertendoUnidadeSalva ? 'Convertendo…' : 'Aplicar conversão'}
                                             </button>
                                         </div>
                                     </div>

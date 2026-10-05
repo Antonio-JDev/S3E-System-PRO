@@ -16,6 +16,13 @@ import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
 import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
 import { itemParaDraft, aplicarDraftNoItem, atualizarCampoNumericoItem, calcItemTotalCost } from '../utils/compraItemList.util';
 import { roundMoney } from '../utils/financeiroValor';
+import {
+    camposItemImportadoXml,
+    registrarConversaoManual,
+    desfazerConversaoAutomatica,
+    camposConversaoPayload,
+    type ConversaoUnidadeForm,
+} from '../utils/conversaoUnidadeItemCompra.util';
 import AlertDialog from '../components/ui/AlertDialog';
 import {
     classificacaoVaiParaEstoque,
@@ -77,6 +84,8 @@ type ExtendedItem = PurchaseOrderItem & {
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
     unidadeEmbalagem?: string; // "cx", "pct", etc.
+    conversaoUnidade?: ConversaoUnidadeForm | null;
+    conversaoRecusada?: boolean;
 };
 
 interface NovaCompraPageProps {
@@ -696,17 +705,14 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             // Preencher Itens
             if (data.items && Array.isArray(data.items)) {
                 const xmlItems: ExtendedItem[] = data.items.map((item: any) => {
-                    const quantity = item.quantidade || 0;
-                    const unitCost = roundMoney(item.valorUnit || 0);
+                    const campos = camposItemImportadoXml({ ...item, unidadeMedida: item.unidadeMedida || item.unidade });
                     return {
                         productId: item.materialId || '',
                         productName: item.nomeProduto || '',
-                        quantity,
-                        unitCost,
-                        totalCost: item.valorTotal != null ? roundMoney(item.valorTotal) : calcItemTotalCost(quantity, unitCost),
+                        ...campos,
+                        totalCost: item.valorTotal != null ? roundMoney(item.valorTotal) : campos.totalCost,
                     ncm: item.ncm || '',
                     sku: item.sku || '',
-                    unidadeMedida: item.unidadeMedida || item.unidade || 'un',
                     materialId: item.materialId,
                     materialVinculado: item.materialVinculado,
                     matchAutomatico: !!item.matchAutomatico,
@@ -718,6 +724,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 });
                 setPurchaseItems(xmlItems);
                 console.log(`✅ ${xmlItems.length} itens adicionados ao formulário`);
+                const convertidosAuto = xmlItems.filter((it) => it.conversaoUnidade).length;
+                if (convertidosAuto > 0) {
+                    toast.info(`${convertidosAuto} cabo(s) convertido(s) automaticamente de km para m. Confira os itens marcados.`);
+                }
                 const matchesAutomaticos = xmlItems.filter(it => it.matchAutomatico).length;
                 const pendentes = xmlItems.filter(it => !it.materialId).length;
                 if (matchesAutomaticos > 0 || pendentes > 0) {
@@ -810,10 +820,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
-                    valorUnit: roundMoney(it.unitCost),
+                    valorUnit: it.conversaoUnidade ? it.unitCost : roundMoney(it.unitCost),
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: it.unidadeMedida || 'un',
+                    ...camposConversaoPayload(it),
                     materialId: (it as ExtendedItem).materialId,
                     codigoFornecedor: (it as ExtendedItem).codigoFornecedor,
                     ean: (it as ExtendedItem).ean,
@@ -1804,6 +1815,28 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 📦 {item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades
                                                             </p>
                                                         )}
+                                                        {item.conversaoUnidade?.origem === 'AUTOMATICA_IMPORTACAO' && (
+                                                            <div className="mt-1 flex items-center gap-2 flex-wrap">
+                                                                <span
+                                                                    className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300"
+                                                                    title={item.conversaoUnidade.descricao || undefined}
+                                                                >
+                                                                    📏 Convertido automaticamente de {item.conversaoUnidade.de} para {item.conversaoUnidade.para}
+                                                                    {` (NF: ${item.conversaoUnidade.quantidadeOriginal} ${item.conversaoUnidade.de})`}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setPurchaseItems((prev) =>
+                                                                            prev.map((row, i) => (i === index ? desfazerConversaoAutomatica(row) : row))
+                                                                        )
+                                                                    }
+                                                                    className="text-xs text-purple-700 hover:text-purple-900 dark:text-purple-300 underline"
+                                                                >
+                                                                    Desfazer
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                         <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                                             {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
                                                             {item.sku && <span className="mr-3">SKU: {item.sku}</span>}
@@ -2321,13 +2354,12 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             if (item.productName === itemConversaoUnidade.productName && 
                                 item.quantity === itemConversaoUnidade.quantity &&
                                 item.unitCost === itemConversaoUnidade.unitCost) {
-                                return {
-                                    ...item,
+                                return registrarConversaoManual(item, {
+                                    unidade: String(convertedItem.unidadeMedida).toLowerCase(),
                                     quantity: convertedItem.quantity,
                                     unitCost: convertedItem.unitCost,
                                     totalCost: convertedItem.totalCost,
-                                    unidadeMedida: convertedItem.unidadeMedida
-                                };
+                                });
                             }
                             return item;
                         });

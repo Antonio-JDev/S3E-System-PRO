@@ -7,6 +7,12 @@ import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
 import { roundMoney } from '../utils/currency';
 import {
+    prepararUnidadeItemCompra,
+    type CamposUnidadeItemCompra,
+    type ConversaoInformada,
+    type ItemCompraEntrada,
+} from '../utils/conversaoUnidadeCompra.util';
+import {
     matchMaterial,
     upsertAlias,
     normalizarEan,
@@ -31,6 +37,10 @@ export interface CompraItemPayload {
     unidadeEmbalagem?: string; // "cx", "pct", etc.
     /** false = item segue destinoTipo da compra (obra/OS); true = apenas estoque */
     destinoEstoque?: boolean;
+    /** Conversão de unidade já aplicada no formulário (ex.: km -> m) */
+    conversaoUnidade?: ConversaoInformada | null;
+    /** Usuário desfez a conversão automática no formulário */
+    conversaoRecusada?: boolean;
 }
 
 function identificadoresItemNf(item: CompraItemPayload) {
@@ -348,7 +358,7 @@ export class ComprasService {
     /**
      * Registra uma compra completa com integração de estoque e contas a pagar
      */
-    static async registrarCompra(data: CompraPayload) {
+    static async registrarCompra(data: CompraPayload, usuario?: { id: string; nome?: string }) {
         const {
             fornecedorNome,
             fornecedorCNPJ,
@@ -389,10 +399,19 @@ export class ComprasService {
             throw new Error('Compra deve ter pelo menos um item');
         }
 
-        const items = itemsBrutos.map((item) => ({
-            ...item,
-            valorUnit: roundMoney(item.valorUnit),
-        }));
+        const items = itemsBrutos.map((item) => {
+            const preparado = prepararUnidadeItemCompra(item as ItemCompraEntrada);
+            const camposUnidade: CamposUnidadeItemCompra =
+                preparado.campos.conversaoUnidadeOrigem === 'MANUAL' && usuario
+                    ? { ...preparado.campos, conversaoUnidadePorId: usuario.id, conversaoUnidadePorNome: usuario.nome ?? null }
+                    : preparado.campos;
+            return {
+                ...item,
+                quantidade: preparado.quantidade,
+                valorUnit: preparado.valorUnit,
+                camposUnidade,
+            };
+        });
 
         if (destinoTipo === 'OBRA' && !obraId) {
             throw new Error('Compra avulsa para obra exige obraId');
@@ -521,6 +540,7 @@ export class ComprasService {
                     quantidadeFracionada?: number;
                     tipoEmbalagem?: string;
                     unidadeEmbalagem?: string;
+                    camposUnidade?: CamposUnidadeItemCompra;
                 }> = [];
 
                 for (const item of items) {
@@ -561,7 +581,8 @@ export class ComprasService {
                         valorTotal: roundMoney(item.quantidade * item.valorUnit),
                         quantidadeFracionada: (item as any).quantidadeFracionada,
                         tipoEmbalagem: (item as any).tipoEmbalagem,
-                        unidadeEmbalagem: item.unidadeEmbalagem
+                        unidadeEmbalagem: item.unidadeEmbalagem,
+                        camposUnidade: item.camposUnidade,
                     });
                 }
 
@@ -616,7 +637,8 @@ export class ComprasService {
                                 valorTotal: it.valorTotal,
                                 quantidadeFracionada: it.quantidadeFracionada || null,
                                 tipoEmbalagem: it.tipoEmbalagem || null,
-                                unidadeEmbalagem: it.unidadeEmbalagem || null
+                                unidadeEmbalagem: it.unidadeEmbalagem || null,
+                                ...(it.camposUnidade || {})
                             }))
                         }
                     } as any,
@@ -696,7 +718,8 @@ export class ComprasService {
                                 ncm: item.ncm ? String(item.ncm) : null,
                                 quantidadeFracionada: item.quantidadeFracionada || null,
                                 tipoEmbalagem: item.tipoEmbalagem || null,
-                                unidadeEmbalagem: item.unidadeEmbalagem || null
+                                unidadeEmbalagem: item.unidadeEmbalagem || null,
+                                ...(item.camposUnidade || {})
                             }))
                         }
                     } as any,
@@ -791,7 +814,8 @@ export class ComprasService {
                                 ncm: item.ncm ? String(item.ncm) : null,
                                 quantidadeFracionada: item.quantidadeFracionada || null,
                                 tipoEmbalagem: item.tipoEmbalagem || null,
-                                unidadeEmbalagem: item.unidadeEmbalagem || null
+                                unidadeEmbalagem: item.unidadeEmbalagem || null,
+                                ...(item.camposUnidade || {})
                             }))
                         }
                     } as any,
@@ -821,6 +845,7 @@ export class ComprasService {
                 tipoEmbalagem?: string;
                 unidadeEmbalagem?: string;
                 destinoEstoque?: boolean;
+                camposUnidade?: CamposUnidadeItemCompra;
             }> = [];
             
             // Contadores para resumo
@@ -935,6 +960,7 @@ export class ComprasService {
                     tipoEmbalagem: (item as any).tipoEmbalagem,
                     unidadeEmbalagem: item.unidadeEmbalagem,
                     destinoEstoque: (item as CompraItemPayload).destinoEstoque !== false,
+                    camposUnidade: item.camposUnidade,
                 });
             }
             
@@ -997,7 +1023,8 @@ export class ComprasService {
                             destinoEstoque: item.destinoEstoque !== false,
                             quantidadeFracionada: item.quantidadeFracionada || null,
                             tipoEmbalagem: item.tipoEmbalagem || null,
-                            unidadeEmbalagem: item.unidadeEmbalagem || null
+                            unidadeEmbalagem: item.unidadeEmbalagem || null,
+                            ...(item.camposUnidade || {})
                         }))
                     }
                 } as any,

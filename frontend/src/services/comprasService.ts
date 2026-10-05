@@ -109,6 +109,13 @@ class ComprasService {
           ncm: ncm, // ✅ Sempre usar NCM do material quando disponível
           sku: sku, // ✅ Sempre usar SKU do material quando disponível
           unidadeMedida: unidadeMedida, // ✅ Preservar unidade de medida
+          unidadeItem: it.unidadeMedida || null,
+          unidadeOriginal: it.unidadeOriginal || null,
+          quantidadeOriginal: it.quantidadeOriginal ?? null,
+          valorUnitOriginal: it.valorUnitOriginal ?? null,
+          conversaoUnidadeEm: it.conversaoUnidadeEm || null,
+          conversaoUnidadePorNome: it.conversaoUnidadePorNome || null,
+          conversaoUnidadeOrigem: it.conversaoUnidadeOrigem || null,
           ean: it.ean || null,
           codigoFornecedor: it.codigoFornecedor || null,
           quantidadeFracionada: it.quantidadeFracionada,
@@ -308,6 +315,27 @@ class ComprasService {
       `/api/compras/${compraId}/items/${itemId}/vincular-material`,
       payload
     );
+  }
+
+  /**
+   * Converter unidade de um item de compra já salva (ex.: km -> m). Apenas admin/dev.
+   */
+  async converterUnidadeItem(
+    compraId: string,
+    itemId: string,
+    payload: { de: string; para: string; origem?: 'MANUAL' | 'REVISAO' }
+  ) {
+    return axiosApiService.post<any>(
+      `/api/compras/${compraId}/items/${itemId}/converter-unidade`,
+      payload
+    );
+  }
+
+  /**
+   * Sugestões de conversão km -> m para itens de cabo de uma compra salva
+   */
+  async sugestoesConversao(compraId: string) {
+    return axiosApiService.get<any>(`/api/compras/${compraId}/sugestoes-conversao`);
   }
 
   /**
