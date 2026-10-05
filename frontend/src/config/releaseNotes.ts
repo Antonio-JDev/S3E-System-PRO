@@ -2,91 +2,128 @@
  * Notas de atualização exibidas no login (produção).
  * Ao publicar um novo pacote, incremente `RELEASE_NOTES_VERSION` e atualize `items`.
  */
-export const RELEASE_NOTES_VERSION = '2026-07-27-deploy';
+export const RELEASE_NOTES_VERSION = '2026-10-05-deploy';
+
+export type ReleaseNoteTipo = 'novo' | 'melhoria' | 'correcao' | 'removido';
 
 export type ReleaseNoteItem = {
   id: string;
   titulo: string;
   descricao: string;
   area: string;
+  tipo: ReleaseNoteTipo;
 };
 
 export const RELEASE_NOTES_META = {
-  titulo: 'Notas de Atualização',
-  subtitulo: 'O que chegou nesta versão — checklist das últimas implementações',
-  dataLabel: '27/07/2026',
+  titulo: 'Novidades do sistema',
+  subtitulo: 'Confira o que mudou nesta versão e marque os itens conforme for revisando.',
+  dataLabel: '05/10/2026',
 };
 
 export const RELEASE_NOTES_ITEMS: ReleaseNoteItem[] = [
   {
-    id: 'financeiro-cartao',
-    area: 'Financeiro',
-    titulo: 'Cartão de crédito e faturas',
+    id: 'dashboard-periodo',
+    area: 'Dashboard',
+    tipo: 'novo',
+    titulo: 'Períodos bimestral e trimestral',
     descricao:
-      'Nova aba no Financeiro para cadastrar cartões, acompanhar faturas por competência e vincular despesas em Contas a Pagar.',
+      'O seletor de período agora atualiza os cards e os gráficos ao mesmo tempo e ganhou as opções Bimestral e Trimestral. Cada card compara o período atual com o anterior.',
   },
   {
-    id: 'os-vistoria-celesc',
+    id: 'dashboard-cards',
+    area: 'Dashboard',
+    tipo: 'melhoria',
+    titulo: 'Cards revisados',
+    descricao:
+      'Saem Obras Ativas e Equipes Ativas e entra Orçamentos aprovados. Quadros produzidos passa a contar só OS do tipo Quadros e Painéis, e Clientes atendidos considera o período selecionado.',
+  },
+  {
+    id: 'dashboard-graficos',
+    area: 'Dashboard',
+    tipo: 'melhoria',
+    titulo: 'Gráficos mais objetivos',
+    descricao:
+      'Saíram os gráficos de obras (Kanban), evolução de pedidos de venda e categorias de venda. O Comparativo agora mostra Orçamentos x Pedidos de venda, aparece só para admin e desenvolvedor e fica ao lado da rosca de pedidos.',
+  },
+  {
+    id: 'os-card-horas',
     area: 'Ordens de Serviço',
-    titulo: 'Vistoria CELESC',
+    tipo: 'melhoria',
+    titulo: 'Card da OS com horas previstas e executadas',
     descricao:
-      'Nova aba Vistorias no hub de OS, flag “Exige Vistoria CELESC”, protocolo, status e histórico de reprovação com motivos.',
+      'A listagem de OS mostra barras de horas previstas na agenda e horas apontadas, junto do prazo. O selo "Estouro de prazo" passa a indicar quando a data final do cronograma já passou.',
   },
   {
-    id: 'os-validado',
+    id: 'os-horas-resultado',
     area: 'Ordens de Serviço',
-    titulo: 'Status Validado removido do fluxo',
+    tipo: 'melhoria',
+    titulo: 'Resultado e prazo estimado em horas',
     descricao:
-      'OS que estavam em Validado migram automaticamente para Aprovado — o estágio Validado deixa de existir no kanban.',
+      'As abas da OS mostram horas de engenharia e de execução (diária = 8 h) no lugar de diárias, com barras de previstas, executadas, faltantes e excedente.',
   },
   {
-    id: 'rh-abpd',
-    area: 'RH / Ponto',
-    titulo: 'Avaliação A/B/P/D na conferência',
+    id: 'os-previsao-chegada',
+    area: 'Ordens de Serviço',
+    tipo: 'novo',
+    titulo: 'Previsão de chegada de materiais',
     descricao:
-      'Camada de avaliação rápida na conferência de ponto, com tratamento de débito/crédito para a folha.',
+      'Na aba Materiais da OS, selecione um ou vários produtos e defina a data de chegada com a referência (pedido de compra, orçamento ou NF). Chegadas atrasadas ficam destacadas em vermelho.',
   },
   {
-    id: 'rh-feriado',
-    area: 'RH / Ponto',
-    titulo: 'Override manual de feriados',
+    id: 'calendario-horario-dia',
+    area: 'Calendário',
+    tipo: 'novo',
+    titulo: 'Horário de cada dia na alocação',
     descricao:
-      'Na conferência da folha, admin/RH pode marcar ou desmarcar um dia como feriado no calendário da empresa.',
+      'No evento, ajuste o início e o fim de cada dia da alocação. Sem ajuste, vale o horário padrão de 07:30 às 17:30.',
   },
   {
-    id: 'rh-folha-pdf',
-    area: 'RH / Ponto',
-    titulo: 'Melhorias na folha e PDF de conferência',
+    id: 'calendario-confirmar-executar',
+    area: 'Calendário',
+    tipo: 'novo',
+    titulo: 'Confirmar alocação e Executar OS',
     descricao:
-      'Ajustes de jornada, demonstrativo e geração do PDF de conferência de ponto.',
+      '"Confirmar alocação" transforma a previsão em alocação confirmada no próprio evento, sem duplicar na agenda. "Executar OS" grava o apontamento da equipe nos dias até hoje e marca a alocação como executada.',
   },
   {
-    id: 'orcamento-dnd',
+    id: 'orcamento-cronograma',
     area: 'Orçamentos',
-    titulo: 'Reordenar itens por arrastar e soltar',
+    tipo: 'melhoria',
+    titulo: 'Cronograma obrigatório',
     descricao:
-      'Nas telas de novo e editar orçamento, use o ícone ≡ ao lado de cada item para reposicionar na listagem.',
+      'Previsão de início e previsão de término passam a ser obrigatórias ao criar ou editar um orçamento, e o término não pode ser anterior ao início.',
   },
   {
-    id: 'bi-dashboards',
-    area: 'BI / Dashboards',
-    titulo: 'Gráficos e tema visual',
+    id: 'compras-conversao-unidade',
+    area: 'Compras',
+    tipo: 'novo',
+    titulo: 'Conversão de cabos de km para metros',
     descricao:
-      'Tema compartilhado de gráficos, melhorias no BI e refinamentos de dark mode nos dashboards.',
+      'Ao importar o XML, cabos vendidos em km são convertidos para metros automaticamente. Em compras já lançadas, o botão "Revisar unidades" sugere a conversão e ajusta preço, estoque e OS. Fica registrado quem converteu e quando.',
   },
   {
-    id: 'whatsapp',
-    area: 'CRM WhatsApp',
-    titulo: 'Sync de não lidas e chat',
+    id: 'estoque-sku-numerico',
+    area: 'Estoque',
+    tipo: 'melhoria',
+    titulo: 'SKU numérico e sequencial',
     descricao:
-      'Melhorias no sync de mensagens não lidas, identidade e painel de conversas.',
+      'Novos materiais recebem SKU só com números, a partir de 100001. Os SKUs antigos com letras foram renumerados e continuam aparecendo na busca.',
   },
   {
-    id: 'compras-pagar',
-    area: 'Compras / Contas a Pagar',
-    titulo: 'Ajustes em compras e contas a pagar',
+    id: 'estoque-movimentacao-os',
+    area: 'Estoque',
+    tipo: 'melhoria',
+    titulo: 'Baixa e devolução vinculadas à OS',
     descricao:
-      'Melhorias de fluxo e vínculo com cartão/fatura nas telas de compra e contas a pagar.',
+      'Em Movimentações, a baixa por alocação, instalação ou serviço exige a OS de destino, com busca por número, título ou cliente. A devolução de OS permite informar a OS de origem.',
+  },
+  {
+    id: 'sistema-telas-obras',
+    area: 'Sistema',
+    tipo: 'removido',
+    titulo: 'Telas antigas de obras descontinuadas',
+    descricao:
+      'Saíram o hub de tarefas de obra, o calendário de alocações antigo, o Gantt de obras e o modal de equipes de obra. A alocação de equipes agora é feita pelo Calendário.',
   },
 ];
 

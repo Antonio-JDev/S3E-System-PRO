@@ -209,8 +209,8 @@ faz `stripPrefix /api` (a linha está comentada no compose — veja
 ### 3. Push para Docker Hub
 
 ```bash
-docker push odev10antonio/s3e-backend:1.3.1
-docker push odev10antonio/s3e-frontend:1.3.1
+docker push odev10antonio/s3e-backend:2.3.1
+docker push odev10antonio/s3e-frontend:2.3.1
 ```
 
 ## 🚀 Pipeline completo (1.3.x)
