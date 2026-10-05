@@ -103,9 +103,7 @@ const OsPrazoProgressoBar: React.FC<OsPrazoProgressoBarProps> = ({
       </div>
       {!isCompact && prazo.temEstimativa && (
         <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          {prazo.eixo === 'diarias'
-            ? 'Comparativo diárias/dias corridos vs estimativa orçada'
-            : 'Dias corridos vs janela data início → previsão'}
+          Dias corridos desde o início até a data final do cronograma
           {prazo.percentualRaw > 100
             ? ` · ${Math.round(prazo.percentualRaw)}% do estimado`
             : ''}

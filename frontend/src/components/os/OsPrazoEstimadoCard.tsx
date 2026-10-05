@@ -3,11 +3,14 @@ import { toast } from 'sonner';
 import { projetosService } from '../../services/projetosService';
 import {
   calcularCustoTempoOrcado,
-  calcularDiasCorridos,
   calcularDiasEstimadosTexto,
 } from '../../utils/osCockpit.util';
-import { calcularPrazoProgresso } from '../../utils/osPrazoProgresso.util';
+import {
+  calcularLeituraOrcadoRealizado,
+  type FaixaOrcadoRealizado,
+} from '../../utils/osPrazoProgresso.util';
 import { formatMoeda, formatQuantidade, type ResultadoOsCalculado } from '../../utils/apropriacaoOs';
+import { HORAS_COMERCIAIS_POR_DIA } from '../../utils/custoEventoCalendario';
 import { serverDateToInput, formatDateDisplay } from '../../utils/date';
 
 export interface OsPrazoEstimadoCardProps {
@@ -29,6 +32,42 @@ export interface OsPrazoEstimadoCardProps {
   onSaved?: () => void;
 }
 
+function BarraOrcadoRealizado({
+  titulo,
+  faixa,
+  unidade,
+  semApontamento,
+}: {
+  titulo: string;
+  faixa: FaixaOrcadoRealizado;
+  unidade: 'h' | 'd';
+  semApontamento: boolean;
+}) {
+  const realizadoTxt = semApontamento ? '—' : formatQuantidade(faixa.realizado, unidade);
+  const orcadoTxt = formatQuantidade(faixa.orcado, unidade);
+  return (
+    <div>
+      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1 gap-2">
+        <span>{titulo}</span>
+        <span className="font-semibold tabular-nums">
+          {realizadoTxt} / {orcadoTxt}
+        </span>
+      </div>
+      <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full transition-all ${faixa.barClassName}`}
+          style={{ width: `${semApontamento ? 0 : faixa.percentual}%` }}
+        />
+      </div>
+      {faixa.estourou && !semApontamento && (
+        <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-300">
+          Acima do orçado
+        </p>
+      )}
+    </div>
+  );
+}
+
 const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
   projetoId,
   projeto,
@@ -41,7 +80,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     dataPrevisao: serverDateToInput(projeto.dataPrevisao as string),
-    diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
+    horasExecucaoOrcadas: (projeto.diariasEquipeOrcadas ?? 0) * HORAS_COMERCIAIS_POR_DIA,
     horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
     valorDiariaEquipe: projeto.valorDiariaEquipe ?? '',
     valorHoraEngenharia: projeto.valorHoraEngenharia ?? '',
@@ -51,7 +90,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
     if (!editing) {
       setForm({
         dataPrevisao: serverDateToInput(projeto.dataPrevisao as string),
-        diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
+        horasExecucaoOrcadas: (projeto.diariasEquipeOrcadas ?? 0) * HORAS_COMERCIAIS_POR_DIA,
         horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
         valorDiariaEquipe: projeto.valorDiariaEquipe ?? '',
         valorHoraEngenharia: projeto.valorHoraEngenharia ?? '',
@@ -59,13 +98,11 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
     }
   }, [projeto, editing]);
 
-  const diasCorridos = useMemo(
-    () => calcularDiasCorridos(projeto.dataInicio),
-    [projeto.dataInicio]
-  );
-
   const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
-  const diariasRealizadas = resumo?.diariasEquipeRealizadas ?? 0;
+  const horasExecucaoOrcadas = diariasOrcadas * HORAS_COMERCIAIS_POR_DIA;
+  const horasOrcadas = Number(projeto.horasEngenhariaOrcadas) || 0;
+  const horasExecucaoRealizadas = (resumo?.diariasEquipeRealizadas ?? 0) * HORAS_COMERCIAIS_POR_DIA;
+  const horasRealizadas = resumo?.horasEngenhariaRealizadas ?? 0;
   const custoOrcado =
     resumo?.custoOrcado ??
     calcularCustoTempoOrcado({
@@ -75,39 +112,24 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
       valorDiariaEquipe: projeto.valorDiariaEquipe,
     });
 
-  const prazoProgresso = useMemo(
+  const leitura = useMemo(
     () =>
-      calcularPrazoProgresso({
-        dataInicio: projeto.dataInicio,
-        dataPrevisao: projeto.dataPrevisao,
-        dataConclusao: projeto.dataConclusao,
-        dataFim: projeto.dataFim,
-        status: projeto.status,
-        diariasOrcadas,
-        diariasRealizadas,
+      calcularLeituraOrcadoRealizado({
+        horasOrcadas,
+        horasRealizadas,
+        diariasOrcadas: horasExecucaoOrcadas,
+        diariasRealizadas: horasExecucaoRealizadas,
       }),
-    [
-      projeto.dataInicio,
-      projeto.dataPrevisao,
-      projeto.dataConclusao,
-      projeto.dataFim,
-      projeto.status,
-      diariasOrcadas,
-      diariasRealizadas,
-    ]
+    [horasOrcadas, horasRealizadas, horasExecucaoOrcadas, horasExecucaoRealizadas],
   );
-
-  const pctDiarias =
-    diariasOrcadas > 0 ? Math.min(100, (diariasRealizadas / diariasOrcadas) * 100) : 0;
-  const pctDiasCorridos =
-    diariasOrcadas > 0 ? Math.min(100, (diasCorridos / diariasOrcadas) * 100) : 0;
 
   async function handleSave() {
     try {
       setSaving(true);
       const res = await projetosService.atualizar(projetoId, {
         dataPrevisao: form.dataPrevisao,
-        diariasEquipeOrcadas: Number(form.diariasEquipeOrcadas) || 0,
+        diariasEquipeOrcadas:
+          (Number(form.horasExecucaoOrcadas) || 0) / HORAS_COMERCIAIS_POR_DIA,
         horasEngenhariaOrcadas: Number(form.horasEngenhariaOrcadas) || 0,
         valorDiariaEquipe:
           form.valorDiariaEquipe === '' ? null : Number(form.valorDiariaEquipe),
@@ -131,7 +153,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
   return (
     <div
       className={`rounded-xl border bg-white dark:bg-dark-card p-5 ${
-        prazoProgresso.estourou
+        leitura.estourou
           ? 'border-red-300 dark:border-red-700'
           : 'border-gray-200 dark:border-dark-border'
       }`}
@@ -169,14 +191,14 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
             />
           </label>
           <label className="text-xs font-medium text-gray-600">
-            Diárias orçadas
+            Horas execução
             <input
               type="number"
               min={0}
               step={0.5}
-              value={form.diariasEquipeOrcadas}
+              value={form.horasExecucaoOrcadas}
               onChange={(e) =>
-                setForm((f) => ({ ...f, diariasEquipeOrcadas: Number(e.target.value) }))
+                setForm((f) => ({ ...f, horasExecucaoOrcadas: Number(e.target.value) }))
               }
               className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
             />
@@ -235,51 +257,22 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-            <span>Dias corridos vs orçados</span>
-            <span className="font-semibold">
-              {diasCorridos} / {diariasOrcadas || '—'}
-            </span>
-          </div>
-          <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all ${
-                prazoProgresso.motivoEstouro === 'dias_corridos'
-                  ? 'bg-red-500'
-                  : prazoProgresso.cor === 'orange'
-                    ? 'bg-orange-500'
-                    : prazoProgresso.cor === 'yellow'
-                      ? 'bg-amber-400'
-                      : 'bg-gray-400'
-              }`}
-              style={{ width: `${pctDiasCorridos}%` }}
-            />
-          </div>
-        </div>
-        <div>
-          <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-            <span>Diárias realizadas</span>
-            <span className="font-semibold">
-              {formatQuantidade(diariasRealizadas, 'd')} / {formatQuantidade(diariasOrcadas, 'd')}
-            </span>
-          </div>
-          <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all ${
-                prazoProgresso.motivoEstouro === 'diarias'
-                  ? 'bg-red-500'
-                  : prazoProgresso.cor === 'orange'
-                    ? 'bg-orange-500'
-                    : prazoProgresso.cor === 'yellow'
-                      ? 'bg-amber-400'
-                      : 'bg-gray-400'
-              }`}
-              style={{ width: `${pctDiarias}%` }}
-            />
-          </div>
-        </div>
+        <BarraOrcadoRealizado
+          titulo="Horas engenharia"
+          faixa={leitura.horas}
+          unidade="h"
+          semApontamento={!resumo}
+        />
+        <BarraOrcadoRealizado
+          titulo="Horas execução"
+          faixa={leitura.diarias}
+          unidade="h"
+          semApontamento={!resumo}
+        />
       </div>
+      <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+        Apontado / orçado. A data limite não entra neste progresso.
+      </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-gray-500 dark:text-gray-400">
@@ -288,9 +281,9 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
             {formatDateDisplay(projeto.dataPrevisao as string) || '—'}
           </strong>
         </span>
-        {prazoProgresso.temEstimativa && (
-          <span className={`text-xs font-medium px-2 py-1 rounded-md ${prazoProgresso.badgeClassName}`}>
-            {prazoProgresso.badge}
+        {leitura.temEstimativa && (
+          <span className={`text-xs font-medium px-2 py-1 rounded-md ${leitura.badgeClassName}`}>
+            {leitura.badge}
           </span>
         )}
       </div>

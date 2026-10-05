@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { formatDateDisplay, formatDatePtBrInSaoPaulo } from '../../utils/date';
 import { formatMoeda, formatQuantidade, type ResultadoOsCalculado } from '../../utils/apropriacaoOs';
+import { HORAS_COMERCIAIS_POR_DIA } from '../../utils/custoEventoCalendario';
 import {
   isOsTipoQuadrosPainels,
   isOsWorkflowTipo,
@@ -446,10 +447,10 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
               </p>
             </div>
             <div className="rounded-lg bg-white/70 dark:bg-dark-card/60 px-3 py-2">
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">Diárias</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Horas exec.</p>
               <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">
                 {diariasOrcadas > 0 || diariasReal > 0
-                  ? `${formatQuantidade(diariasReal, 'd')} / ${formatQuantidade(diariasOrcadas, 'd')}`
+                  ? `${formatQuantidade(diariasReal * HORAS_COMERCIAIS_POR_DIA, 'h')} / ${formatQuantidade(diariasOrcadas * HORAS_COMERCIAIS_POR_DIA, 'h')}`
                   : '—'}
               </p>
             </div>

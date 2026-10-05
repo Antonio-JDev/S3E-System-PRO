@@ -11,10 +11,13 @@ import {
   calcularDiasEstimadosTexto,
 } from '../../utils/osCockpit.util';
 import type { ApontamentoOs } from '../../services/apropriacaoOsService';
+import { HORAS_COMERCIAIS_POR_DIA } from '../../utils/custoEventoCalendario';
+import OsFatiasTempoBarras from './OsFatiasTempoBarras';
 import OsPrazoProgressoBar from './OsPrazoProgressoBar';
 
 export interface OsResultadoTabProps {
   projeto: {
+    id?: string;
     status: string;
     valorTotal?: number | null;
     dataInicio?: string | null;
@@ -60,7 +63,6 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
     (resumo?.diariasEquipeOrcadas ?? Number(projeto.diariasEquipeOrcadas)) || 0;
   const horasOrcadas =
     (resumo?.horasEngenhariaOrcadas ?? Number(projeto.horasEngenhariaOrcadas)) || 0;
-  const diariasRealizadas = resumo?.diariasEquipeRealizadas ?? 0;
 
   const custoTempoOrcado =
     resumo?.custoOrcado ??
@@ -101,7 +103,7 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
             Resultado — Orçado vs Realizado
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Análise de custo e esforço a partir do orçamento, prazo estimado e apontamentos F1.
+            Prazo do cronograma, esforço orçado e o realizado pelos apontamentos (executar na agenda ou F1).
           </p>
         </div>
         {onExportCsv && (
@@ -145,29 +147,27 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
 
         <div className="rounded-2xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card p-5 space-y-3">
           <h4 className="text-sm font-bold text-gray-800 dark:text-white">
-            Prazo estimado
+            Prazo do cronograma
           </h4>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {calcularDiasEstimadosTexto(
-              diariasOrcadas,
+              0,
               projeto.dataInicio,
               projeto.dataPrevisao
             )}
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <div className="text-xs text-gray-500">Data limite</div>
+              <div className="text-xs text-gray-500">Início</div>
               <div className="font-semibold text-gray-900 dark:text-white">
-                {formatDateDisplay(projeto.dataPrevisao as string) || '—'}
+                {projeto.dataInicio ? formatDateDisplay(projeto.dataInicio) : '—'}
               </div>
             </div>
             <div>
-              <div className="text-xs text-gray-500">Diárias orçadas</div>
-              <div className="font-semibold">{formatQuantidade(diariasOrcadas, 'd')}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Horas eng. orçadas</div>
-              <div className="font-semibold">{formatQuantidade(horasOrcadas, 'h')}</div>
+              <div className="text-xs text-gray-500">Data final</div>
+              <div className="font-semibold text-gray-900 dark:text-white">
+                {projeto.dataPrevisao ? formatDateDisplay(projeto.dataPrevisao) : '—'}
+              </div>
             </div>
           </div>
           <OsPrazoProgressoBar
@@ -176,12 +176,59 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
             dataConclusao={projeto.dataConclusao}
             dataFim={projeto.dataFim}
             status={projeto.status}
-            diariasOrcadas={diariasOrcadas}
-            diariasRealizadas={diariasRealizadas}
             variant="full"
           />
         </div>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800/50 bg-white dark:bg-dark-card p-5">
+          <h4 className="text-sm font-bold text-gray-800 dark:text-white">Estimado (orçado)</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">
+            Esforço previsto dentro do prazo do cronograma.
+          </p>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-xs text-gray-500">Horas execução</div>
+              <div className="text-lg font-bold tabular-nums">
+                {formatQuantidade(diariasOrcadas * HORAS_COMERCIAIS_POR_DIA, 'h')}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Horas eng. orçadas</div>
+              <div className="text-lg font-bold tabular-nums">{formatQuantidade(horasOrcadas, 'h')}</div>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800/50 bg-white dark:bg-dark-card p-5">
+          <h4 className="text-sm font-bold text-gray-800 dark:text-white">Realizado</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">
+            Apontado ao executar a alocação no calendário ou pelo modal F1.
+          </p>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-xs text-gray-500">Horas execução</div>
+              <div className="text-lg font-bold tabular-nums">
+                {formatQuantidade(totaisApontamentos.diarias * HORAS_COMERCIAIS_POR_DIA, 'h')}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Horas de engenharia</div>
+              <div className="text-lg font-bold tabular-nums">
+                {formatQuantidade(totaisApontamentos.horas, 'h')}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {projeto.id && (
+        <OsFatiasTempoBarras
+          projetoId={projeto.id}
+          horasEngenhariaOrcadas={horasOrcadas}
+          diariasEquipeOrcadas={diariasOrcadas}
+        />
+      )}
 
       {!resumo ? (
         <p className="text-sm text-gray-500">Carregando resumo...</p>
@@ -249,7 +296,7 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
               <div className="flex justify-between text-sm mb-2">
                 <span>Orçado</span>
                 <span className="font-semibold">
-                  {formatQuantidade(resumo.diariasEquipeOrcadas, 'd')}
+                  {formatQuantidade(resumo.diariasEquipeOrcadas * HORAS_COMERCIAIS_POR_DIA, 'h')}
                 </span>
               </div>
               <div className="flex justify-between text-sm mb-3">
@@ -259,7 +306,7 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
                     resumo.estouroDiariasEquipe ? 'text-red-700' : ''
                   }`}
                 >
-                  {formatQuantidade(resumo.diariasEquipeRealizadas, 'd')}
+                  {formatQuantidade(resumo.diariasEquipeRealizadas * HORAS_COMERCIAIS_POR_DIA, 'h')}
                 </span>
               </div>
               <div className="h-3 bg-white/70 dark:bg-black/20 rounded-full overflow-hidden">
@@ -281,7 +328,7 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
               </div>
               {resumo.estouroDiariasEquipe && (
                 <p className="text-xs text-red-700 mt-2 font-semibold">
-                  Orçamento de diárias estourado
+                  Orçamento de horas de execução estourado
                 </p>
               )}
             </div>
@@ -354,7 +401,7 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
                 Custo / esforço por apontamento (F1)
               </h4>
               <p className="text-xs text-gray-500 mt-0.5">
-                Horas de engenharia, diárias/HE de execução e colaboradores lançados no
+                Horas de engenharia, horas de execução e colaboradores lançados no
                 apontamento rápido.
               </p>
             </div>
@@ -370,9 +417,9 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
                 </div>
               </div>
               <div>
-                <div className="text-xs text-gray-500">Diárias F1</div>
+                <div className="text-xs text-gray-500">Horas execução F1</div>
                 <div className="font-semibold">
-                  {formatQuantidade(totaisApontamentos.diarias, 'd')}
+                  {formatQuantidade(totaisApontamentos.diarias * HORAS_COMERCIAIS_POR_DIA, 'h')}
                 </div>
               </div>
               <div>

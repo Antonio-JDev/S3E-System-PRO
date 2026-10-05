@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PRAZO_LIMITE_AMARELO,
+  calcularLeituraOrcadoRealizado,
   calcularPrazoProgresso,
   contarColaboradoresDistintos,
   montarResumoProdutividadeOs,
@@ -21,65 +22,45 @@ describe('osPrazoProgresso.util', () => {
     expect(r.cor).toBe('neutral');
   });
 
-  it('usa diárias orçadas como eixo e fica amarelo abaixo do limite', () => {
-    const r = calcularPrazoProgresso({
-      dataInicio: inicio,
-      diariasOrcadas: 10,
-      diariasRealizadas: 3,
-      status: 'EXECUCAO',
-      agora: new Date('2026-01-05T12:00:00'), // 4 dias corridos
-    });
-    expect(r.eixo).toBe('diarias');
-    expect(r.temEstimativa).toBe(true);
-    expect(r.percentualRaw).toBe(40); // max(4/10, 3/10)*100
-    expect(r.nivel).toBe('no_prazo');
-    expect(r.cor).toBe('yellow');
-    expect(r.badge).toBe('No prazo');
-    expect(r.percentualRaw).toBeLessThan(PRAZO_LIMITE_AMARELO);
-  });
-
-  it('fica laranja entre 80% e 100%', () => {
-    const r = calcularPrazoProgresso({
-      dataInicio: inicio,
-      diariasOrcadas: 10,
-      diariasRealizadas: 8.5,
-      status: 'EXECUCAO',
-      agora: new Date('2026-01-05T12:00:00'),
-    });
-    expect(r.percentualRaw).toBe(85);
-    expect(r.nivel).toBe('em_risco');
-    expect(r.cor).toBe('orange');
-    expect(r.badge).toBe('Em risco');
-  });
-
-  it('fica vermelho ao estourar por dias corridos em EXECUCAO', () => {
-    const r = calcularPrazoProgresso({
-      dataInicio: inicio,
-      diariasOrcadas: 10,
-      diariasRealizadas: 5,
-      status: 'EXECUCAO',
-      agora: new Date('2026-01-15T12:00:00'), // 14 dias > 10
-    });
-    expect(r.estourou).toBe(true);
-    expect(r.motivoEstouro).toBe('dias_corridos');
-    expect(r.nivel).toBe('estouro');
-    expect(r.cor).toBe('red');
-    expect(r.percentual).toBe(100);
-    expect(r.percentualRaw).toBeGreaterThan(100);
-  });
-
-  it('fica vermelho ao estourar por diárias realizadas', () => {
+  it('ignora diárias orçadas e fica sem estimativa sem data final', () => {
     const r = calcularPrazoProgresso({
       dataInicio: inicio,
       diariasOrcadas: 10,
       diariasRealizadas: 12,
       status: 'EXECUCAO',
+      agora: new Date('2026-01-15T12:00:00'),
+    });
+    expect(r.temEstimativa).toBe(false);
+    expect(r.eixo).toBe('nenhum');
+    expect(r.estourou).toBe(false);
+  });
+
+  it('fica amarelo abaixo de 80% da janela do cronograma', () => {
+    const r = calcularPrazoProgresso({
+      dataInicio: inicio,
+      dataPrevisao: new Date('2026-01-11T12:00:00'),
+      diariasOrcadas: 2,
+      diariasRealizadas: 2,
       agora: new Date('2026-01-05T12:00:00'),
     });
-    expect(r.estourou).toBe(true);
-    expect(r.motivoEstouro).toBe('diarias');
-    expect(r.cor).toBe('red');
-    expect(r.labelNumeros).toContain('diárias');
+    expect(r.eixo).toBe('dias_calendario');
+    expect(r.percentualRaw).toBe(40);
+    expect(r.nivel).toBe('no_prazo');
+    expect(r.cor).toBe('yellow');
+    expect(r.percentualRaw).toBeLessThan(PRAZO_LIMITE_AMARELO);
+    expect(r.estourou).toBe(false);
+  });
+
+  it('fica laranja entre 80% e 100% da janela', () => {
+    const r = calcularPrazoProgresso({
+      dataInicio: inicio,
+      dataPrevisao: new Date('2026-01-11T12:00:00'),
+      agora: new Date('2026-01-09T12:00:00'),
+    });
+    expect(r.percentualRaw).toBe(80);
+    expect(r.nivel).toBe('em_risco');
+    expect(r.cor).toBe('orange');
+    expect(r.badge).toBe('Em risco');
   });
 
   it('usa janela dataInicio→dataPrevisao quando não há diárias orçadas', () => {
@@ -168,6 +149,36 @@ describe('osPrazoProgresso.util', () => {
         ],
       })
     ).toBe(2);
+  });
+
+  it('no bloco de prazo compara apontado com orçado e ignora dia corrido', () => {
+    const r = calcularLeituraOrcadoRealizado({
+      horasOrcadas: 2,
+      horasRealizadas: 0,
+      diariasOrcadas: 2,
+      diariasRealizadas: 1,
+    });
+    expect(r.estourou).toBe(false);
+    expect(r.horas.percentualRaw).toBe(0);
+    expect(r.diarias.percentualRaw).toBe(50);
+    expect(r.diarias.realizado).toBe(1);
+    expect(r.diarias.orcado).toBe(2);
+    expect(r.nivel).toBe('no_prazo');
+    expect(r.badge).toBe('No prazo');
+  });
+
+  it('estoura o prazo estimado quando o apontado passa do orçado', () => {
+    const r = calcularLeituraOrcadoRealizado({
+      horasOrcadas: 2,
+      horasRealizadas: 3,
+      diariasOrcadas: 2,
+      diariasRealizadas: 1,
+    });
+    expect(r.horas.estourou).toBe(true);
+    expect(r.diarias.estourou).toBe(false);
+    expect(r.estourou).toBe(true);
+    expect(r.cor).toBe('red');
+    expect(r.badge).toBe('Estouro');
   });
 
   it('monta resumo de produtividade com rendimento custo/homem-hora', () => {

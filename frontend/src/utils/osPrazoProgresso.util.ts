@@ -1,9 +1,5 @@
 import type { ResultadoOsCalculado } from './apropriacaoOs';
-import {
-  calcularDiasCorridos,
-  calcularDiasEntreDatas,
-  detectarEstouroPrazoExecucao,
-} from './osCockpit.util';
+import { calcularDiasCorridos, calcularDiasEntreDatas } from './osCockpit.util';
 
 /** Limite superior do “no prazo” (amarelo). Acima disso → laranja. */
 export const PRAZO_LIMITE_AMARELO = 80;
@@ -115,14 +111,13 @@ function nivelPorPercentual(raw: number, estourou: boolean): {
 }
 
 /**
- * Consumo do prazo estimado (amarelo → laranja → vermelho).
- * Prioriza diárias orçadas (mesma regra do cockpit); senão janela dataInicio→dataPrevisao.
+ * Consumo do prazo do cronograma (amarelo → laranja → vermelho).
+ * A janela é dataInicio → dataPrevisao. Diárias e horas orçadas são esforço, não o prazo.
+ * Estouro só quando os dias corridos passam da data final.
  */
 export function calcularPrazoProgresso(
   input: CalcularPrazoProgressoInput
 ): PrazoProgressoResultado {
-  const diariasOrcadas = Number(input.diariasOrcadas) || 0;
-  const diariasRealizadas = Number(input.diariasRealizadas) || 0;
   const ref = refFimPrazo(input);
   const diasCorridos = calcularDiasCorridos(input.dataInicio, ref);
 
@@ -144,53 +139,6 @@ export function calcularPrazoProgresso(
       motivoEstouro: null,
     };
   };
-
-  if (diariasOrcadas > 0) {
-    const pctDias = (diasCorridos / diariasOrcadas) * 100;
-    const pctDiarias = (diariasRealizadas / diariasOrcadas) * 100;
-    const percentualRaw = Math.max(pctDias, pctDiarias);
-
-    const estouroCockpit = detectarEstouroPrazoExecucao({
-      status: input.status || 'EXECUCAO',
-      diariasOrcadas,
-      diariasRealizadas,
-      diasCorridos,
-    });
-
-    // Fora de EXECUCAO ainda mostra estouro visual se consumo > 100%
-    let motivoEstouro: PrazoProgressoResultado['motivoEstouro'] = null;
-    let estourou = false;
-    if (estouroCockpit.estourou) {
-      estourou = true;
-      motivoEstouro = estouroCockpit.motivo;
-    } else if (percentualRaw > 100) {
-      estourou = true;
-      motivoEstouro =
-        pctDiarias >= pctDias ? 'diarias' : 'dias_corridos';
-    }
-
-    const { nivel, cor, badge } = nivelPorPercentual(percentualRaw, estourou);
-    const classes = classesPorCor(cor);
-    const usaDiariasComoLabel = diariasRealizadas > 0 || pctDiarias >= pctDias;
-
-    return {
-      temEstimativa: true,
-      eixo: 'diarias',
-      percentual: Math.min(100, Math.max(0, percentualRaw)),
-      percentualRaw,
-      consumido: usaDiariasComoLabel ? diariasRealizadas : diasCorridos,
-      estimado: diariasOrcadas,
-      labelNumeros: usaDiariasComoLabel
-        ? `${formatNum(diariasRealizadas)} / ${formatNum(diariasOrcadas)} diárias`
-        : `${diasCorridos} / ${formatNum(diariasOrcadas)} dias`,
-      nivel,
-      badge,
-      cor,
-      ...classes,
-      estourou,
-      motivoEstouro,
-    };
-  }
 
   const diasEstimados = calcularDiasEntreDatas(input.dataInicio, input.dataPrevisao);
   if (diasEstimados != null && diasEstimados > 0) {
@@ -219,8 +167,93 @@ export function calcularPrazoProgresso(
   return semEstimativa();
 }
 
-function formatNum(n: number): string {
-  return n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+export interface FaixaOrcadoRealizado {
+  realizado: number;
+  orcado: number;
+  /** 0–100 para a largura da barra. */
+  percentual: number;
+  /** Sem teto. Infinito quando há apontamento e o orçado é zero. */
+  percentualRaw: number;
+  estourou: boolean;
+  cor: PrazoProgressoCor;
+  barClassName: string;
+}
+
+export interface LeituraOrcadoRealizado {
+  horas: FaixaOrcadoRealizado;
+  diarias: FaixaOrcadoRealizado;
+  temEstimativa: boolean;
+  estourou: boolean;
+  nivel: PrazoProgressoNivel;
+  badge: string;
+  cor: PrazoProgressoCor;
+  badgeClassName: string;
+}
+
+function faixaOrcadoRealizado(realizado: number, orcado: number): FaixaOrcadoRealizado {
+  const r = Math.max(0, Number(realizado) || 0);
+  const o = Math.max(0, Number(orcado) || 0);
+  const semBase = o <= 0;
+  const percentualRaw = semBase ? (r > 0 ? Number.POSITIVE_INFINITY : 0) : (r / o) * 100;
+  const estourou = semBase ? r > 0 : r > o;
+  const { cor } = semBase && r <= 0
+    ? { cor: 'neutral' as PrazoProgressoCor }
+    : nivelPorPercentual(Number.isFinite(percentualRaw) ? percentualRaw : 101, estourou);
+  return {
+    realizado: r,
+    orcado: o,
+    percentual: Number.isFinite(percentualRaw) ? Math.min(100, Math.max(0, percentualRaw)) : r > 0 ? 100 : 0,
+    percentualRaw,
+    estourou,
+    cor,
+    barClassName: classesPorCor(cor).barClassName,
+  };
+}
+
+/**
+ * Leitura do bloco Prazo e estimativa: orçado salvo versus apontado.
+ * A data limite e os dias corridos não entram neste progresso.
+ */
+export function calcularLeituraOrcadoRealizado(input: {
+  horasOrcadas: number;
+  horasRealizadas: number;
+  diariasOrcadas: number;
+  diariasRealizadas: number;
+}): LeituraOrcadoRealizado {
+  const horas = faixaOrcadoRealizado(input.horasRealizadas, input.horasOrcadas);
+  const diarias = faixaOrcadoRealizado(input.diariasRealizadas, input.diariasOrcadas);
+  const faixas = [horas, diarias];
+  const temEstimativa = faixas.some((f) => f.orcado > 0 || f.realizado > 0);
+  const estourou = faixas.some((f) => f.estourou);
+
+  if (!temEstimativa) {
+    return {
+      horas,
+      diarias,
+      temEstimativa: false,
+      estourou: false,
+      nivel: 'sem_estimativa',
+      badge: 'Sem estimativa',
+      cor: 'neutral',
+      badgeClassName: classesPorCor('neutral').badgeClassName,
+    };
+  }
+
+  const raws = faixas
+    .filter((f) => f.orcado > 0 || f.realizado > 0)
+    .map((f) => (Number.isFinite(f.percentualRaw) ? f.percentualRaw : 101));
+  const rawMax = raws.length > 0 ? Math.max(...raws) : 0;
+  const nivel = nivelPorPercentual(rawMax, estourou);
+  return {
+    horas,
+    diarias,
+    temEstimativa: true,
+    estourou,
+    nivel: nivel.nivel,
+    badge: nivel.badge,
+    cor: nivel.cor,
+    badgeClassName: classesPorCor(nivel.cor).badgeClassName,
+  };
 }
 
 /** Conta colaboradores distintos nas linhas de calendário do resumo F1/apropriação. */

@@ -23,20 +23,50 @@ export function roundHorasFatia(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+export type ChaveSerieComparativo = 'orcadas' | 'previstas' | 'executadas' | 'faltantes' | 'excedente';
+
+export interface SerieComparativoTempo {
+  chave: ChaveSerieComparativo;
+  nome: string;
+  horas: number;
+}
+
 /**
- * Três fatias disjuntas sobre o orçado.
- * restante = orcadas − efetivadas − previstas (nunca negativo).
- * excedente = o que passou do orçado, visível à parte.
+ * Quatro barras do comparativo visual.
+ * Faltantes = restante (orçadas − executadas − previstas, nunca negativo).
+ * O excedente entra como quinta barra só quando a soma passa do orçado.
+ */
+export function seriesComparativoTempo(fatias: FatiasHoras): SerieComparativoTempo[] {
+  const series: SerieComparativoTempo[] = [
+    { chave: 'orcadas', nome: 'Orçadas', horas: fatias.orcadas },
+    { chave: 'previstas', nome: 'Previstas', horas: fatias.previstas },
+    { chave: 'executadas', nome: 'Executadas', horas: fatias.efetivadas },
+    { chave: 'faltantes', nome: 'Faltantes', horas: fatias.restante },
+  ];
+  if (fatias.excedente > 0) {
+    series.push({ chave: 'excedente', nome: 'Excedente', horas: fatias.excedente });
+  }
+  return series;
+}
+
+/**
+ * Previstas é o plano gravado na agenda e permanece depois da execução.
+ * O faltante desconta só a parte da previsão que ainda não foi executada,
+ * para a mesma hora não sair duas vezes do orçado.
  */
 export function calcularFatiasHoras(
   orcadas: number,
   efetivadas: number,
   previstas: number,
+  previstasAindaNaoExecutadas?: number,
 ): FatiasHoras {
   const o = roundHorasFatia(Math.max(0, Number(orcadas) || 0));
   const e = roundHorasFatia(Math.max(0, Number(efetivadas) || 0));
   const p = roundHorasFatia(Math.max(0, Number(previstas) || 0));
-  const soma = roundHorasFatia(e + p);
+  const pNaConta = roundHorasFatia(
+    Math.max(0, Number(previstasAindaNaoExecutadas ?? previstas) || 0),
+  );
+  const soma = roundHorasFatia(e + pNaConta);
   return {
     orcadas: o,
     efetivadas: e,
@@ -94,19 +124,112 @@ export function ymdLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export function horasPorDiaLocal(inicio: Date, fim: Date): Array<{ dia: string; horas: number }> {
-  const out: Array<{ dia: string; horas: number }> = [];
+/**
+ * Ciclo do arraste de obra. É o workshift padrão do calendário
+ * (entrada1 07:30 / saida2 17:30 em workshift.util.ts).
+ * Horário fora disso só entra se estiver salvo em horariosPorDia.
+ */
+export const CICLO_ALOCACAO_INICIO = '07:30';
+export const CICLO_ALOCACAO_FIM = '17:30';
+
+export interface HorarioDiaAlocacao {
+  dia: string;
+  inicio: string;
+  fim: string;
+}
+
+function minutosHm(hhmm: string): number | null {
+  const m = String(hhmm).trim().match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function hhmmLocal(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+export function horasEntreHorarios(inicio: string, fim: string): number {
+  const a = minutosHm(inicio);
+  const b = minutosHm(fim);
+  if (a == null || b == null || b <= a) return 0;
+  return (b - a) / 60;
+}
+
+/** Recorta cada dia civil do intervalo ao ciclo 07:30–17:30. A madrugada fica de fora. */
+export function intervalosNoCicloComercial(inicio: Date, fim: Date): HorarioDiaAlocacao[] {
+  const out: HorarioDiaAlocacao[] = [];
   if (Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime()) || fim <= inicio) return out;
+  const cicloIniMin = minutosHm(CICLO_ALOCACAO_INICIO) ?? 7 * 60 + 30;
+  const cicloFimMin = minutosHm(CICLO_ALOCACAO_FIM) ?? 17 * 60 + 30;
   let cursor = new Date(inicio.getTime());
   const end = fim.getTime();
   while (cursor.getTime() < end) {
-    const nextMidnight = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
-    const sliceEndMs = Math.min(nextMidnight.getTime(), end);
-    const horas = (sliceEndMs - cursor.getTime()) / 3_600_000;
-    if (horas > 0) out.push({ dia: ymdLocal(cursor), horas });
-    cursor = new Date(sliceEndMs);
+    const dayStart = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+    const nextMidnight = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+    const sliceStart = cursor.getTime();
+    const sliceEnd = Math.min(nextMidnight.getTime(), end);
+    const cicloStart = dayStart.getTime() + cicloIniMin * 60_000;
+    const cicloEnd = dayStart.getTime() + cicloFimMin * 60_000;
+    const a = Math.max(sliceStart, cicloStart);
+    const b = Math.min(sliceEnd, cicloEnd);
+    if (b > a) {
+      out.push({
+        dia: ymdLocal(dayStart),
+        inicio: hhmmLocal(new Date(a)),
+        fim: hhmmLocal(new Date(b)),
+      });
+    }
+    cursor = new Date(nextMidnight.getTime());
   }
   return out;
+}
+
+export function lerHorariosPorDia(value: unknown): HorarioDiaAlocacao[] | null {
+  if (value == null) return null;
+  let raw: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      raw = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(raw)) return null;
+  const out: HorarioDiaAlocacao[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const dia = String((item as { dia?: unknown }).dia || '');
+    const inicio = String((item as { inicio?: unknown }).inicio || '');
+    const fim = String((item as { fim?: unknown }).fim || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) continue;
+    if (minutosHm(inicio) == null || minutosHm(fim) == null) continue;
+    if (horasEntreHorarios(inicio, fim) <= 0) continue;
+    out.push({ dia, inicio, fim });
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Horas que alimentam a previsão da OS.
+ * Sem horário manual, recorta o intervalo ao ciclo comercial.
+ * Com horariosPorDia, usa exatamente o que foi gravado no modal (pode passar de 17:30).
+ */
+export function horasPorDiaLocal(
+  inicio: Date,
+  fim: Date,
+  horariosManuais?: HorarioDiaAlocacao[] | null,
+): Array<{ dia: string; horas: number }> {
+  const manuais = lerHorariosPorDia(horariosManuais);
+  if (manuais) {
+    return manuais.map((h) => ({ dia: h.dia, horas: horasEntreHorarios(h.inicio, h.fim) }));
+  }
+  return intervalosNoCicloComercial(inicio, fim).map((h) => ({
+    dia: h.dia,
+    horas: horasEntreHorarios(h.inicio, h.fim),
+  }));
 }
 
 export interface EventoFatiaInput {
@@ -119,6 +242,7 @@ export interface EventoFatiaInput {
   equipe?: MembroClassificavel[];
   equipeEngenhariaIds?: string[];
   equipeExecucaoIds?: string[];
+  horariosPorDia?: HorarioDiaAlocacao[] | null;
 }
 
 export interface ApontamentoFatiaInput {
@@ -213,9 +337,7 @@ export function montarResumoFatiasOs(input: {
     if ((ev.tipo || '') !== 'OBRA') continue;
     const inicio = parseDate(ev.dataInicio);
     const fim = parseDate(ev.dataFim);
-    if (ev.status === 'PREVISAO') {
-      for (const dia of diasCobertos(inicio, fim)) diasPrevistos.add(dia);
-    }
+    for (const dia of diasCobertos(inicio, fim)) diasPrevistos.add(dia);
     if (ev.status === 'VALIDO') {
       for (const dia of diasCobertos(inicio, fim)) diasEfetivados.add(dia);
     }
@@ -226,7 +348,7 @@ export function montarResumoFatiasOs(input: {
       ev.equipeEngenhariaIds,
       ev.equipeExecucaoIds,
     );
-    for (const slice of horasPorDiaLocal(inicio, fim)) {
+    for (const slice of horasPorDiaLocal(inicio, fim, ev.horariosPorDia)) {
       if (engenharia.length > 0) somarMapa(agendaEng, slice.dia, slice.horas * engenharia.length);
       if (execucao.length > 0) somarMapa(agendaExe, slice.dia, slice.horas * execucao.length);
     }
@@ -239,11 +361,13 @@ export function montarResumoFatiasOs(input: {
     engenharia: calcularFatiasHoras(
       Number(input.horasEngenhariaOrcadas) || 0,
       soma(efetivasEng),
+      soma(agendaEng),
       horasPrevistasSemDuplaContagem(agendaEng, efetivasEng),
     ),
     execucao: calcularFatiasHoras(
       diariasParaHoras(Number(input.diariasEquipeOrcadas) || 0),
       soma(efetivasExe),
+      soma(agendaExe),
       horasPrevistasSemDuplaContagem(agendaExe, efetivasExe),
     ),
     diasPrevistos: diasPrevistos.size,
