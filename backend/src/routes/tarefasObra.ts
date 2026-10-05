@@ -1,104 +1,25 @@
-import express from 'express';
+import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
-import { checkPermission, checkEletricista, checkDeletePermission } from '../middlewares/rbac';
-import {
-  getTarefasEletricista,
-  salvarResumoTarefa,
-  getTarefaById,
-  criarTarefa,
-  atualizarTarefa,
-  deletarTarefa,
-  getTarefasPorObra,
-  getRegistrosAtividade,
-  uploadTarefaImages
-} from '../controllers/tarefasObraController';
-
-const router = express.Router();
 
 /**
- * Rotas de Tarefas da Obra
- * 
- * Permissões:
- * - Eletricista: Visualizar suas tarefas, registrar atividades
- * - Desenvolvedor: Acesso completo
- * - Gerente/Engenheiro/Admin: Criar e gerenciar tarefas
+ * Tarefas de campo da aba Cronograma e Alocação foram descontinuadas.
+ * As rotas permanecem registradas e respondem 410 para não cair em outro handler de /api/obras.
  */
+const router = Router();
 
-// GET /api/obras/tarefas - Listar tarefas do usuário (eletricista ou desenvolvedor)
-router.get(
-  '/tarefas',
-  authenticate,
-  checkPermission('view_tarefas_obra'),
-  getTarefasEletricista
-);
+const descontinuado = (_req: Request, res: Response) => {
+  res.status(410).json({
+    success: false,
+    error: 'Tarefas de campo foram descontinuadas nesta ordem de serviço.',
+  });
+};
 
-// POST /api/obras/tarefas/resumo - Salvar resumo do dia com fotos (eletricista ou desenvolvedor)
-// ✅ Qualquer usuário autenticado pode registrar atividades (especialmente eletricistas)
-router.post(
-  '/tarefas/resumo',
-  authenticate, // Apenas precisa estar autenticado
-  (req, res, next) => {
-    uploadTarefaImages(req, res, (err) => {
-      if (err) {
-        console.error('❌ Erro no upload:', err);
-        return res.status(400).json({ 
-          success: false, 
-          error: err.message || 'Erro ao fazer upload das imagens' 
-        });
-      }
-      next();
-    });
-  },
-  salvarResumoTarefa
-);
+router.use(authenticate);
 
-// GET /api/obras/tarefas/:id - Buscar tarefa específica
-// ✅ Qualquer usuário autenticado pode visualizar detalhes da tarefa
-router.get(
-  '/tarefas/:id',
-  authenticate,
-  getTarefaById
-);
-
-// POST /api/obras/tarefas - Criar nova tarefa
-// Alterado para permitir que qualquer usuário autenticado crie tarefas (fallback operacional)
-router.post(
-  '/tarefas',
-  authenticate, // agora apenas autenticado é suficiente
-  criarTarefa
-);
-
-// PUT /api/obras/tarefas/:id - Atualizar tarefa (gerente/engenheiro/admin/desenvolvedor)
-router.put(
-  '/tarefas/:id',
-  authenticate,
-  checkPermission('update_obra'),
-  atualizarTarefa
-);
-
-// DELETE /api/obras/tarefas/:id - Deletar tarefa (desenvolvedor/admin/gerente)
-router.delete(
-  '/tarefas/:id',
-  authenticate,
-  checkDeletePermission('obra'),
-  deletarTarefa
-);
-
-// GET /api/obras/:obraId/tarefas - Listar tarefas de uma obra específica
-router.get(
-  '/:obraId/tarefas',
-  authenticate,
-  checkPermission('view_obras', 'view_tarefas_obra'),
-  getTarefasPorObra
-);
-
-// GET /api/obras/tarefas/registros/:tarefaId - Listar registros de atividade
-// ✅ Qualquer usuário autenticado pode visualizar registros
-router.get(
-  '/tarefas/registros/:tarefaId',
-  authenticate,
-  getRegistrosAtividade
-);
+router.all('/tarefas/resumo', descontinuado);
+router.all('/tarefas/registros/:tarefaId', descontinuado);
+router.all('/tarefas/:id', descontinuado);
+router.all('/tarefas', descontinuado);
+router.all('/:obraId/tarefas', descontinuado);
 
 export default router;
-
