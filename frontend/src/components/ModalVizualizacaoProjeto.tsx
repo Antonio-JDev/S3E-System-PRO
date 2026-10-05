@@ -27,7 +27,6 @@ import {
 } from '../utils/apropriacaoOs';
 import { projetosService } from '../services/projetosService';
 import { ordemServicosService } from '../services/ordemServicosService';
-import type { Obra } from '../services/obrasService';
 import OsVisaoGeralTab from './os/OsVisaoGeralTab';
 import { statusBadgeClass, statusLabel } from '../utils/osStatus.util';
 import {
@@ -69,6 +68,19 @@ import {
   parseKitIdFromExpandKey,
   resolveComposicaoCatalogoKit,
 } from '../utils/bomKitExpand';
+import ModalDefinirChegada, {
+  type DadosDefinirChegada,
+  type ItemDefinirChegada,
+} from './os/ModalDefinirChegada';
+import {
+  previsaoChegadaService,
+  type PrevisaoChegadaMaterial,
+} from '../services/previsaoChegadaService';
+import {
+  linhaBomAceitaChegada,
+  rotuloReferenciaChegada,
+  statusPrevisaoChegada,
+} from '../utils/previsaoChegadaBom.util';
 
 type ProjetoStatus = 'PROPOSTA' | 'VALIDADO' | 'APROVADO' | 'EXECUCAO' | 'CONCLUIDO';
 
@@ -254,7 +266,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   
   // Estado para obra vinculada
   const [obraVinculada, setObraVinculada] = useState<{ id: string; nome?: string } | null>(null);
-  const [obraDetalhe, setObraDetalhe] = useState<Obra | null>(null);
   const [loadingObra, setLoadingObra] = useState(false);
 
   // Modal de visualização de cliente
@@ -290,17 +301,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     setAprovacaoNegadaOpen(true);
   }
 
-  // Estados para alocação de materiais
-  const [materialParaAlocar, setMaterialParaAlocar] = useState<{
-    item: OrcamentoItemRef;
-    materialId: string;
-    quantidade: number;
-    nomeMaterial: string;
-    estoqueDisponivel: number;
-  } | null>(null);
-  const [confirmarAlocacaoOpen, setConfirmarAlocacaoOpen] = useState(false);
-  const [alocacoesPorItem, setAlocacoesPorItem] = useState<Record<string, string>>({}); // itemId -> status de alocação
   const [materiaisAlocados, setMateriaisAlocados] = useState<Set<string>>(new Set()); // Set de materialIds já alocados
+
+  // Previsão de chegada de compras (coluna "Chegada" da BOM), indexada pelo id da linha
+  const [previsoesChegada, setPrevisoesChegada] = useState<Record<string, PrevisaoChegadaMaterial>>({});
+  const [selecionadosChegada, setSelecionadosChegada] = useState<Set<string>>(new Set());
+  const [modalChegadaItens, setModalChegadaItens] = useState<ItemDefinirChegada[] | null>(null);
+  const [salvandoChegada, setSalvandoChegada] = useState(false);
   
   // Estados para vinculação de itens do banco frio
   const [vinculacoesBancoFrio, setVinculacoesBancoFrio] = useState<Record<string, string>>({}); // itemId -> materialId
@@ -337,6 +344,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     if (isOpen && activeTab === 'Materiais' && projeto.orcamento?.id) {
       carregarOrcamentoCompleto();
       carregarMateriaisEstoque(); // Sempre atualizar lista de materiais/estoque ao abrir a aba (reflete compras e entradas)
+      void carregarPrevisoesChegada();
       // Garantir que a aba Materiais já saiba quais materiais tiveram baixa/alocação na OS.
       // Isso habilita o check verde em "Alocado" logo ao abrir a aba.
       if (projeto?.id) carregarObraVinculada();
@@ -349,9 +357,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       carregarObraVinculada();
       carregarDocumentos();
       void carregarResumoApropriacao();
-    }
-    if (isOpen && activeTab === 'Cronograma & Alocação') {
-      carregarObraVinculada();
     }
     if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status !== 'CANCELADO')) {
       void carregarResumoApropriacao();
@@ -520,32 +525,15 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           nome: data.nome || data.nomeObra || 'Obra vinculada',
         };
         setObraVinculada(obra);
-        setObraDetalhe({
-          id: data.id,
-          projetoId: data.projetoId ?? projeto.id,
-          nomeObra: data.nomeObra || data.nome || 'Obra vinculada',
-          status: data.status || 'BACKLOG',
-          clienteNome: data.clienteNome || projeto.cliente?.nome || '',
-          dataPrevistaInicio: data.dataPrevistaInicio,
-          dataPrevistaFim: data.dataPrevistaFim,
-          dataInicioReal: data.dataInicioReal,
-          dataFimReal: data.dataFimReal,
-          progresso: data.progresso ?? 0,
-          totalTarefas: data.totalTarefas ?? 0,
-          tarefasConcluidas: data.tarefasConcluidas ?? 0,
-          equipe: data.equipe,
-        });
 
         await carregarMateriaisAlocados(obra.id);
       } else {
         setObraVinculada(null);
-        setObraDetalhe(null);
         setMateriaisAlocados(new Set());
       }
     } catch (error) {
       console.error('Erro ao carregar obra vinculada:', error);
       setObraVinculada(null);
-      setObraDetalhe(null);
       setMateriaisAlocados(new Set());
     } finally {
       setLoadingObra(false);
@@ -562,17 +550,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         );
         setMateriaisAlocados(materiaisIds);
         console.log(`✅ Materiais já alocados carregados: ${materiaisIds.size} materiais`);
-        
-        // Atualizar estado de alocação por item baseado nos materiais alocados
-        if (orcamentoCompleto?.items) {
-          const novasAlocacoes: Record<string, string> = {};
-          orcamentoCompleto.items.forEach((item: any) => {
-            if (item.material?.id && materiaisIds.has(item.material.id)) {
-              novasAlocacoes[item.id] = 'Alocado';
-            }
-          });
-          setAlocacoesPorItem(prev => ({ ...prev, ...novasAlocacoes }));
-        }
       } else {
         setMateriaisAlocados(new Set());
       }
@@ -582,131 +559,61 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
   }
 
-  async function handleAlocacaoChange(item: OrcamentoItemRef, value: string) {
-    // Se não for "Reservar do estoque", apenas atualizar o estado local
-    if (value !== 'Reservar do estoque') {
-      setAlocacoesPorItem(prev => ({
-        ...prev,
-        [item.id]: value
-      }));
-      return;
-    }
-
-    // Verificar se há obra vinculada
-    if (!obraVinculada?.id) {
-      toast.error('Obra não encontrada', {
-        description: 'É necessário ter uma obra vinculada ao projeto para alocar materiais.'
-      });
-      setAlocacoesPorItem(prev => ({
-        ...prev,
-        [item.id]: 'Não alocado'
-      }));
-      return;
-    }
-
-    // Verificar se o item tem material (não pode alocar itens de banco frio ou sem material)
-    if (!item.material?.id || item.tipo?.toUpperCase() === 'COTACAO') {
-      toast.error('Material não pode ser alocado', {
-        description: 'Apenas materiais do estoque real podem ser alocados. Itens do banco frio precisam ser comprados primeiro.'
-      });
-      setAlocacoesPorItem(prev => ({
-        ...prev,
-        [item.id]: 'Não alocado'
-      }));
-      return;
-    }
-
-    const quantidadeNecessaria = Number(item.quantidade ?? 0);
-    const estoqueDisponivel = Number(item.material?.estoque ?? 0);
-    const nomeMaterial = item.material?.nome || 'Material';
-
-    // Verificar se há estoque suficiente
-    if (estoqueDisponivel < quantidadeNecessaria) {
-      toast.error('Estoque insuficiente', {
-        description: `${nomeMaterial}: Disponível ${estoqueDisponivel}, Necessário ${quantidadeNecessaria}`
-      });
-      setAlocacoesPorItem(prev => ({
-        ...prev,
-        [item.id]: 'Não alocado'
-      }));
-      return;
-    }
-
-    // Preparar dados para confirmação
-    setMaterialParaAlocar({
-      item,
-      materialId: item.material.id,
-      quantidade: quantidadeNecessaria,
-      nomeMaterial,
-      estoqueDisponivel
-    });
-    setConfirmarAlocacaoOpen(true);
+  function aplicarPrevisoesChegada(lista: PrevisaoChegadaMaterial[]) {
+    setPrevisoesChegada(Object.fromEntries(lista.map((p) => [p.itemKey, p])));
   }
 
-  async function confirmarAlocacao() {
-    if (!materialParaAlocar || !obraVinculada?.id) {
-      toast.error('Erro ao alocar material');
-      return;
-    }
-
+  async function carregarPrevisoesChegada() {
+    if (!projeto?.id) return;
     try {
-      console.log('🔄 [ModalProjeto] Iniciando alocação de material:', {
-        obraId: obraVinculada.id,
-        materialId: materialParaAlocar.materialId,
-        quantidade: materialParaAlocar.quantidade
+      const res = await previsaoChegadaService.listar(projeto.id);
+      if (res.success && Array.isArray(res.data)) aplicarPrevisoesChegada(res.data);
+    } catch (error) {
+      console.error('Erro ao carregar previsões de chegada:', error);
+    }
+  }
+
+  async function salvarPrevisaoChegada(dados: DadosDefinirChegada) {
+    const itens = modalChegadaItens || [];
+    if (!itens.length) return;
+    try {
+      setSalvandoChegada(true);
+      const res = await previsaoChegadaService.definir(projeto.id, {
+        itens: itens.map((it) => ({ itemKey: it.itemKey, descricao: it.nome, materialId: it.materialId })),
+        ...dados,
       });
-
-      const response = await alocacaoMateriaisService.alocarMaterialParaObra(
-        obraVinculada.id,
-        {
-          materialId: materialParaAlocar.materialId,
-          quantidade: materialParaAlocar.quantidade,
-          projetoId: projeto.id
-        }
-      );
-
-      console.log('📥 [ModalProjeto] Resposta da alocação:', response);
-
-      if (response.success) {
-        console.log('✅ [ModalProjeto] Alocação bem-sucedida, mostrando toast de sucesso');
-        toast.success('✅ Material alocado com sucesso!', {
-          description: `${materialParaAlocar.nomeMaterial} foi alocado para a obra "${obraVinculada.nome || 'vinculada'}".`
-        });
-
-        // Adicionar material ao Set de materiais alocados
-        setMateriaisAlocados(prev => new Set([...prev, materialParaAlocar.materialId]));
-
-        // Atualizar estado de alocação
-        setAlocacoesPorItem(prev => ({
-          ...prev,
-          [materialParaAlocar.item.id]: 'Alocado'
-        }));
-
-        // Recarregar orçamento para atualizar estoque
-        await carregarOrcamentoCompleto();
-
-        // Fechar dialog
-        setConfirmarAlocacaoOpen(false);
-        setMaterialParaAlocar(null);
-      } else {
-        console.error('❌ [ModalProjeto] Alocação falhou:', response.error);
-        toast.error('Erro ao alocar material', {
-          description: response.error || 'Não foi possível alocar o material.'
-        });
-        setAlocacoesPorItem(prev => ({
-          ...prev,
-          [materialParaAlocar.item.id]: 'Não alocado'
-        }));
-      }
+      if (!res.success) throw new Error(res.error || 'Não foi possível salvar a data de chegada.');
+      aplicarPrevisoesChegada(res.data || []);
+      setSelecionadosChegada((prev) => {
+        const next = new Set(prev);
+        itens.forEach((it) => next.delete(it.itemKey));
+        return next;
+      });
+      setModalChegadaItens(null);
+      toast.success('Data de chegada definida', {
+        description: `${itens.length} item(ns) com chegada prevista para ${formatDateDisplay(dados.dataChegada)}.`,
+      });
     } catch (error: any) {
-      console.error('❌ [ModalProjeto] Erro ao alocar material:', error);
-      toast.error('Erro ao alocar material', {
-        description: error?.message || 'Ocorreu um erro ao processar a alocação.'
-      });
-      setAlocacoesPorItem(prev => ({
-        ...prev,
-        [materialParaAlocar.item.id]: 'Não alocado'
-      }));
+      toast.error('Erro ao definir data de chegada', { description: error?.message });
+    } finally {
+      setSalvandoChegada(false);
+    }
+  }
+
+  async function removerPrevisaoChegada() {
+    const keys = (modalChegadaItens || []).map((it) => it.itemKey).filter((k) => previsoesChegada[k]);
+    if (!keys.length) return;
+    try {
+      setSalvandoChegada(true);
+      const res = await previsaoChegadaService.remover(projeto.id, keys);
+      if (!res.success) throw new Error(res.error || 'Não foi possível remover a previsão.');
+      aplicarPrevisoesChegada(res.data || []);
+      setModalChegadaItens(null);
+      toast.success('Previsão de chegada removida');
+    } catch (error: any) {
+      toast.error('Erro ao remover previsão de chegada', { description: error?.message });
+    } finally {
+      setSalvandoChegada(false);
     }
   }
 
@@ -1070,6 +977,46 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       return nome.includes(termo) || sku.includes(termo) || ncm.includes(termo);
     });
   }, [itensParaExibicao, buscaMateriaisAba]);
+
+  const linhaJaAlocada = (item: OrcamentoItemRef) => !!(item.material?.id && materiaisAlocados.has(item.material.id));
+  const linhaPodeDefinirChegada = (item: OrcamentoItemRef) => linhaBomAceitaChegada(item) && !linhaJaAlocada(item);
+  const itemChegadaDaLinha = (item: OrcamentoItemRef): ItemDefinirChegada => ({
+    itemKey: item.id,
+    nome: item.material?.nome || item.cotacao?.nome || item.descricao || 'Item sem identificação',
+    materialId: item.material?.id || vinculacoesBancoFrio[item.id] || item.materialVinculadoId || null,
+  });
+
+  const itensChegadaVisiveis = itensFiltradosPorBusca
+    .filter((row) => linhaPodeDefinirChegada(row.item))
+    .map((row) => itemChegadaDaLinha(row.item));
+  // Seleção sobrevive à busca, mas some se o kit for recolhido (linha deixa de existir)
+  const itensChegadaSelecionados = itensParaExibicao
+    .filter((row) => selecionadosChegada.has(row.item.id) && linhaPodeDefinirChegada(row.item))
+    .map((row) => itemChegadaDaLinha(row.item));
+  const qtdVisiveisSelecionados = itensChegadaVisiveis.filter((it) => selecionadosChegada.has(it.itemKey)).length;
+  const todosVisiveisSelecionados =
+    itensChegadaVisiveis.length > 0 && qtdVisiveisSelecionados === itensChegadaVisiveis.length;
+  const hojeYmdChegada = localYmdFromDate(new Date());
+
+  function toggleSelecionadoChegada(itemKey: string) {
+    setSelecionadosChegada((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemKey)) next.delete(itemKey);
+      else next.add(itemKey);
+      return next;
+    });
+  }
+
+  function toggleSelecionarTodosChegada() {
+    setSelecionadosChegada((prev) => {
+      const next = new Set(prev);
+      itensChegadaVisiveis.forEach((it) => {
+        if (todosVisiveisSelecionados) next.delete(it.itemKey);
+        else next.add(it.itemKey);
+      });
+      return next;
+    });
+  }
 
   function handleComprarFaltantes() {
     const items = agregarItensFaltantesParaCompra(kitDispCache, itensParaExibicao, {
@@ -2307,10 +2254,48 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 </div>
               </div>
 
+                {itensChegadaSelecionados.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20">
+                    <span className="text-sm font-semibold text-blue-800 dark:text-blue-200">
+                      {itensChegadaSelecionados.length} item(ns) selecionado(s)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelecionadosChegada(new Set())}
+                        className="px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 rounded-lg hover:bg-white/70 dark:hover:bg-dark-hover"
+                      >
+                        Limpar seleção
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModalChegadaItens(itensChegadaSelecionados)}
+                        className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-all"
+                      >
+                        Definir data de chegada
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="overflow-x-auto bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl shadow-soft">
                   <table className="min-w-full">
                     <thead className="bg-gray-50 dark:bg-dark-bg border-b-2 border-gray-200 dark:border-dark-border">
                       <tr>
+                        <th className="text-center pl-4 pr-1 py-4 w-10">
+                          <input
+                            type="checkbox"
+                            aria-label="Selecionar todos os produtos"
+                            title="Selecionar todos os produtos visíveis"
+                            checked={todosVisiveisSelecionados}
+                            disabled={itensChegadaVisiveis.length === 0}
+                            ref={(el) => {
+                              if (el) el.indeterminate = qtdVisiveisSelecionados > 0 && !todosVisiveisSelecionados;
+                            }}
+                            onChange={toggleSelecionarTodosChegada}
+                            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                          />
+                        </th>
                         <th className="text-center px-4 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Foto</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Item</th>
                         <th className="text-left px-4 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">SKU</th>
@@ -2318,13 +2303,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Quantidade</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Subtotal</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Disponibilidade</th>
-                        <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Alocação</th>
+                        <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Chegada</th>
                       </tr>
                     </thead>
                     <tbody>
                       {loadingOrcamento ? (
                         <tr>
-                          <td colSpan={8} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                          <td colSpan={9} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                             <div className="flex flex-col items-center gap-2">
                               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                               <p className="font-medium">Carregando materiais...</p>
@@ -2470,9 +2455,28 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         }`;
 
                         const fotoUrl = item.material?.imagemUrl || materialVinculado?.imagemUrl;
+                        const podeDefinirChegada = linhaPodeDefinirChegada(item);
+                        const previsaoChegada = previsoesChegada[item.id];
+                        const statusChegada = previsaoChegada
+                          ? statusPrevisaoChegada(previsaoChegada.dataChegada, hojeYmdChegada)
+                          : null;
+                        const referenciaChegada = previsaoChegada
+                          ? rotuloReferenciaChegada(previsaoChegada.tipoReferencia, previsaoChegada.referencia)
+                          : null;
 
                         return (
                           <tr key={item.id || idx} className={rowClasses}>
+                            <td className="pl-4 pr-1 py-4 text-center align-top">
+                              {podeDefinirChegada && (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Selecionar ${nomeMaterial}`}
+                                  checked={selecionadosChegada.has(item.id)}
+                                  onChange={() => toggleSelecionadoChegada(item.id)}
+                                  className="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                />
+                              )}
+                            </td>
                             {/* Coluna de Foto */}
                             <td className="px-4 py-4 text-center align-top">
                               {fotoUrl ? (
@@ -2691,31 +2695,76 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                 </div>
                               )}
                             </td>
-                            <td className="px-6 py-4 text-sm align-top">
-                              {alocacoesPorItem[item.id] === 'Alocado' || (item.material?.id && materiaisAlocados.has(item.material.id)) ? (
+                            <td className="px-6 py-4 text-sm align-top min-w-[190px]">
+                              {isServico ? (
+                                <span className="text-xs text-gray-400 dark:text-gray-500">Não se aplica</span>
+                              ) : isKit ? (
+                                kitExpanded ? (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Defina a chegada nos componentes abaixo.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Expanda o kit para definir a chegada dos componentes.
+                                    </p>
+                                    {mostrarBotaoDesunificar && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleKitDesunificado(nodeKey, kitIdCatalogo)}
+                                        className="px-3 py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-all"
+                                      >
+                                        Expandir kit
+                                      </button>
+                                    )}
+                                  </div>
+                                )
+                              ) : linhaJaAlocada(item) ? (
                                 <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border-2 border-green-300 dark:border-green-700 rounded-lg">
                                   <svg className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                   </svg>
                                   <span className="text-green-700 dark:text-green-300 font-semibold">Alocado</span>
                                 </div>
-                              ) : (
-                                <select
-                                  value={alocacoesPorItem[item.id] || 'Não alocado'}
-                                  onChange={(e) => handleAlocacaoChange(item, e.target.value)}
-                                  disabled={!item.material?.id || isBancoFrio || !obraVinculada?.id || (item.material?.id && materiaisAlocados.has(item.material.id))}
-                                  className={`px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white ${
-                                    (!item.material?.id || isBancoFrio || !obraVinculada?.id || (item.material?.id && materiaisAlocados.has(item.material.id)))
-                                      ? 'opacity-50 cursor-not-allowed'
-                                      : ''
+                              ) : previsaoChegada ? (
+                                <div
+                                  className={`px-3 py-2 rounded-lg border-2 space-y-0.5 ${
+                                    statusChegada === 'atrasada'
+                                      ? 'bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700'
+                                      : 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700'
                                   }`}
                                 >
-                                  <option>Não alocado</option>
-                                  <option disabled={!possuiEstoque || !item.material?.id || isBancoFrio || (item.material?.id && materiaisAlocados.has(item.material.id))}>
-                                    Reservar do estoque
-                                  </option>
-                                  <option>Solicitar compra</option>
-                                </select>
+                                  <p
+                                    className={`font-semibold ${
+                                      statusChegada === 'atrasada'
+                                        ? 'text-red-700 dark:text-red-300'
+                                        : 'text-blue-700 dark:text-blue-300'
+                                    }`}
+                                  >
+                                    📦 {statusChegada === 'hoje' ? 'Chega hoje' : `Chega ${formatDateDisplay(previsaoChegada.dataChegada)}`}
+                                  </p>
+                                  {statusChegada === 'atrasada' && (
+                                    <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">Chegada atrasada</p>
+                                  )}
+                                  {referenciaChegada && (
+                                    <p className="text-xs text-gray-600 dark:text-gray-300">{referenciaChegada}</p>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setModalChegadaItens([itemChegadaDaLinha(item)])}
+                                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+                                  >
+                                    Alterar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setModalChegadaItens([itemChegadaDaLinha(item)])}
+                                  className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-dark-bg hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-all font-medium whitespace-nowrap"
+                                >
+                                  Definir data de chegada
+                                </button>
                               )}
                             </td>
                           </tr>
@@ -2723,7 +2772,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                       })}
                       {!loadingOrcamento && itensFiltradosPorBusca.length === 0 && (
                         <tr>
-                          <td colSpan={8} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                          <td colSpan={9} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                             <div className="flex flex-col items-center gap-2">
                               <svg className="w-12 h-12 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -3045,9 +3094,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
             <OsCronogramaAlocacaoTab
               projetoId={projeto.id}
               semObra={Boolean((projeto as ProjetoDetalhe).semObra)}
-              obra={obraDetalhe}
-              loadingObra={loadingObra}
-              onIniciarObra={podeGerarObra ? handleIniciarObra : undefined}
             />
           )}
 
@@ -3890,61 +3936,22 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* AlertDialog para Confirmação de Alocação de Material */}
-        <AlertDialog open={confirmarAlocacaoOpen} onOpenChange={setConfirmarAlocacaoOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Confirmar Alocação de Material</AlertDialogTitle>
-              {materialParaAlocar && (
-                <div className="space-y-2 mt-2">
-                  <AlertDialogDescription asChild>
-                    <div>
-                      <p>
-                        <strong>Material:</strong> {materialParaAlocar.nomeMaterial}
-                      </p>
-                      <p>
-                        <strong>Quantidade necessária:</strong> {materialParaAlocar.quantidade} {materialParaAlocar.item.material?.unidadeMedida || 'un'}
-                      </p>
-                      <p>
-                        <strong>Estoque disponível:</strong> {materialParaAlocar.estoqueDisponivel} {materialParaAlocar.item.material?.unidadeMedida || 'un'}
-                      </p>
-                    </div>
-                  </AlertDialogDescription>
-                  <div className="mt-4">
-                    <p className="font-semibold text-orange-600 dark:text-orange-400">
-                      Esta ação dará baixa imediata no estoque e alocará o material para a obra "{obraVinculada?.nome || 'obra vinculada'}".
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                      Deseja confirmar a alocação?
-                    </p>
-                  </div>
-                </div>
-              )}
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel 
-                onClick={() => {
-                  setConfirmarAlocacaoOpen(false);
-                  if (materialParaAlocar) {
-                    setAlocacoesPorItem(prev => ({
-                      ...prev,
-                      [materialParaAlocar.item.id]: 'Não alocado'
-                    }));
-                  }
-                  setMaterialParaAlocar(null);
-                }}
-              >
-                Cancelar
-              </AlertDialogCancel>
-              <AlertDialogAction 
-                onClick={confirmarAlocacao}
-                className="bg-orange-600 hover:bg-orange-700 text-white"
-              >
-                Confirmar Alocação
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ModalDefinirChegada
+          open={!!modalChegadaItens}
+          itens={modalChegadaItens || []}
+          previsaoExistente={
+            (modalChegadaItens || []).map((it) => previsoesChegada[it.itemKey]).find(Boolean) || null
+          }
+          quantidadeComPrevisao={(modalChegadaItens || []).filter((it) => previsoesChegada[it.itemKey]).length}
+          salvando={salvandoChegada}
+          onClose={() => !salvandoChegada && setModalChegadaItens(null)}
+          onSalvar={(dados) => void salvarPrevisaoChegada(dados)}
+          onRemover={
+            (modalChegadaItens || []).some((it) => previsoesChegada[it.itemKey])
+              ? () => void removerPrevisaoChegada()
+              : undefined
+          }
+        />
 
         {/* Modal de Vinculação de Item do Banco Frio */}
         {modalVinculacaoOpen && (

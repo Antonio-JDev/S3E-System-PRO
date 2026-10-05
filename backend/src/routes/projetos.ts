@@ -69,6 +69,11 @@ import {
   getEntregaQuadro,
   putEntregaQuadro,
 } from '../controllers/osEntregaQuadroController';
+import {
+  getPrevisoesChegada,
+  putPrevisoesChegada,
+  removerPrevisoesChegadaHandler,
+} from '../controllers/previsaoChegadaMaterialOsController';
 import { authenticate } from '../middlewares/auth';
 import PDFDocument from 'pdfkit';
 import path from 'path';
@@ -158,6 +163,15 @@ router.get('/:id/entrega-quadro', getEntregaQuadro);
  * @desc Salvar checklist de entrega/romaneio
  */
 router.put('/:id/entrega-quadro', putEntregaQuadro);
+
+/**
+ * @route GET/PUT /api/projetos/:id/previsoes-chegada
+ * @desc Previsão de chegada de compras por item da BOM (aba Materiais da OS)
+ */
+router.get('/:id/previsoes-chegada', getPrevisoesChegada);
+router.put('/:id/previsoes-chegada', putPrevisoesChegada);
+router.post('/:id/previsoes-chegada/remover', removerPrevisoesChegadaHandler);
+
 router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
 
 /**
