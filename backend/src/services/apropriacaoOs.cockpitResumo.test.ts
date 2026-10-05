@@ -34,7 +34,7 @@ describe('apropriacaoOsService.obterCockpitResumoBatch', () => {
     expect(prisma.projeto.findMany).not.toHaveBeenCalled();
   });
 
-  it('agrega custo orçado, diárias realizadas e estouro de dias corridos', async () => {
+  it('agrega custo orçado e não estoura o prazo enquanto a data final do cronograma não passou', async () => {
     (prisma.projeto.findMany as jest.Mock).mockResolvedValue([
       {
         id: 'proj-1',
@@ -65,12 +65,37 @@ describe('apropriacaoOsService.obterCockpitResumoBatch', () => {
       diariasEquipeRealizadas: 2,
       custoTempoOrcado: 3000,
       estouroDiarias: false,
-      estouroDiasCorridos: true,
+      estouroDiasCorridos: false,
+      horasPrevistas: 0,
+      horasExecutadas: 0,
     });
     expect(result['proj-1'].dataPrevisao).toContain('2026-06-30');
     // 1/jun → 15/jun (inclusive floor em TZ local)
     expect(result['proj-1'].diasCorridos).toBeGreaterThanOrEqual(14);
     expect(result['proj-1'].diasCorridos).toBeLessThanOrEqual(15);
+  });
+
+  it('marca estouro de prazo quando os dias corridos passam da data final do cronograma', async () => {
+    (prisma.projeto.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'proj-prazo',
+        status: 'EXECUCAO',
+        dataInicio: new Date('2026-06-01T00:00:00.000Z'),
+        dataPrevisao: new Date('2026-06-05T00:00:00.000Z'),
+        horasEngenhariaOrcadas: 0,
+        diariasEquipeOrcadas: 20,
+        valorHoraEngenharia: 0,
+        valorDiariaEquipe: 0,
+        valorTotal: 0,
+        orcamento: null,
+      },
+    ]);
+    (prisma.apontamentoOsItem.findMany as jest.Mock).mockResolvedValue([]);
+
+    const result = await apropriacaoOsService.obterCockpitResumoBatch(['proj-prazo']);
+
+    expect(result['proj-prazo'].estouroDiarias).toBe(false);
+    expect(result['proj-prazo'].estouroDiasCorridos).toBe(true);
   });
 
   it('marca estouroDiarias quando realizadas ultrapassam orçadas', async () => {
@@ -101,5 +126,62 @@ describe('apropriacaoOsService.obterCockpitResumoBatch', () => {
 
     expect(result['proj-2'].estouroDiarias).toBe(true);
     expect(result['proj-2'].estouroDiasCorridos).toBe(false);
+    expect(result['proj-2'].horasExecutadas).toBe(0);
+  });
+
+  it('soma horas previstas da agenda e executadas dos apontamentos', async () => {
+    (prisma.projeto.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'proj-1',
+        status: 'EXECUCAO',
+        dataInicio: new Date('2026-09-01T00:00:00.000Z'),
+        dataPrevisao: null,
+        horasEngenhariaOrcadas: 20,
+        diariasEquipeOrcadas: 0,
+        valorHoraEngenharia: 0,
+        valorDiariaEquipe: 0,
+        valorTotal: 0,
+        orcamento: null,
+      },
+    ]);
+
+    (prisma.apontamentoOsItem.findMany as jest.Mock).mockResolvedValue([
+      {
+        tipoRecurso: 'HORA_ENGENHARIA',
+        quantidade: 5,
+        apontamento: {
+          projetoId: 'proj-1',
+          dataApontamento: new Date('2026-09-01T00:00:00.000Z'),
+        },
+      },
+    ]);
+
+    (prisma.eventoCalendario.findMany as jest.Mock).mockImplementation(
+      (args: { where?: { tipo?: string } }) => {
+        if (args?.where?.tipo === 'OBRA') {
+          return Promise.resolve([
+            {
+              id: 'agenda-6h',
+              projetoId: 'proj-1',
+              status: 'PREVISAO',
+              tipo: 'OBRA',
+              dataInicio: new Date('2026-09-02T11:00:00.000Z'),
+              dataFim: new Date('2026-09-02T17:00:00.000Z'),
+              eventoOrigemId: null,
+              equipeEngenhariaIds: ['e1'],
+              equipeExecucaoIds: [],
+              horariosPorDia: null,
+              equipe: [{ id: 'e1', cargo: 'Engenheiro', valorHora: 80, valorDiaria: null }],
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    const result = await apropriacaoOsService.obterCockpitResumoBatch(['proj-1']);
+
+    expect(result['proj-1'].horasExecutadas).toBe(5);
+    expect(result['proj-1'].horasPrevistas).toBe(6);
   });
 });

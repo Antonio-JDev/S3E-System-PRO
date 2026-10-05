@@ -44,10 +44,11 @@ describe('osCockpit.util', () => {
     expect(calcularDiasEntreDatas(null, '2026-01-11')).toBeNull();
   });
 
-  it('formata texto de dias estimados priorizando diárias orçadas', () => {
+  it('formata texto de dias do cronograma e usa diárias só sem datas', () => {
     expect(calcularDiasEstimadosTexto(5)).toBe('~5 diárias');
     expect(calcularDiasEstimadosTexto(1)).toBe('~1 diária');
-    expect(calcularDiasEstimadosTexto(0, '2026-01-01', '2026-01-08')).toBe('~7 dias');
+    expect(calcularDiasEstimadosTexto(5, '2026-01-01', '2026-01-08')).toBe('7 dias de cronograma');
+    expect(calcularDiasEstimadosTexto(0, '2026-01-01', '2026-01-08')).toBe('7 dias de cronograma');
     expect(calcularDiasEstimadosTexto(0)).toBe('—');
   });
 
@@ -107,6 +108,8 @@ describe('osCockpit.util', () => {
       diasCorridos: 4,
       estouroDiarias: false,
       estouroDiasCorridos: false,
+      horasPrevistas: 6,
+      horasExecutadas: 5,
     };
     expect(item.custoTempoOrcado).toBe(5000);
   });

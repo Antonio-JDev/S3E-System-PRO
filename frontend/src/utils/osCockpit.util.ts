@@ -46,12 +46,12 @@ export function calcularDiasEstimadosTexto(
   dataInicio?: string | Date | null,
   dataPrevisao?: string | Date | null
 ): string {
-  const diarias = Number(diariasEquipeOrcadas) || 0;
-  if (diarias > 0) return `~${diarias} diária${diarias !== 1 ? 's' : ''}`;
   const diasCalendario = calcularDiasEntreDatas(dataInicio, dataPrevisao);
   if (diasCalendario != null && diasCalendario > 0) {
-    return `~${diasCalendario} dia${diasCalendario !== 1 ? 's' : ''}`;
+    return `${diasCalendario} dia${diasCalendario !== 1 ? 's' : ''} de cronograma`;
   }
+  const diarias = Number(diariasEquipeOrcadas) || 0;
+  if (diarias > 0) return `~${diarias} diária${diarias !== 1 ? 's' : ''}`;
   return '—';
 }
 
@@ -106,4 +106,8 @@ export interface CockpitResumoItem {
   diasCorridos: number;
   estouroDiarias: boolean;
   estouroDiasCorridos: boolean;
+  /** Agenda ainda não coberta por apontamento (engenharia + execução), em horas. */
+  horasPrevistas?: number;
+  /** Apontamentos de engenharia + diárias de equipe convertidas em horas. */
+  horasExecutadas?: number;
 }

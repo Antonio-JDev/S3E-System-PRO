@@ -1,6 +1,7 @@
 import { ProjetoStatus, TipoRecursoApontamento } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { calcularMaoDeObraCalendarioOs } from './horasCustoContabil.service';
+import { totaisHorasCardOs } from '../utils/totaisHorasCardOs';
 import {
   calcularResultadoOs,
   calcularTotaisApropriacao,
@@ -199,6 +200,21 @@ function calcularDiasCorridos(dataInicio: Date | null | undefined, ref: Date = n
   return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000));
 }
 
+/** Dias entre início e data final do cronograma. Estouro quando os corridos passam disso. */
+function diasJanelaCronograma(
+  dataInicio: Date | null | undefined,
+  dataPrevisao: Date | null | undefined,
+): number | null {
+  if (!dataInicio || !dataPrevisao) return null;
+  const start = new Date(dataInicio);
+  const end = new Date(dataPrevisao);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  const dias = Math.max(0, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+  return dias > 0 ? dias : null;
+}
+
 export interface CockpitResumoItem {
   diariasEquipeOrcadas: number;
   diariasEquipeRealizadas: number;
@@ -207,6 +223,10 @@ export interface CockpitResumoItem {
   diasCorridos: number;
   estouroDiarias: boolean;
   estouroDiasCorridos: boolean;
+  /** Agenda ainda não coberta por apontamento no mesmo dia (engenharia + execução), em horas. */
+  horasPrevistas: number;
+  /** Apontamentos HORA_ENGENHARIA + DIARIA_EQUIPE×8 h. */
+  horasExecutadas: number;
 }
 
 async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
@@ -414,7 +434,7 @@ export const apropriacaoOsService = {
       select: {
         tipoRecurso: true,
         quantidade: true,
-        apontamento: { select: { projetoId: true } },
+        apontamento: { select: { projetoId: true, dataApontamento: true } },
       },
     });
 
@@ -424,6 +444,33 @@ export const apropriacaoOsService = {
       const list = itensPorProjeto.get(pid) ?? [];
       list.push(row);
       itensPorProjeto.set(pid, list);
+    }
+
+    const eventosRows = await prisma.eventoCalendario.findMany({
+      where: { projetoId: { in: ids }, tipo: 'OBRA' },
+      select: {
+        id: true,
+        projetoId: true,
+        dataInicio: true,
+        dataFim: true,
+        status: true,
+        tipo: true,
+        eventoOrigemId: true,
+        equipeEngenhariaIds: true,
+        equipeExecucaoIds: true,
+        horariosPorDia: true,
+        equipe: {
+          select: { id: true, cargo: true, valorHora: true, valorDiaria: true },
+        },
+      },
+    });
+
+    const eventosPorProjeto = new Map<string, typeof eventosRows>();
+    for (const ev of eventosRows) {
+      if (!ev.projetoId) continue;
+      const list = eventosPorProjeto.get(ev.projetoId) ?? [];
+      list.push(ev);
+      eventosPorProjeto.set(ev.projetoId, list);
     }
 
     const calendarios = await Promise.all(
@@ -462,6 +509,31 @@ export const apropriacaoOsService = {
       );
       const diasCorridos = calcularDiasCorridos(projeto.dataInicio);
       const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
+      const janelaCronograma = diasJanelaCronograma(projeto.dataInicio, projeto.dataPrevisao);
+      const horasCard = totaisHorasCardOs({
+        eventos: (eventosPorProjeto.get(projeto.id) ?? []).map((ev) => ({
+          id: ev.id,
+          dataInicio: ev.dataInicio,
+          dataFim: ev.dataFim,
+          status: ev.status,
+          tipo: ev.tipo,
+          eventoOrigemId: ev.eventoOrigemId,
+          equipeEngenhariaIds: ev.equipeEngenhariaIds,
+          equipeExecucaoIds: ev.equipeExecucaoIds,
+          horariosPorDia: ev.horariosPorDia,
+          equipe: ev.equipe.map((membro) => ({
+            id: membro.id,
+            cargo: membro.cargo,
+            valorHora: membro.valorHora != null ? Number(membro.valorHora) : null,
+            valorDiaria: membro.valorDiaria != null ? Number(membro.valorDiaria) : null,
+          })),
+        })),
+        itens: (itensPorProjeto.get(projeto.id) ?? []).map((row) => ({
+          dataApontamento: row.apontamento.dataApontamento,
+          tipoRecurso: row.tipoRecurso,
+          quantidade: Number(row.quantidade) || 0,
+        })),
+      });
       map[projeto.id] = {
         diariasEquipeOrcadas: diariasOrcadas,
         diariasEquipeRealizadas: resumo.diariasEquipeRealizadas,
@@ -470,7 +542,11 @@ export const apropriacaoOsService = {
         diasCorridos,
         estouroDiarias: resumo.estouroDiariasEquipe,
         estouroDiasCorridos:
-          projeto.status === 'EXECUCAO' && diariasOrcadas > 0 && diasCorridos > diariasOrcadas,
+          projeto.status === 'EXECUCAO' &&
+          janelaCronograma != null &&
+          diasCorridos > janelaCronograma,
+        horasPrevistas: horasCard.horasPrevistas,
+        horasExecutadas: horasCard.horasExecutadas,
       };
     }
 

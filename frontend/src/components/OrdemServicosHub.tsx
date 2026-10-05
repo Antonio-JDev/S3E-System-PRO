@@ -19,14 +19,9 @@ import ActionsDropdown from './ui/ActionsDropdown';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses, compactNavTabClasses, compactActionBtnClasses, compactPagePaddingClasses, pageTabBarContainerClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
-import { formatMoeda } from '../utils/apropriacaoOs';
-import {
-  calcularCustoTempoOrcado,
-  calcularDiasEstimadosTexto,
-  type CockpitResumoItem,
-} from '../utils/osCockpit.util';
+import { type CockpitResumoItem } from '../utils/osCockpit.util';
 import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
-import OsPrazoProgressoBar from './os/OsPrazoProgressoBar';
+import OsCardListagemBarras from './os/OsCardListagemBarras';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { serverDateToInput, formatDateDisplay, nowYmdInSaoPaulo, addDaysToYmd } from '../utils/date';
@@ -1044,7 +1039,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 
                 if (response.success) {
                     toast.success('Obra gerada com sucesso!', {
-                        description: 'Acompanhe o cronograma e as tarefas de campo nesta OS'
+                        description: 'Acompanhe a equipe do calendário nesta OS'
                     });
                     setProjetos(prev => prev.map(p => 
                         p.id === projetoToView.id ? { ...p, status: 'Em Execução' } : p
@@ -1419,29 +1414,14 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredProjetos.map((projeto) => {
-                        // Calcular progresso real do projeto (usar valor calculado por fetchProgressForProjects quando disponível)
-                        const progresso = projectProgressMap[projeto.id]?.percentual ?? calcularProgressoProjeto(projeto);
                         const numeroOS = gerarNumeroOS(projeto);
                         const temMinhasTarefas = projetoIdsComMinhasTarefas.has(projeto.id);
                         const temMinhasTarefasAtrasadas = projetoIdsComMinhasTarefasAtrasadas.has(projeto.id);
                         const cockpitResumo = cockpitResumoMap[projeto.id];
-                        const custoTempoOrcado =
-                            cockpitResumo?.custoTempoOrcado ??
-                            calcularCustoTempoOrcado({
-                                horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
-                                diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
-                                valorHoraEngenharia: projeto.valorHoraEngenharia,
-                                valorDiariaEquipe: projeto.valorDiariaEquipe,
-                            });
-                        const diasEstimadosTexto = calcularDiasEstimadosTexto(
-                            cockpitResumo?.diariasEquipeOrcadas ?? projeto.diariasEquipeOrcadas ?? 0,
-                            projeto.dataInicio,
-                            projeto.dataPrevisao
-                        );
                         const estouroPrazo =
                             projeto.status === 'EXECUCAO' &&
                             cockpitResumo != null &&
-                            (cockpitResumo.estouroDiarias || cockpitResumo.estouroDiasCorridos);
+                            cockpitResumo.estouroDiasCorridos;
                         
                         return (
                             <div
@@ -1480,7 +1460,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                             </span>
                                         )}
                                         {estouroPrazo && (
-                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-white bg-red-600 px-2 py-1 rounded-md border border-red-700 shadow-sm" title="Dias corridos ou diárias realizadas ultrapassaram a estimativa">
+                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-white bg-red-600 px-2 py-1 rounded-md border border-red-700 shadow-sm" title="A data final do cronograma já passou">
                                                 Estouro de prazo
                                             </span>
                                         )}
@@ -1525,70 +1505,29 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </div>
                                 </div>
 
-                                {/* Progresso execução (azul) + consumo do prazo */}
-                                <div className="mb-4 space-y-3">
-                                    <div>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
-                                                Progresso de execução
-                                            </span>
-                                            <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
-                                                {Math.round(progresso)}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2.5 overflow-hidden shadow-inner">
-                                            <div
-                                                className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500"
-                                                style={{ width: `${progresso}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                    <OsPrazoProgressoBar
-                                        variant="compact"
-                                        dataInicio={projeto.dataInicio}
-                                        dataPrevisao={cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao}
-                                        dataConclusao={projeto.dataConclusao}
-                                        status={projeto.status}
-                                        diariasOrcadas={
+                                <OsCardListagemBarras
+                                    horasPrevistas={
+                                        typeof cockpitResumo?.horasPrevistas === 'number'
+                                            ? cockpitResumo.horasPrevistas
+                                            : null
+                                    }
+                                    horasExecutadas={
+                                        typeof cockpitResumo?.horasExecutadas === 'number'
+                                            ? cockpitResumo.horasExecutadas
+                                            : null
+                                    }
+                                    prazo={{
+                                        dataInicio: projeto.dataInicio,
+                                        dataPrevisao: cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao,
+                                        dataConclusao: projeto.dataConclusao,
+                                        status: projeto.status,
+                                        diariasOrcadas:
                                             cockpitResumo?.diariasEquipeOrcadas ??
                                             projeto.diariasEquipeOrcadas ??
-                                            0
-                                        }
-                                        diariasRealizadas={cockpitResumo?.diariasEquipeRealizadas ?? 0}
-                                        showWhenEmpty
-                                    />
-                                </div>
-
-                                {/* Prazo e custo de tempo */}
-                                <div className="mb-4 p-3 bg-blue-50 dark:bg-dark-elevated rounded-xl border border-blue-100 dark:border-dark-border space-y-2">
-                                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Estimativa</span>
-                                        <span className="text-xs font-bold text-blue-700 dark:text-dark-accent-light bg-blue-100 dark:bg-dark-accent-soft px-2 py-0.5 rounded-md">
-                                            {diasEstimadosTexto}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Custo tempo orçado</span>
-                                        <span className="text-sm font-bold text-gray-900 dark:text-dark-text">{formatMoeda(custoTempoOrcado)}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Data limite</span>
-                                        <span className="text-sm font-bold text-blue-700 dark:text-dark-accent-light">
-                                            {formatDateDisplay((cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao) as any) || '—'}
-                                        </span>
-                                    </div>
-                                    {cockpitResumo != null && (
-                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-blue-100/80 dark:border-dark-border">
-                                            <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
-                                                Diárias realizadas
-                                            </span>
-                                            <span className="text-xs font-bold text-gray-800 dark:text-dark-text tabular-nums">
-                                                {cockpitResumo.diariasEquipeRealizadas} /{' '}
-                                                {cockpitResumo.diariasEquipeOrcadas || '—'}
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
+                                            0,
+                                        diariasRealizadas: cockpitResumo?.diariasEquipeRealizadas ?? 0,
+                                    }}
+                                />
 
                                 {/* Datas */}
                                 <div className="flex flex-col gap-1 text-xs text-gray-500 pt-4 border-t border-gray-100">
