@@ -2809,7 +2809,7 @@ export async function sendOrcamentoPdfToWhatsappChat(params: {
     const detail = e instanceof Error ? e.message : String(e);
     console.error('[WA-PDF] falha ao gerar PDF no servidor', { orcamentoId: orcamento.id, detail });
     throw new Error(
-      `Não foi possível gerar o PDF do orçamento no servidor${detail ? `: ${detail}` : ''}. Verifique se o Chromium/Puppeteer está disponível no backend.`
+      `Não foi possível gerar o PDF do orçamento no servidor${detail ? `: ${detail}` : ''}.`
     );
   }
 
