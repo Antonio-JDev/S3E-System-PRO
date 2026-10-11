@@ -215,7 +215,7 @@ export class PDFOrcamentoController {
                 opacidade: opacidade ? parseFloat(opacidade as string) : 0.05
             };
 
-            console.log('📄 Gerando PDF com Puppeteer para orçamento:', id);
+            console.log('📄 Gerando PDF com pdfmake para orçamento:', id);
 
             const pdfBuffer = await PDFOrcamentoService.gerarPDF(id, marcaDaguaConfig);
             const nomeArquivo = await PDFOrcamentoController.gerarNomeArquivo(id);

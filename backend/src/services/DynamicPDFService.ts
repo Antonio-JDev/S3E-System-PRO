@@ -1,4 +1,3 @@
-import puppeteer from 'puppeteer';
 import handlebars from 'handlebars';
 import fs from 'fs';
 import path from 'path';
@@ -360,53 +359,13 @@ export class DynamicPDFService {
     }
 
     /**
-     * Gera PDF usando Puppeteer
+     * Gera PDF usando pdfmake
      */
     async generatePDF(orcamentoData: OrcamentoPDFData, customization: PDFCustomization): Promise<Buffer> {
-        let browser;
-
-        try {
-            console.log('🚀 Iniciando geração de PDF personalizado...');
-
-            // Gerar HTML
-            const html = this.generateHTML(orcamentoData, customization);
-
-            // Iniciar Puppeteer
-            browser = await puppeteer.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
-
-            const page = await browser.newPage();
-
-            // Configurar conteúdo
-            await page.setContent(html, {
-                waitUntil: 'load'
-            });
-
-            // Gerar PDF
-            const pdfBuffer = await page.pdf({
-                format: customization.design.pageSize === 'Letter' ? 'Letter' : 'A4',
-                printBackground: true,
-                margin: {
-                    top: `${customization.design.margins.top}mm`,
-                    right: `${customization.design.margins.right}mm`,
-                    bottom: `${customization.design.margins.bottom}mm`,
-                    left: `${customization.design.margins.left}mm`
-                }
-            });
-
-            console.log('✅ PDF gerado com sucesso!');
-
-            return Buffer.from(pdfBuffer);
-        } catch (error) {
-            console.error('❌ Erro ao gerar PDF:', error);
-            throw new Error('Erro ao gerar PDF personalizado');
-        } finally {
-            if (browser) {
-                await browser.close();
-            }
-        }
+        const { PDFOrcamentoService } = await import('./pdfOrcamento.service');
+        const { buildMarcaDaguaFromPdfCustomization } = await import('../utils/orcamentoPdfPersonalization.util');
+        const marcaDagua = buildMarcaDaguaFromPdfCustomization(customization);
+        return PDFOrcamentoService.gerarPDF(orcamentoData.id, marcaDagua);
     }
 }
 
