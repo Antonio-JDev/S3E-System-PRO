@@ -6,6 +6,7 @@ import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service'
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
 import { roundMoney } from '../utils/currency';
+import { camposCustoMovimento } from '../utils/custoMovimentacao.util';
 import {
     prepararUnidadeItemCompra,
     type CamposUnidadeItemCompra,
@@ -279,6 +280,18 @@ export class ComprasService {
         const legacyObraAvulsa = !!(compra.obraId && !compra.destinoTipo);
         const segueDestino = legacyObraAvulsa || item.destinoEstoque === false;
 
+        const custoDaSaida = async (projetoId?: string | null) => {
+            const mat = await tx.material.findUnique({
+                where: { id: materialId },
+                select: { preco: true },
+            });
+            return camposCustoMovimento({
+                preco: mat?.preco,
+                quantidade: quantidadeParaEstoque,
+                projetoId,
+            });
+        };
+
         await tx.material.update({
             where: { id: materialId },
             data: { estoque: { increment: quantidadeParaEstoque } },
@@ -302,6 +315,14 @@ export class ComprasService {
 
         if (destinoTipo === 'OBRA' || (legacyObraAvulsa && compra.obraId)) {
             const obraIdDestino = compra.obraId!;
+            let projetoIdSaida = compra.projetoId ?? null;
+            if (!projetoIdSaida) {
+                const obraDestino = await tx.obra.findUnique({
+                    where: { id: obraIdDestino },
+                    select: { projetoId: true },
+                });
+                projetoIdSaida = obraDestino?.projetoId ?? null;
+            }
             await tx.material.update({
                 where: { id: materialId },
                 data: { estoque: { decrement: quantidadeParaEstoque } },
@@ -314,6 +335,7 @@ export class ComprasService {
                     motivo: 'OBRA',
                     referencia: obraIdDestino,
                     observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF}`,
+                    ...(await custoDaSaida(projetoIdSaida)),
                 },
             });
             return;
@@ -337,6 +359,7 @@ export class ComprasService {
                         motivo: 'OBRA',
                         referencia: obra.id,
                         observacoes: `Material alocado para obra (OS) via Compra Avulsa NF: ${compra.numeroNF}`,
+                        ...(await custoDaSaida(compra.projetoId)),
                     },
                 });
                 return;

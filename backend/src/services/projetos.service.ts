@@ -318,6 +318,15 @@ export class ProjetosService {
 
       await scaffoldWorkflowTasks(tx, projeto.id, tipo, data.criadoPorId);
       return projeto;
+    }).then(async (projeto) => {
+      // Se a venda já existe, reserva kit e material de obra sem dar baixa.
+      try {
+        const { reservarMateriaisDaVenda } = await import('./baixaMaterialOrcamento.service');
+        await reservarMateriaisDaVenda(data.orcamentoId);
+      } catch (err) {
+        console.error('Erro ao reservar materiais na criação da OS:', err);
+      }
+      return projeto;
     });
   }
 
@@ -342,6 +351,12 @@ export class ProjetosService {
 
     const existente = await prisma.projeto.findUnique({ where: { orcamentoId } });
     if (existente) {
+      try {
+        const { reservarMateriaisDaVenda } = await import('./baixaMaterialOrcamento.service');
+        await reservarMateriaisDaVenda(orcamentoId);
+      } catch (err) {
+        console.error('Erro ao reservar materiais da OS existente:', err);
+      }
       return existente;
     }
 

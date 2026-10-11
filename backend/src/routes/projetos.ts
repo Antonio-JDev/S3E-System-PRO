@@ -64,6 +64,7 @@ import {
   excluirApontamentoOs,
   obterResumoApropriacaoOs,
 } from '../controllers/apropriacaoOsController';
+import { obterCmvOsHandler } from '../controllers/cmvOsController';
 import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
 import {
   getEntregaQuadro,
@@ -173,6 +174,7 @@ router.put('/:id/previsoes-chegada', putPrevisoesChegada);
 router.post('/:id/previsoes-chegada/remover', removerPrevisoesChegadaHandler);
 
 router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
+router.get('/:id/cmv', obterCmvOsHandler);
 
 /**
  * @route GET/POST/PATCH/DELETE /api/projetos/:projetoId/apontamentos

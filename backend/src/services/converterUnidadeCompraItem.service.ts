@@ -5,6 +5,7 @@ import {
   normalizarUnidade,
   type MotivoConversao,
 } from '../utils/conversaoUnidadeCompra.util';
+import { camposCustoMovimento } from '../utils/custoMovimentacao.util';
 
 export class ConverterUnidadeError extends Error {
   constructor(
@@ -164,15 +165,29 @@ export async function converterUnidadeCompraItem(input: ConverterUnidadeInput): 
     const destinoTipo = compra.destinoTipo || (compra.obraId ? 'OBRA' : compra.projetoId ? 'PROJETO' : null);
 
     const ajustarSaidaObra = async (obraId: string) => {
+      const qtd = Math.abs(delta);
+      const mat = await tx.material.findUnique({
+        where: { id: materialId },
+        select: { preco: true },
+      });
+      const obraDestino = await tx.obra.findUnique({
+        where: { id: obraId },
+        select: { projetoId: true },
+      });
       await tx.material.update({ where: { id: materialId }, data: { estoque: { decrement: delta } } });
       await tx.movimentacaoEstoque.create({
         data: {
           materialId,
           tipo: delta > 0 ? 'SAIDA' : 'ENTRADA',
-          quantidade: Math.abs(delta),
+          quantidade: qtd,
           motivo: 'OBRA',
           referencia: obraId,
           observacoes: `Ajuste de alocação por conversão de unidade: ${descricaoConversao}`,
+          ...camposCustoMovimento({
+            preco: mat?.preco,
+            quantidade: qtd,
+            projetoId: obraDestino?.projetoId ?? compra.projetoId ?? null,
+          }),
         },
       });
       resultado.destinoAjustado = 'OBRA';

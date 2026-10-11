@@ -17,6 +17,7 @@ import {
   alterouCamposPlanejamentoOs,
   isUpdateSomenteEstimativaOs,
 } from '../utils/projetosUpdatePlanejamento.util';
+import { aplicarEstoqueSemObra } from '../services/baixaMaterialOrcamento.service';
 
 /** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
 export const buscarProjetos = async (req: Request, res: Response): Promise<void> => {
@@ -528,6 +529,7 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
     if (typeof responsavelObra !== 'undefined') data.responsavelObra = responsavelObra || null;
 
     if (typeof semObra !== 'undefined') data.semObra = Boolean(semObra);
+    const virouSemObra = data.semObra === true && !projetoExistente.semObra;
     if (typeof justificativaSemObra !== 'undefined') {
       data.justificativaSemObra = justificativaSemObra || null;
     }
@@ -599,6 +601,14 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
           : 'Nenhum campo para atualizar'
       });
       return;
+    }
+
+    if (virouSemObra) {
+      try {
+        await aplicarEstoqueSemObra(id);
+      } catch (estoqueErr) {
+        console.error('Erro ao baixar estoque ao marcar sem obra:', estoqueErr);
+      }
     }
 
     const projeto = await prisma.projeto.update({

@@ -1,4 +1,11 @@
 import { prisma } from '../lib/prisma';
+import { camposCustoMovimento } from '../utils/custoMovimentacao.util';
+
+export type ExtrasMovimentoEstoque = {
+    projetoId?: string | null;
+    custoUnitario?: number | null;
+    valorCusto?: number | null;
+};
 
 export class EstoqueService {
     /**
@@ -9,7 +16,8 @@ export class EstoqueService {
         quantidade: number,
         motivo: string,
         referencia: string,
-        observacoes?: string
+        observacoes?: string,
+        extras?: ExtrasMovimentoEstoque,
     ) {
         // Buscar material
         const material = await prisma.material.findUnique({
@@ -43,7 +51,14 @@ export class EstoqueService {
                     quantidade,
                     motivo,
                     referencia,
-                    observacoes
+                    observacoes,
+                    ...camposCustoMovimento({
+                        preco: material.preco,
+                        quantidade,
+                        projetoId: extras?.projetoId,
+                        custoUnitario: extras?.custoUnitario,
+                        valorCusto: extras?.valorCusto,
+                    }),
                 }
             })
         ]);
@@ -57,7 +72,8 @@ export class EstoqueService {
         quantidade: number,
         motivo: string,
         referencia: string,
-        observacoes?: string
+        observacoes?: string,
+        extras?: ExtrasMovimentoEstoque,
     ) {
         // Buscar material
         const material = await prisma.material.findUnique({
@@ -95,7 +111,13 @@ export class EstoqueService {
                     quantidade,
                     motivo,
                     referencia,
-                    observacoes
+                    observacoes,
+                    ...camposCustoMovimento({
+                        preco: material.preco,
+                        quantidade,
+                        projetoId: extras?.projetoId,
+                        custoUnitario: extras?.custoUnitario,
+                    }),
                 }
             })
         ]);
@@ -108,12 +130,20 @@ export class EstoqueService {
         });
 
         for (const mov of movimentacoes) {
+            const valorCusto = mov.valorCusto != null
+                ? Number(mov.valorCusto)
+                : Number(((Number(mov.custoUnitario) || 0) * mov.quantidade).toFixed(2));
             await this.incrementarEstoque(
                 mov.materialId,
                 mov.quantidade,
                 'DEVOLUCAO',
                 projetoId,
                 `Estorno automático — rollback da OS (obra ${obraId})`,
+                {
+                    projetoId,
+                    custoUnitario: mov.custoUnitario,
+                    valorCusto,
+                },
             );
         }
 
@@ -220,198 +250,20 @@ export class EstoqueService {
     }
 
     /**
-     * Processa baixa de estoque de um orçamento (materiais + kits expandidos).
-     * Regra: se a baixa já foi feita na Ordem de Serviço (Iniciar obra), não faz baixa no PV.
+     * Não baixa mais na geração da venda.
+     * O kit sai na NF-e e o material de obra sai na OS. Mantido para não quebrar chamadas antigas.
      */
-    static async processarBaixaOrcamento(orcamentoId: string, vendaId: string) {
-        // Buscar orçamento com seus itens e flag de baixa
-        const orcamento = await prisma.orcamento.findUnique({
-            where: { id: orcamentoId },
-            include: {
-                items: {
-                    include: {
-                        cotacao: true,
-                        material: true
-                    }
-                }
-            }
-        });
-
-        if (!orcamento) {
-            throw new Error('Orçamento não encontrado');
-        }
-
-        // Se a baixa já foi realizada ao "Iniciar obra" (OS), não realizar novamente no Pedido de Venda
-        if (orcamento.baixaEstoqueRealizadaEm === 'OBRA') {
-            console.log(`[Estoque] Baixa do orçamento ${orcamentoId} já foi realizada na Ordem de Serviço (Iniciar obra). Não realizar baixa no PV.`);
-            return {
-                success: true,
-                skipped: true,
-                reason: 'Baixa já realizada na Ordem de Serviço (Iniciar obra).',
-                materiaisProcessados: 0,
-                totalItens: 0,
-                movimentacoes: []
-            };
-        }
-
-        const materiaisParaBaixa: Array<{
-            materialId: string;
-            quantidade: number;
-            origem: string;
-        }> = [];
-
-        // Processar cada item do orçamento (excluir itens "venda direta fornecedor" — não dão baixa em estoque)
-        for (const item of orcamento.items) {
-            if ((item as any).vendaDiretaFornecedor) {
-                continue;
-            }
-            if (item.tipo === 'MATERIAL' && item.materialId) {
-                // Item é material direto
-                materiaisParaBaixa.push({
-                    materialId: item.materialId,
-                    quantidade: item.quantidade,
-                    origem: 'Material direto do orçamento'
-                });
-            } else if (item.tipo === 'COTACAO' && (item.cotacaoId || item.materialId)) {
-                const materialId = await this.resolverMaterialIdParaItemCotacao(item);
-                if (materialId) {
-                    materiaisParaBaixa.push({
-                        materialId,
-                        quantidade: item.quantidade,
-                        origem: item.materialId
-                            ? 'Item banco frio vinculado ao estoque'
-                            : 'Item banco frio (material resolvido por nome, como na validação de obra)'
-                    });
-                }
-            } else if (item.tipo === 'KIT' && (item as any).itensDoKit) {
-                // ✅ Kit com composição materializada no orçamento (kit unificado ou kit catálogo materializado)
-                const qtdKit = Number(item.quantidade || 1);
-                const itensDoKit = (item as any).itensDoKit;
-                const arr = Array.isArray(itensDoKit) ? itensDoKit : [itensDoKit];
-
-                for (const sub of arr) {
-                    const tipo = String(sub?.tipo || '').toUpperCase();
-                    if (tipo === 'SERVICO') continue;
-
-                    if (tipo === 'KIT' && sub?.kitId) {
-                        const componentesKit = await this.expandirKit(String(sub.kitId));
-                        const mult = Number(sub?.quantidade || 1) * qtdKit;
-                        for (const componente of componentesKit) {
-                            materiaisParaBaixa.push({
-                                materialId: componente.materialId,
-                                quantidade: componente.quantidade * mult,
-                                origem: `Kit (composição) (${qtdKit}x)`
-                            });
-                        }
-                        continue;
-                    }
-
-                    if (tipo === 'MATERIAL' && sub?.materialId) {
-                        materiaisParaBaixa.push({
-                            materialId: String(sub.materialId),
-                            quantidade: Number(sub?.quantidade || 1) * qtdKit,
-                            origem: `Kit (composição) (${qtdKit}x)`
-                        });
-                        continue;
-                    }
-
-                    // Banco frio dentro do kit: só dá baixa se houver vinculação ao estoque
-                    if (tipo === 'COTACAO' && (sub?.materialVinculadoId || sub?.materialId)) {
-                        materiaisParaBaixa.push({
-                            materialId: String(sub.materialVinculadoId || sub.materialId),
-                            quantidade: Number(sub?.quantidade || 1) * qtdKit,
-                            origem: `Item banco frio (composição) vinculado ao estoque (${qtdKit}x)`
-                        });
-                        continue;
-                    }
-                }
-            } else if (item.tipo === 'KIT' && item.kitId) {
-                // Item é kit - precisa expandir
-                const componentesKit = await this.expandirKit(item.kitId);
-                
-                // Adicionar cada componente do kit multiplicado pela quantidade
-                for (const componente of componentesKit) {
-                    const quantidadeTotal = componente.quantidade * item.quantidade;
-                    
-                    materiaisParaBaixa.push({
-                        materialId: componente.materialId,
-                        quantidade: quantidadeTotal,
-                        origem: `Kit (${item.quantidade}x)`
-                    });
-                }
-            }
-            // SERVICO não afeta estoque
-        }
-
-        // Agrupar materiais repetidos (somar quantidades)
-        const materiaisAgrupados = new Map<string, number>();
-        
-        materiaisParaBaixa.forEach(item => {
-            const quantidadeAtual = materiaisAgrupados.get(item.materialId) || 0;
-            materiaisAgrupados.set(item.materialId, quantidadeAtual + item.quantidade);
-        });
-
-        // Verificar estoque de todos antes de dar baixa
-        // Tipagem explícita para evitar inferência como `never[]` (TS strict)
-        const verificacoes: any[] = [];
-        for (const [materialId, quantidade] of materiaisAgrupados.entries()) {
-            const material = await prisma.material.findUnique({
-                where: { id: materialId }
-            });
-
-            if (!material) {
-                throw new Error(`Material ${materialId} não encontrado`);
-            }
-
-            if (material.estoque < quantidade) {
-                verificacoes.push({
-                    material: material.nome,
-                    disponivel: material.estoque,
-                    necessario: quantidade,
-                    falta: quantidade - material.estoque
-                });
-            }
-        }
-
-        // Se houver falta de estoque, retornar erro detalhado
-        if (verificacoes.length > 0) {
-            const mensagem = verificacoes.map(v => 
-                `${v.material}: faltam ${v.falta} unidades (disponível: ${v.disponivel}, necessário: ${v.necessario})`
-            ).join('\n');
-            
-            throw new Error(`Estoque insuficiente:\n${mensagem}`);
-        }
-
-        // Dar baixa em todos os materiais
-        const movimentacoes: any[] = [];
-        
-        for (const [materialId, quantidade] of materiaisAgrupados.entries()) {
-            const resultado = await this.darBaixaMaterial(
-                materialId,
-                quantidade,
-                'VENDA',
-                vendaId,
-                `Baixa automática - Venda baseada em orçamento ${orcamentoId}`
-            );
-            
-            movimentacoes.push(resultado);
-        }
-
-        // Marcar orçamento: baixa foi feita no Pedido de Venda (evita nova baixa ao "Iniciar obra")
-        await prisma.orcamento.update({
-            where: { id: orcamentoId },
-            // Cast para evitar quebra em ambientes onde o Prisma Client ainda
-            // não está sincronizado com o schema (campo existe no schema).
-            data: { baixaEstoqueRealizadaEm: 'VENDA' } as any
-        });
-
+    static async processarBaixaOrcamento(_orcamentoId: string, _vendaId: string) {
         return {
             success: true,
-            materiaisProcessados: materiaisAgrupados.size,
-            totalItens: Array.from(materiaisAgrupados.values()).reduce((sum, q) => sum + q, 0),
-            movimentacoes
+            skipped: true,
+            reason: 'Baixa na geração da venda desativada. O kit baixa na NF-e e o material de obra na OS.',
+            materiaisProcessados: 0,
+            totalItens: 0,
+            movimentacoes: [] as any[]
         };
     }
+
 
     /**
      * Verifica disponibilidade de estoque para um orçamento

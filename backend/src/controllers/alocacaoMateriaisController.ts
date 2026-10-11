@@ -99,7 +99,8 @@ export class AlocacaoMateriaisController {
         quantidade,
         'Alocação para obra',
         obraId,
-        observacoes
+        observacoes,
+        { projetoId: obra.projetoId },
       );
 
       // Buscar a movimentação com os dados do material para retornar

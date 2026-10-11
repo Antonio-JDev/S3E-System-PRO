@@ -2,6 +2,11 @@ import { StatusObra } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { EstoqueService } from './estoque.service';
 import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service';
+import {
+  agruparMateriaisDoOrcamento,
+  baixarMapaMateriais,
+  vincularMovimentosVendaAoProjeto,
+} from './baixaMaterialOrcamento.service';
 
 export interface CreateObraData {
   projetoId: string;
@@ -178,26 +183,8 @@ export class ObraService {
         },
       });
 
-      const reservaPorMaterial = new Map<string, number>();
-      try {
-        const reservas = await ReservaMaterialProjetoService.listarPorProjeto(projetoId);
-        for (const r of reservas) {
-          reservaPorMaterial.set(
-            r.materialId,
-            (reservaPorMaterial.get(r.materialId) || 0) + r.quantidade,
-          );
-        }
-        if (reservas.length > 0) {
-          await ReservaMaterialProjetoService.consumirReservasAoIniciarObra(projetoId, obra.id);
-        }
-      } catch (reservaErr) {
-        console.error('Erro ao consumir reservas do projeto:', reservaErr);
-        // Não reverter obra por falha de reserva
-      }
-
-      // ✅ Alocar (dar baixa) automaticamente dos materiais do orçamento ao gerar a obra
-      // Regra: se a baixa já foi feita no Pedido de Venda, não fazer novamente ao Iniciar obra.
-      // Baixa parcial: só o disponível em estoque.
+      // Material de obra sai aqui. Componente de kit fica reservado até a NF-e.
+      // Pedido antigo com baixa na venda não baixa de novo.
       try {
         if (projeto.orcamentoId) {
           const orcamentoParaBaixa = await prisma.orcamento.findUnique({
@@ -205,110 +192,41 @@ export class ObraService {
             select: { baixaEstoqueRealizadaEm: true }
           });
           if (orcamentoParaBaixa?.baixaEstoqueRealizadaEm === 'VENDA') {
-            console.log(`[Obra] Baixa do orçamento ${projeto.orcamentoId} já foi realizada no Pedido de Venda. Não realizar baixa ao iniciar obra.`);
+            console.log(`[Obra] Baixa do orçamento ${projeto.orcamentoId} já foi realizada no Pedido de Venda antigo. Não realizar baixa ao iniciar obra.`);
+            await vincularMovimentosVendaAoProjeto(projeto.orcamentoId, projetoId);
+          } else if (orcamentoParaBaixa?.baixaEstoqueRealizadaEm === 'OBRA') {
+            console.log(`[Obra] Material de obra do orçamento ${projeto.orcamentoId} já foi baixado.`);
           } else {
-          const itensOrcamento = await prisma.orcamentoItem.findMany({
-            where: { orcamentoId: projeto.orcamentoId },
-            include: { kit: true, cotacao: true, material: true }
-          });
-
-          const materiaisAgrupados = new Map<string, number>();
-          const add = (materialId: string, qtd: number) => {
-            if (!materialId || !qtd || qtd <= 0) return;
-            const atual = materiaisAgrupados.get(materialId) || 0;
-            materiaisAgrupados.set(materialId, atual + qtd);
-          };
-
-          for (const item of itensOrcamento as any[]) {
-            if (item?.vendaDiretaFornecedor) continue;
-            const tipo = String(item.tipo || '').toUpperCase();
-            if (tipo === 'SERVICO' || tipo === 'QUADRO_PRONTO' || tipo === 'CUSTO_EXTRA') continue;
-
-            if (tipo === 'MATERIAL' && item.materialId) {
-              add(String(item.materialId), Number(item.quantidade || 0));
-              continue;
+            const materiaisObra = await agruparMateriaisDoOrcamento(projeto.orcamentoId, 'obra');
+            let consumidas = new Map<string, number>();
+            try {
+              consumidas = await ReservaMaterialProjetoService.consumirReservasLimitadas({
+                projetoId,
+                referencia: obra.id,
+                motivo: 'OBRA',
+                limites: materiaisObra,
+                observacao: `Reserva de material de obra consumida ao iniciar obra (projeto ${projetoId})`,
+              });
+            } catch (reservaErr) {
+              console.error('Erro ao consumir reservas do projeto:', reservaErr);
             }
 
-            if (tipo === 'COTACAO' && (item.cotacaoId || item.materialId)) {
-              const materialIdCotacao = await EstoqueService.resolverMaterialIdParaItemCotacao(item);
-              if (materialIdCotacao) {
-                add(String(materialIdCotacao), Number(item.quantidade || 0));
-              }
-              continue;
-            }
-
-            if (tipo === 'KIT' && item.itensDoKit) {
-              const qtdKit = Number(item.quantidade || 1);
-              const arr = Array.isArray(item.itensDoKit) ? item.itensDoKit : [item.itensDoKit];
-              for (const sub of arr) {
-                const tipoSub = String(sub?.tipo || '').toUpperCase();
-                if (tipoSub === 'SERVICO') continue;
-                if (tipoSub === 'MATERIAL' && sub?.materialId) {
-                  add(String(sub.materialId), Number(sub?.quantidade || 1) * qtdKit);
-                  continue;
-                }
-                if (tipoSub === 'COTACAO' && (sub?.materialVinculadoId || sub?.materialId)) {
-                  // Banco frio dentro do kit: baixa apenas se tiver vinculação ao estoque
-                  add(String(sub.materialVinculadoId || sub.materialId), Number(sub?.quantidade || 1) * qtdKit);
-                  continue;
-                }
-                if (tipoSub === 'KIT' && sub?.kitId) {
-                  // Sub-kit catálogo dentro da composição
-                  const componentes = await EstoqueService.expandirKit(String(sub.kitId));
-                  const mult = Number(sub?.quantidade || 1) * qtdKit;
-                  for (const c of componentes) {
-                    add(String(c.materialId), Number(c.quantidade || 1) * mult);
-                  }
-                  continue;
-                }
-              }
-              continue;
-            }
-
-            if (tipo === 'KIT' && item.kitId) {
-              const componentes = await EstoqueService.expandirKit(String(item.kitId));
-              for (const c of componentes) {
-                add(String(c.materialId), Number(c.quantidade || 1) * Number(item.quantidade || 1));
-              }
-              continue;
-            }
-          }
-
-          for (const [materialId, quantidade] of materiaisAgrupados.entries()) {
-            const reservado = reservaPorMaterial.get(materialId) || 0;
-            const qtdRestante = Math.max(0, quantidade - reservado);
-            if (qtdRestante <= 0) continue;
-
-            const material = await prisma.material.findUnique({
-              where: { id: materialId },
-              select: { id: true, nome: true, estoque: true },
+            await baixarMapaMateriais({
+              quantidades: materiaisObra,
+              descontar: consumidas,
+              projetoId,
+              referencia: obra.id,
+              motivo: 'Alocação para obra',
+              observacao: (_nome, qtdBaixa, qtdRestante) =>
+                qtdBaixa < qtdRestante
+                  ? `Baixa parcial ao gerar obra (projeto ${projetoId}): ${qtdBaixa}/${qtdRestante}`
+                  : `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`,
             });
-            if (!material) continue;
 
-            const qtdBaixa = Math.min(qtdRestante, Math.max(0, Number(material.estoque) || 0));
-            if (qtdBaixa <= 0) {
-              console.warn(
-                `[Obra] Sem estoque para baixar ${material.nome} (necessário ${qtdRestante}). Continuando.`
-              );
-              continue;
-            }
-
-            await EstoqueService.darBaixaMaterial(
-              materialId,
-              qtdBaixa,
-              'Alocação para obra',
-              obra.id,
-              qtdBaixa < qtdRestante
-                ? `Baixa parcial ao gerar obra (projeto ${projetoId}): ${qtdBaixa}/${qtdRestante}`
-                : `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`,
-            );
-          }
-
-          // Marcar orçamento: baixa foi feita na Ordem de Serviço (Iniciar obra) — evita nova baixa no PV
-          await prisma.orcamento.update({
-            where: { id: projeto.orcamentoId },
-            data: { baixaEstoqueRealizadaEm: 'OBRA' }
-          });
+            await prisma.orcamento.update({
+              where: { id: projeto.orcamentoId },
+              data: { baixaEstoqueRealizadaEm: 'OBRA' }
+            });
           }
         }
       } catch (alocErr) {
