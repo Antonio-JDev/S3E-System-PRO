@@ -3,13 +3,17 @@ import {
   CalendarDays,
   CheckCircle2,
   Circle,
+  Banknote,
   ClipboardList,
   FileText,
+  Landmark,
   LayoutDashboard,
   Package,
+  Receipt,
   Settings2,
   ShoppingCart,
   Sparkles,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -48,6 +52,10 @@ const ICONE_AREA: Record<string, LucideIcon> = {
   Compras: ShoppingCart,
   Estoque: Package,
   Sistema: Settings2,
+  Financeiro: Landmark,
+  Vendas: Receipt,
+  Folha: Banknote,
+  RH: Users,
 };
 
 const TIPO_META: Record<ReleaseNoteTipo, { label: string; className: string }> = {
