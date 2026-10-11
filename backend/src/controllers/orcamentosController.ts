@@ -8,7 +8,6 @@ import {
 import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
-import puppeteer from 'puppeteer';
 import { roundMoney } from '../utils/currency';
 
 // Configurar multer para upload de JSON
@@ -2440,29 +2439,102 @@ export const gerarPdfItensKit = async (req: Request, res: Response): Promise<voi
       </html>
     `;
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    const PdfPrinter = require('pdfmake');
+    const vfs = require('pdfmake/build/vfs_fonts').pdfMake.vfs;
+    const fonts = {
+      Roboto: {
+        normal: Buffer.from(vfs['Roboto-Regular.ttf'], 'base64'),
+        bold: Buffer.from(vfs['Roboto-Medium.ttf'], 'base64'),
+        italics: Buffer.from(vfs['Roboto-Italic.ttf'], 'base64'),
+        bolditalics: Buffer.from(vfs['Roboto-MediumItalic.ttf'], 'base64'),
+      },
+    };
 
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 });
-      const pdfBytes = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '12mm', right: '10mm', bottom: '12mm', left: '10mm' }
-      });
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [35, 40, 35, 35],
+      content: [
+        { text: 'Itens do Kit', fontSize: 18, bold: true, color: '#111827' },
+        { text: `Kit: ${nomeKitSafe}`, fontSize: 11, color: '#4b5563', margin: [0, 4, 0, 10] },
+        {
+          table: {
+            widths: ['*'],
+            body: [
+              [
+                {
+                  stack: [
+                    ...(numeroOrcamentoSafe ? [{ text: [{ text: 'Orçamento: ', bold: true }, `#${numeroOrcamentoSafe}`] }] : []),
+                    ...(usuarioGeradorSafe ? [{ text: [{ text: 'Gerado por: ', bold: true }, usuarioGeradorSafe] }] : []),
+                    { text: [{ text: 'Data/Hora: ', bold: true }, dataGeracao] },
+                  ],
+                  fillColor: '#f9fafb',
+                  fontSize: 9,
+                  margin: [4, 4, 4, 4],
+                },
+              ],
+            ],
+          },
+          layout: {
+            hLineWidth: () => 0.5,
+            vLineWidth: () => 0.5,
+            hLineColor: () => '#e5e7eb',
+            vLineColor: () => '#e5e7eb',
+          },
+          margin: [0, 0, 0, 12],
+        },
+        {
+          table: {
+            headerRows: 1,
+            widths: [30, '*', 100, 80],
+            body: [
+              [
+                { text: '#', bold: true, fillColor: '#f3f4f6', fontSize: 9 },
+                { text: 'Item', bold: true, fillColor: '#f3f4f6', fontSize: 9 },
+                { text: 'Tipo', bold: true, fillColor: '#f3f4f6', fontSize: 9 },
+                { text: 'Quantidade', bold: true, fillColor: '#f3f4f6', fontSize: 9, alignment: 'right' },
+              ],
+              ...itens.map((it: any, index: number) => [
+                { text: String(index + 1), fontSize: 8.5 },
+                { text: String(it?.nome || it?.descricao || '-'), fontSize: 8.5 },
+                { text: String(it?.tipo || '-'), fontSize: 8.5 },
+                { text: `${Number(it?.quantidade || 0).toLocaleString('pt-BR')} ${String(it?.unidade || 'UN')}`, fontSize: 8.5, alignment: 'right' },
+              ]),
+            ],
+          },
+          layout: {
+            hLineWidth: () => 0.5,
+            vLineWidth: () => 0.5,
+            hLineColor: () => '#d1d5db',
+            vLineColor: () => '#d1d5db',
+            paddingLeft: () => 6,
+            paddingRight: () => 6,
+            paddingTop: () => 5,
+            paddingBottom: () => 5,
+          },
+          margin: [0, 0, 0, 10],
+        },
+        { text: `Total de itens: ${itens.length}`, fontSize: 9, color: '#6b7280' },
+      ],
+      defaultStyle: { font: 'Roboto' },
+    };
 
+    const printer = new PdfPrinter(fonts);
+    const pdfDoc = printer.createPdfKitDocument(docDefinition);
+    const chunks: Buffer[] = [];
+
+    pdfDoc.on('data', (c: Buffer) => chunks.push(c));
+    pdfDoc.on('end', () => {
+      const pdfBuffer = Buffer.concat(chunks);
       const nomeArquivo = `Itens_Kit_${(nomeKit || 'unificado').replace(/[^\w\-]+/g, '_')}.pdf`;
-      const pdfBuffer = Buffer.from(pdfBytes as Uint8Array);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${nomeArquivo}"`);
       res.setHeader('Content-Length', String(pdfBuffer.length));
       res.send(pdfBuffer);
-    } finally {
-      await browser.close();
-    }
+    });
+    pdfDoc.on('error', (err: any) => {
+      throw err;
+    });
+    pdfDoc.end();
   } catch (error: any) {
     console.error('Erro ao gerar PDF dos itens do kit:', error);
     res.status(500).json({
