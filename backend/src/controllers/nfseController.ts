@@ -5,7 +5,6 @@ import { type EnviarLoteRpsEnvioInput, type RpsNfse } from '../services/nfse-pub
 import { sendDocumentEmail } from '../services/email.service';
 import PDFDocument from 'pdfkit';
 import { gerarPdfNfseBuffer } from '../services/pdfNfse.service';
-import { gerarPdfNfsePuppeteerBuffer } from '../services/pdfNfsePuppeteer.service';
 import { buildContentDisposition } from '../utils/filename.util';
 
 type RpsNfsePayload = RpsNfse & { dataEmissao?: string | Date };
@@ -304,15 +303,7 @@ export async function getPdf(req: Request, res: Response): Promise<void> {
       res.status(404).json({ success: false, message: 'NFS-e não encontrada' });
       return;
     }
-    // Prefer HTML+Puppeteer renderer for pixel-perfect DANFE
-    let pdfBuffer: Buffer;
-    try {
-      pdfBuffer = await gerarPdfNfsePuppeteerBuffer(id);
-    } catch (e) {
-      // fallback to PDFKit renderer
-      console.warn('[NFS-e] Puppeteer PDF generation failed, falling back to PDFKit:', e instanceof Error ? e.message : String(e));
-      pdfBuffer = await gerarPdfNfseBuffer(id);
-    }
+    const pdfBuffer = await gerarPdfNfseBuffer(id);
     const numero = nfse.numeroNfse || id;
     const filename = `Nota_Fiscl_No_${numero}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
@@ -357,19 +348,14 @@ export async function enviarEmail(req: Request, res: Response): Promise<void> {
       });
     }
 
-    // Generate PDF (prefer HTML+Puppeteer). Attach file with numeroNfse in filename.
+    // Generate PDF via PDFKit nativo
     let pdfBufferResult: Buffer;
     try {
-      pdfBufferResult = await gerarPdfNfsePuppeteerBuffer(id);
-    } catch (e) {
-      console.warn('[NFS-e] Puppeteer PDF generation failed for email attachment, falling back to PDFKit:', e instanceof Error ? e.message : String(e));
-      try {
-        pdfBufferResult = await gerarPdfNfseBuffer(id);
-      } catch (err) {
-        console.error('Falha ao gerar PDF da NFS-e para envio por email:', err);
-        res.status(500).json({ success: false, message: 'Falha ao gerar anexo do PDF' });
-        return;
-      }
+      pdfBufferResult = await gerarPdfNfseBuffer(id);
+    } catch (err) {
+      console.error('Falha ao gerar PDF da NFS-e para envio por email:', err);
+      res.status(500).json({ success: false, message: 'Falha ao gerar anexo do PDF' });
+      return;
     }
     const numeroPdf = nfse.numeroNfse || id;
     attachments.push({
