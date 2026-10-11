@@ -68,6 +68,40 @@ class ApropriacaoOsService {
       `${ENDPOINTS.PROJETOS}/${projetoId}/apropriacao/resumo`
     );
   }
+
+  async obterCmv(projetoId: string) {
+    return axiosApiService.get<CmvOsResumo>(`${ENDPOINTS.PROJETOS}/${projetoId}/cmv`);
+  }
+}
+
+export interface LinhaCmvOs {
+  id: string;
+  materialNome: string;
+  sku: string;
+  unidade: string;
+  quantidade: number;
+  custoUnitario: number;
+  valorCusto: number;
+  custoRetroativo: boolean;
+  data: string;
+  motivo: string;
+}
+
+export interface LinhaComprometidaOs {
+  id: string;
+  materialNome: string;
+  sku: string;
+  unidade: string;
+  quantidade: number;
+  custoUnitario: number;
+  valorEstimado: number;
+}
+
+export interface CmvOsResumo {
+  linhas: LinhaCmvOs[];
+  totalCmv: number;
+  comprometido: LinhaComprometidaOs[];
+  totalComprometido: number;
 }
 
 export const apropriacaoOsService = new ApropriacaoOsService();

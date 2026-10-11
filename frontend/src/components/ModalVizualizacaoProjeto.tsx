@@ -20,7 +20,7 @@ import ModalApontamentoOs from './ModalApontamentoOs';
 import ScrollableRow from './ui/ScrollableRow';
 import { ModalDetailHeader } from './ui/ModalDetailHeader';
 import { scrollableNavItemClasses, compactNavTabClasses, modalOverlayPaddingClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
-import { apropriacaoOsService } from '../services/apropriacaoOsService';
+import { apropriacaoOsService, type CmvOsResumo } from '../services/apropriacaoOsService';
 import type { ApontamentoOs } from '../services/apropriacaoOsService';
 import {
   type ResultadoOsCalculado,
@@ -210,6 +210,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const [resumoApropriacao, setResumoApropriacao] = useState<ResultadoOsCalculado | null>(null);
   const [apontamentosResultado, setApontamentosResultado] = useState<ApontamentoOs[]>([]);
   const [loadingApontamentosResultado, setLoadingApontamentosResultado] = useState(false);
+  const [cmvOs, setCmvOs] = useState<CmvOsResumo | null>(null);
+  const [loadingCmvOs, setLoadingCmvOs] = useState(false);
   const [estoqueEscapeOpen, setEstoqueEscapeOpen] = useState(false);
   const [materiaisFaltantesEstoque, setMateriaisFaltantesEstoque] = useState<
     Array<{ nome: string; necessario: number; disponivel: number; falta: number; bancoFrio?: boolean }>
@@ -363,6 +365,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
     if (isOpen && projeto?.id && activeTab === 'Resultado') {
       void carregarApontamentosResultado();
+      void carregarCmvOs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, activeTab, projeto?.id]);
@@ -374,6 +377,19 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       if (res.success && res.data) setResumoApropriacao(res.data);
     } catch {
       /* silencioso */
+    }
+  }
+
+  async function carregarCmvOs() {
+    if (!projeto?.id) return;
+    try {
+      setLoadingCmvOs(true);
+      const res = await apropriacaoOsService.obterCmv(projeto.id);
+      if (res.success && res.data) setCmvOs(res.data);
+    } catch {
+      setCmvOs(null);
+    } finally {
+      setLoadingCmvOs(false);
     }
   }
 
@@ -3103,6 +3119,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               resumo={resumoApropriacao}
               apontamentos={apontamentosResultado}
               loadingApontamentos={loadingApontamentosResultado}
+              cmv={cmvOs}
+              loadingCmv={loadingCmvOs}
               onExportCsv={async () => {
                 const agora = new Date();
                 const competencia = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;

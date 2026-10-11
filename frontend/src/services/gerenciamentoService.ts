@@ -131,6 +131,13 @@ export const rhService = {
         return await axiosApiService.post('/api/rh/lancamentos', data);
     },
 
+    async atualizarLancamento(
+        id: string,
+        data: { valor?: number; descricao?: string | null; categoria?: string },
+    ) {
+        return await axiosApiService.patch(`/api/rh/lancamentos/${id}`, data);
+    },
+
     async excluirLancamento(id: string) {
         return await axiosApiService.delete(`/api/rh/lancamentos/${id}`);
     },
@@ -191,6 +198,21 @@ export const rhService = {
     /** Zera completamente positivas e negativas do banco de horas. */
     async zerarBancoHoras(data: { funcionarioId: string }) {
         return await axiosApiService.post('/api/rh/banco-horas/zerar', data);
+    },
+
+    async listarAjustesBancoHoras(funcionarioId: string) {
+        return await axiosApiService.get('/api/rh/banco-horas/ajustes', { funcionarioId });
+    },
+
+    /** Credita horas no banco de uma competência, com justificativa. */
+    async lancarHorasNoBanco(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        horas: number;
+        justificativa: string;
+    }) {
+        return await axiosApiService.post('/api/rh/banco-horas/ajustar', data);
     },
 
     /** Recalcula métricas de ponto (atraso/extra) só do mês — sem apagar batidas. */

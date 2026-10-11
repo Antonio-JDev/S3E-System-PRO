@@ -10,7 +10,7 @@ import {
   calcularCustoTempoOrcado,
   calcularDiasEstimadosTexto,
 } from '../../utils/osCockpit.util';
-import type { ApontamentoOs } from '../../services/apropriacaoOsService';
+import type { ApontamentoOs, CmvOsResumo } from '../../services/apropriacaoOsService';
 import { HORAS_COMERCIAIS_POR_DIA } from '../../utils/custoEventoCalendario';
 import OsFatiasTempoBarras from './OsFatiasTempoBarras';
 import OsPrazoProgressoBar from './OsPrazoProgressoBar';
@@ -33,6 +33,8 @@ export interface OsResultadoTabProps {
   resumo: ResultadoOsCalculado | null;
   apontamentos: ApontamentoOs[];
   loadingApontamentos?: boolean;
+  cmv?: CmvOsResumo | null;
+  loadingCmv?: boolean;
   onExportCsv?: () => void;
 }
 
@@ -49,6 +51,8 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
   resumo,
   apontamentos,
   loadingApontamentos,
+  cmv,
+  loadingCmv,
   onExportCsv,
 }) => {
   const valorOrcamentoOficial = useMemo(() => {
@@ -63,6 +67,10 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
     (resumo?.diariasEquipeOrcadas ?? Number(projeto.diariasEquipeOrcadas)) || 0;
   const horasOrcadas =
     (resumo?.horasEngenhariaOrcadas ?? Number(projeto.horasEngenhariaOrcadas)) || 0;
+
+  const cmvMateriais = cmv?.totalCmv ?? 0;
+  const custoTempoRealizado = resumo?.custoRealizado ?? 0;
+  const custoDaOs = custoTempoRealizado + cmvMateriais;
 
   const custoTempoOrcado =
     resumo?.custoOrcado ??
@@ -179,6 +187,92 @@ const OsResultadoTab: React.FC<OsResultadoTabProps> = ({
             variant="full"
           />
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h4 className="text-sm font-bold text-gray-800 dark:text-white">CMV de materiais</h4>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Custo congelado na baixa do estoque para esta OS. Reserva ainda não baixada fica como comprometido e não entra no CMV.
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-gray-500">Custo da OS</div>
+            <div className="text-lg font-bold tabular-nums text-gray-900 dark:text-white">
+              {formatMoeda(custoDaOs)}
+            </div>
+            <p className="text-xs text-gray-500">
+              Tempo realizado {formatMoeda(custoTempoRealizado)} + materiais {formatMoeda(cmvMateriais)}
+            </p>
+          </div>
+        </div>
+
+        {loadingCmv && (
+          <p className="text-sm text-gray-500">Carregando materiais...</p>
+        )}
+
+        {!loadingCmv && (
+          <>
+            <div className="text-sm font-semibold text-gray-800 dark:text-white">
+              CMV {formatMoeda(cmvMateriais)}
+            </div>
+            {(cmv?.linhas || []).length === 0 ? (
+              <p className="text-sm text-gray-500">Nenhum material baixado para esta OS.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500">
+                      <th className="py-2 pr-3 font-medium">Material</th>
+                      <th className="py-2 pr-3 font-medium">Qtd</th>
+                      <th className="py-2 pr-3 font-medium">Custo unit.</th>
+                      <th className="py-2 font-medium text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cmv!.linhas.map((linha) => (
+                      <tr key={linha.id} className="border-t border-gray-100 dark:border-dark-border">
+                        <td className="py-2 pr-3">
+                          <div className="font-medium text-gray-900 dark:text-white">{linha.materialNome}</div>
+                          {linha.custoRetroativo && (
+                            <div className="text-xs text-amber-700 dark:text-amber-300">Custo estimado</div>
+                          )}
+                          {linha.motivo === 'DEVOLUCAO' && (
+                            <div className="text-xs text-gray-500">Estorno da baixa</div>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 tabular-nums">
+                          {linha.quantidade} {linha.unidade}
+                        </td>
+                        <td className="py-2 pr-3 tabular-nums">{formatMoeda(linha.custoUnitario)}</td>
+                        <td className="py-2 text-right tabular-nums font-medium">{formatMoeda(linha.valorCusto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="text-sm font-semibold text-gray-800 dark:text-white pt-2">
+              Comprometido {formatMoeda(cmv?.totalComprometido || 0)}
+            </div>
+            {(cmv?.comprometido || []).length === 0 ? (
+              <p className="text-sm text-gray-500">Nenhuma reserva pendente de baixa.</p>
+            ) : (
+              <ul className="text-sm space-y-1">
+                {cmv!.comprometido.map((linha) => (
+                  <li key={linha.id} className="flex justify-between gap-3 text-gray-700 dark:text-gray-200">
+                    <span>
+                      {linha.materialNome} · {linha.quantidade} {linha.unidade}
+                    </span>
+                    <span className="tabular-nums">{formatMoeda(linha.valorEstimado)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
