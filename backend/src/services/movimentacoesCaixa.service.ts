@@ -1,6 +1,12 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
 import { calcAbateParcela, calcValorBaseFromEfetivo } from '../utils/financeiroValor.util';
+import {
+  CLASSIFICACAO_TRANSFERENCIA,
+  ehTransferenciaTesouraria,
+  somarDespesaOperacional,
+  somarReceitaOperacional,
+} from '../utils/tesouraria.util';
 
 export interface MovimentacaoCaixaItem {
   id: string;
@@ -13,8 +19,10 @@ export interface MovimentacaoCaixaItem {
   valorJuros?: number;
   valorDesconto?: number;
   meioPagamento: string | null;
-  origem: 'conta_receber' | 'conta_pagar';
+  origem: 'conta_receber' | 'conta_pagar' | 'transferencia';
   referenciaId: string | null;
+  /** TRANSFERENCIA = movimento entre contas. Não entra em receita, despesa nem no saldo da empresa. */
+  classificacao?: string | null;
   tipoCategoria?: string; // FORNECEDOR, RH, etc. para saídas (edição)
   observacoes?: string | null; // Justificativa/descrição do pagamento (ex.: desconto por falta)
   /** true quando a entrada é um recebimento parcial (cada parcial tem sua data/valor; edição/desfazer é feita em Contas a Receber) */
@@ -32,6 +40,8 @@ export interface ResumoMovimentacoes {
   entradasTotal: number;
   saidasTotal: number;
   saldoConta: number;
+  /** Valor que saiu de uma conta e entrou em outra. Não compõe entradas, saídas nem o resultado. */
+  transferenciasTotal: number;
 }
 
 function labelMeioPagamento(meio: string | null): string {
@@ -241,7 +251,43 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
     };
   });
 
-  let movimentacoes: MovimentacaoCaixaItem[] = [...entradas, ...saidas].sort(
+  const movimentosTesouraria = await prisma.movimentacaoTesouraria.findMany({
+    where: {
+      classificacao: CLASSIFICACAO_TRANSFERENCIA,
+      ...(dataPagamentoFiltro ? { data: dataPagamentoFiltro } : {}),
+    },
+    include: {
+      contaBancaria: { select: { nome: true } },
+      transferencia: {
+        select: {
+          contaOrigem: { select: { nome: true } },
+          contaDestino: { select: { nome: true } },
+        },
+      },
+    },
+  });
+
+  const transferencias: MovimentacaoCaixaItem[] = movimentosTesouraria.map((movimento) => {
+    const origemNome = movimento.transferencia.contaOrigem.nome;
+    const destinoNome = movimento.transferencia.contaDestino.nome;
+    const sentido = movimento.tipo === 'SAIDA' ? 'Saída' : 'Entrada';
+    return {
+      id: movimento.id,
+      tipo: movimento.tipo === 'SAIDA' ? 'SAIDA' : 'ENTRADA',
+      dataPagamento: movimento.data,
+      descricao: `${sentido} ${movimento.contaBancaria.nome}: ${origemNome} → ${destinoNome}. ${movimento.descricao}`,
+      categoria: 'Transferência',
+      valor: movimento.valor,
+      valorBase: movimento.valor,
+      meioPagamento: null,
+      origem: 'transferencia',
+      referenciaId: movimento.transferenciaId,
+      classificacao: movimento.classificacao,
+      observacoes: 'Movimento de tesouraria. Não entra como receita nem despesa.',
+    };
+  });
+
+  let movimentacoes: MovimentacaoCaixaItem[] = [...entradas, ...saidas, ...transferencias].sort(
     (a, b) => new Date(b.dataPagamento).getTime() - new Date(a.dataPagamento).getTime()
   );
 
@@ -257,12 +303,16 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
     );
   }
 
-  const entradasTotal = movimentacoes.filter((m) => m.tipo === 'ENTRADA').reduce((s, m) => s + m.valor, 0);
-  const saidasTotal = movimentacoes.filter((m) => m.tipo === 'SAIDA').reduce((s, m) => s + m.valor, 0);
+  const entradasTotal = somarReceitaOperacional(movimentacoes);
+  const saidasTotal = somarDespesaOperacional(movimentacoes);
+  const transferenciasTotal = movimentacoes
+    .filter((m) => ehTransferenciaTesouraria(m.classificacao) && m.tipo === 'SAIDA')
+    .reduce((s, m) => s + m.valor, 0);
   const resumo: ResumoMovimentacoes = {
     entradasTotal,
     saidasTotal,
-    saldoConta: entradasTotal - saidasTotal
+    saldoConta: entradasTotal - saidasTotal,
+    transferenciasTotal,
   };
 
   return { movimentacoes, resumo };

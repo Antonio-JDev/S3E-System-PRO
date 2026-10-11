@@ -11,6 +11,7 @@ import {
     validarSelecaoUnificacao,
     type ContaParaUnificacao,
 } from '../utils/contasPagarUnificacao.util';
+import { contaEhSalarioDaCompetencia } from '../utils/contaSalarioRh.util';
 
 export interface ContaPagarPayload {
     fornecedorId?: string;
@@ -1171,8 +1172,9 @@ export class ContasPagarService {
     }
 
     /**
-     * Recalcula o total da folha (ponto + benefícios + lançamentos) e atualiza a parcela RH **Pendente** do mês, se existir.
-     * Usado após acréscimos/descontos no modal da folha.
+     * O valor do salário em Contas a Pagar é o total a pagar da folha
+     * (ponto, benefícios, acréscimos e descontos). Atualiza a parcela pendente
+     * do mês ou cria essa parcela se ela ainda não existir.
      */
     static async sincronizarValorParcelaRHPelaFolha(
         funcionarioId: string,
@@ -1184,7 +1186,7 @@ export class ContasPagarService {
               ok: true;
               valorFolha: number;
               atualizado: boolean;
-              motivo: 'atualizado' | 'sem_conta' | 'conta_nao_pendente';
+              motivo: 'atualizado' | 'criado' | 'sem_conta' | 'conta_nao_pendente';
               contaId?: string;
           }
     > {
@@ -1201,17 +1203,17 @@ export class ContasPagarService {
             return { ok: false, erro: 'folha_indisponivel' };
         }
 
-        const conta = await prisma.contaPagar.findFirst({
-            where: {
-                tipo: 'RH',
-                funcionarioId,
-                descricao: { contains: mesReferencia },
-            },
+        const candidatas = await prisma.contaPagar.findMany({
+            where: { tipo: 'RH', funcionarioId },
+            orderBy: { createdAt: 'desc' },
         });
-        if (!conta) {
-            return { ok: true, valorFolha, atualizado: false, motivo: 'sem_conta' };
-        }
-        if (conta.status !== 'Pendente') {
+        const doMes = candidatas.filter((conta) =>
+            contaEhSalarioDaCompetencia(conta, referenciaAno, referenciaMes),
+        );
+        const aberta = doMes.find((conta) => conta.status === 'Pendente' || conta.status === 'Atrasado');
+        const conta = aberta ?? doMes[0] ?? null;
+
+        if (conta && conta.status !== 'Pendente' && conta.status !== 'Atrasado') {
             return {
                 ok: true,
                 valorFolha,
@@ -1220,16 +1222,54 @@ export class ContasPagarService {
                 contaId: conta.id,
             };
         }
-        const upd = await prisma.contaPagar.update({
-            where: { id: conta.id },
-            data: { valorParcela: valorFolha },
+
+        if (conta) {
+            const upd = await prisma.contaPagar.update({
+                where: { id: conta.id },
+                data: {
+                    valorParcela: valorFolha,
+                    subtipo: conta.subtipo ?? 'SALARIO',
+                },
+            });
+            return {
+                ok: true,
+                valorFolha,
+                atualizado: true,
+                motivo: 'atualizado',
+                contaId: upd.id,
+            };
+        }
+
+        const func = await prisma.funcionario.findUnique({
+            where: { id: funcionarioId },
+            select: { nome: true, diaPagamento: true },
+        });
+        if (!func) {
+            return { ok: true, valorFolha, atualizado: false, motivo: 'sem_conta' };
+        }
+
+        const ultimoDia = this.ultimoDiaDoMes(referenciaAno, referenciaMes);
+        let dia = func.diaPagamento != null ? Math.min(func.diaPagamento, 31) : 5;
+        if (dia < 1) dia = 1;
+        if (dia > ultimoDia) dia = ultimoDia;
+        const criada = await prisma.contaPagar.create({
+            data: {
+                tipo: 'RH',
+                subtipo: 'SALARIO',
+                origemCadastro: 'RH',
+                funcionarioId,
+                descricao: `Salário ${func.nome} - ${mesReferencia} (folha)`,
+                valorParcela: valorFolha,
+                dataVencimento: new Date(referenciaAno, referenciaMes - 1, dia),
+                status: 'Pendente',
+            },
         });
         return {
             ok: true,
             valorFolha,
             atualizado: true,
-            motivo: 'atualizado',
-            contaId: upd.id,
+            motivo: 'criado',
+            contaId: criada.id,
         };
     }
 
@@ -1246,60 +1286,14 @@ export class ContasPagarService {
 
         const [ano, mes] = mesReferencia.split('-').map(Number);
         await this.aplicarParcelamentosRhCompetencia(ano, mes);
-        const ultimoDia = this.ultimoDiaDoMes(ano, mes - 1);
 
         const contasCriadas: any[] = [];
         const contasAtualizadas: any[] = [];
         for (const func of funcionarios) {
-            // Dia de vencimento: usar diaPagamento do funcionário (1-31), padrão 5
-            let dia = func.diaPagamento != null ? Math.min(func.diaPagamento, 31) : 5;
-            if (dia < 1) dia = 1;
-            if (dia > ultimoDia) dia = ultimoDia;
-            const dataVencimento = new Date(ano, mes - 1, dia);
-
-            const dataRefFolha = new Date(Date.UTC(ano, mes - 1, 1, 12, 0, 0, 0));
-            let valorFolha: number;
-            try {
-                const folha = await RhService.calcularFolhaMes({
-                    funcionarioId: func.id,
-                    dataReferencia: dataRefFolha,
-                });
-                valorFolha = Number((folha as any).totalAPagar ?? folha.valores.totalAPagar ?? 0);
-            } catch {
-                valorFolha = Number(func.salario ?? 0);
-            }
-
-            // Verificar se já existe conta para este funcionário neste mês
-            const contaExistente = await prisma.contaPagar.findFirst({
-                where: {
-                    tipo: 'RH',
-                    funcionarioId: func.id,
-                    descricao: { contains: mesReferencia }
-                }
-            });
-
-            if (contaExistente) {
-                if (contaExistente.status === 'Pendente') {
-                    const atualizada = await prisma.contaPagar.update({
-                        where: { id: contaExistente.id },
-                        data: { valorParcela: valorFolha },
-                    });
-                    contasAtualizadas.push(atualizada);
-                }
-                continue;
-            }
-
-            const conta = await prisma.contaPagar.create({
-                data: {
-                    tipo: 'RH',
-                    funcionarioId: func.id,
-                    descricao: `Salário ${func.nome} - ${mesReferencia} (folha)`,
-                    valorParcela: valorFolha,
-                    dataVencimento,
-                    status: 'Pendente'
-                }
-            });
-            contasCriadas.push(conta);
+            const resultado = await this.sincronizarValorParcelaRHPelaFolha(func.id, ano, mes);
+            if (!resultado.ok || !resultado.contaId) continue;
+            if (resultado.motivo === 'criado') contasCriadas.push({ id: resultado.contaId });
+            if (resultado.motivo === 'atualizado') contasAtualizadas.push({ id: resultado.contaId });
         }
 
         return { criadas: contasCriadas, atualizadas: contasAtualizadas };

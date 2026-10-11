@@ -79,6 +79,7 @@ import cartaoCreditoRoutes from './routes/cartaoCredito.routes';
 import faturaCartaoRoutes from './routes/faturaCartao.routes';
 import sincronizacaoDeployRoutes from './routes/sincronizacaoDeploy.routes';
 import movimentacoesCaixaRoutes from './routes/movimentacoesCaixa.routes';
+import tesourariaRoutes from './routes/tesouraria.routes';
 import receitaRoutes from './routes/receita.routes';
 import notificacoesRoutes from './routes/notificacoes.routes';
 import atendimentoCrmRoutes from './routes/atendimentoCrm.routes';
@@ -552,6 +553,7 @@ app.use('/api/financeiro/cartoes', cartaoCreditoRoutes);
 app.use('/api/financeiro/faturas', faturaCartaoRoutes);
 app.use('/api/sistema', sincronizacaoDeployRoutes);
 app.use('/api/movimentacoes-caixa', movimentacoesCaixaRoutes);
+app.use('/api/financeiro/tesouraria', tesourariaRoutes);
 // Proxy para consultas de CNPJ (resolve problema de CORS do receitaws)
 app.use('/api/external/receita', receitaRoutes);
 
