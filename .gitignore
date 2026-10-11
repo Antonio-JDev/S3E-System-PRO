@@ -23,13 +23,16 @@ build/
 .env.production
 .env.production.local
 
-# IDE
+# IDE & Agent / MCP configs
 .vscode/*
 !.vscode/settings.json
 .idea/
+.cursor/
+.agents/
 *.swp
 *.swo
 *~
+
 
 # OS
 .DS_Store
