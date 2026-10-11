@@ -2,9 +2,8 @@
 # Backend Dockerfile - Multi-stage build
 #
 # Por que este build pode ser bem mais lento que o frontend:
-# - Chromium (+ nss, fonts) é um pacote enorme no Alpine (vários MB, um dos maiores pesos por passo RUN).
 # - libxmljs2 (install script nativo), sharp etc. aumentam bastante tempo de npm install vs um front só-Vite.
-# - Puppeteer (mesmo skip do download) aumenta árvore de dependências npm.
+# - Chromium e Puppeteer foram REMOVIDOS: geração de PDF agora usa pdfmake (Node.js puro, sem Chromium).
 #
 # Mitigações: cache do npm (--mount); um único npm ci + prisma generate no builder; prune na produção
 # para não repetir compile nativo nem instalar deps em duplicação paralela.
@@ -15,12 +14,7 @@ WORKDIR /app
 RUN apk add --no-cache \
     libc6-compat \
     openssl \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
     ca-certificates \
-    ttf-freefont \
     wget \
     && update-ca-certificates \
     && rm -rf /var/cache/apk/*
@@ -62,9 +56,6 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
-ENV PUPPETE_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETE_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
