@@ -8,6 +8,7 @@ import { NFeChaveAcessoUtil } from '../utils/nfe-chave-acesso.util';
 import { NFeProcNFeUtil } from '../utils/nfe-procnfe.util';
 import { NFeXMLValidatorService } from './nfe-xml-validator.service';
 import NFeFilaService, { NFeModoEnvio } from './nfe-fila.service';
+import { baixarKitNaEmissaoNfe, estornarBaixaKitDaNota } from './baixaMaterialOrcamento.service';
 import { VendasService } from './vendas.service';
 import * as fs from 'fs';
 
@@ -190,6 +191,23 @@ export class NFeService {
     const codigoFinal = `COT-${item.id.substring(0, 8).toUpperCase()}`;
     console.log('⚠️ [cProd Fix] Usando fallback final:', codigoFinal);
     return codigoFinal;
+  }
+
+  /**
+   * Kit sai como um produto na nota (não explode a composição).
+   * NCM só o que já está no item. Sem NCM gravado, fica o placeholder da própria nota — não inventar NCM.
+   */
+  private static dadosProdutoDoItem(item: any): { descricao: string; ncm: string } {
+    const ehKit = String(item?.tipo || '').toUpperCase() === 'KIT';
+    const descricao = ehKit
+      ? (item.descricao || item.kit?.nome || 'Kit')
+      : (item.cotacao?.nome || item.descricao || item.material?.nome || 'Produto sem descrição');
+    const ncmFonte = ehKit
+      ? (item.ncm || '')
+      : (item.ncm || item.cotacao?.ncm || item.material?.ncm || '');
+    const digitos = String(ncmFonte).replace(/\D/g, '');
+    const ncm = digitos.length > 0 ? digitos.padStart(8, '0').slice(0, 8) : '00000000';
+    return { descricao, ncm };
   }
 
   /**
@@ -380,12 +398,8 @@ export class NFeService {
         // ========== CORREÇÃO OBRIGATÓRIA: cProd nunca vazio ==========
         const sku = NFeService.gerarCodigoProduto(item);
 
-        // NCM: item do orçamento (herdado da cotação quando veio do banco frio) → cotação → material → padrão 8 dígitos
-        const ncmRaw = (item as any).ncm || item.cotacao?.ncm || item.material?.ncm || '00000000';
-        const ncm = String(ncmRaw).replace(/\D/g, '').padStart(8, '0').slice(0, 8);
-
-        // Obter descrição (priorizar cotação para itens do banco frio)
-        const descricao = item.cotacao?.nome || item.descricao || item.material?.nome || 'Produto sem descrição';
+        // Kit vendido como produto: uma linha só. A composição baixa no estoque, não na nota.
+        const { descricao, ncm } = NFeService.dadosProdutoDoItem(item);
         
         // Obter unidade de medida
         const unidade = item.unidadeVenda || (item.material ? (item.material as any).unidadeMedida : undefined) || 'UN';
@@ -643,12 +657,12 @@ export class NFeService {
     const items = ((venda as any).orcamento?.items || []) as any[];
     for (const item of items) {
       if (item.tipo === 'SERVICO') continue;
+      if (item.vendaDiretaFornecedor) continue;
       // ========== CORREÇÃO OBRIGATÓRIA: cProd nunca vazio ==========
       const sku = NFeService.gerarCodigoProduto(item);
-      const ncmRaw = item.ncm || item.cotacao?.ncm || item.material?.ncm || '00000000';
-      const ncm = String(ncmRaw).replace(/\D/g, '').padStart(8, '0').slice(0, 8);
-      const descricaoOriginal = item.cotacao?.nome || item.descricao || item.material?.nome || 'Produto sem descrição';
-      const descricao = (descricaoOriginal + opts.sufixoDescricao).substring(0, 120);
+      const produtoKit = NFeService.dadosProdutoDoItem(item);
+      const ncm = produtoKit.ncm;
+      const descricao = (produtoKit.descricao + opts.sufixoDescricao).substring(0, 120);
       const unidade = item.unidadeVenda || (item.material as any)?.unidadeMedida || 'UN';
       const quantidade = item.quantidade || 1;
       const valorTotalOriginal = item.subtotal || (quantidade * (item.precoUnit || 0));
@@ -1303,6 +1317,23 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
       }
 
       console.log('✅ NF-e cancelada:', resultado);
+
+      const notaCancelada = await prisma.notaFiscal.findUnique({
+        where: { chaveAcesso },
+        select: { id: true },
+      });
+      if (notaCancelada) {
+        await prisma.notaFiscal.update({
+          where: { id: notaCancelada.id },
+          data: { status: 'Cancelada' },
+        });
+        try {
+          await estornarBaixaKitDaNota(notaCancelada.id);
+        } catch (estornoErr) {
+          console.error('Erro ao estornar a baixa do kit no cancelamento da NF-e:', estornoErr);
+        }
+      }
+
       return {
         status: 'sucesso',
         protocolo: resultado.protocolo,
@@ -1903,6 +1934,14 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         console.warn('⚠️ Não foi possível salvar/atualizar a NF-e em NotaFiscal:', error.message);
       }
 
+      if (notaFiscalId && (resultado.codigoStatus === '100' || resultado.codigoStatus === '104')) {
+        try {
+          await baixarKitNaEmissaoNfe(notaFiscalId);
+        } catch (baixaErr) {
+          console.error('Erro ao baixar componentes do kit na NF-e:', baixaErr);
+        }
+      }
+
       // Auditoria: emissão concluída (autorizada ou pendente/rejeitada)
       await NFeAuditService.registrarEvento({
         action:
@@ -2213,6 +2252,14 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
           observacoes: resultado.mensagem
         }
       });
+
+      if (codigoOk) {
+        try {
+          await baixarKitNaEmissaoNfe(notaFiscal.id);
+        } catch (baixaErr) {
+          console.error('Erro ao baixar componentes do kit na NF-e fracionada:', baixaErr);
+        }
+      }
 
       const dataVenc = frac.dataVencimento.trim().includes('T') ? frac.dataVencimento : `${frac.dataVencimento.trim().slice(0, 10)}T12:00:00.000Z`;
       await prisma.contaReceber.create({

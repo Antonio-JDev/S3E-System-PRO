@@ -12,7 +12,7 @@
  */
 jest.mock('./estoque.service', () => ({
   EstoqueService: {
-    processarBaixaOrcamento: jest.fn().mockResolvedValue({ success: true }),
+    processarBaixaOrcamento: jest.fn().mockResolvedValue({ success: true, skipped: true }),
     verificarDisponibilidadeOrcamento: jest.fn().mockResolvedValue({ disponivel: true }),
   },
 }));

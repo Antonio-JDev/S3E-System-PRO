@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
 import { EstoqueService } from './estoque.service';
+import { reservarMateriaisDaVenda } from './baixaMaterialOrcamento.service';
 import {
     calcAbateParcelaFromBase,
     parseMoney,
@@ -137,9 +138,8 @@ export class VendasService {
         // Gerar número único da venda
         const numeroVenda = `VND-${Date.now()}`;
 
-        // Transação só para venda + contas a receber. A baixa de estoque roda depois do commit:
-        // ficar dentro do callback faz o Prisma contar o tempo de `processarBaixaOrcamento` no
-        // timeout interativo (padrão 5s → P2028 em produção com orçamentos grandes).
+        // Transação só para venda + contas a receber.
+        // A reserva de estoque roda depois do commit, sem dar baixa.
         const resultadoTx = await prisma.$transaction(async (tx) => {
             // 0. Verificar se já existe venda para este orçamento
             const vendaExistente = await tx.venda.findUnique({
@@ -298,28 +298,22 @@ export class VendasService {
 
         const { venda, contasReceber } = resultadoTx;
 
-        // 4. Baixa de estoque (fora da transação interativa — evita P2028 quando há muitos itens/kits)
-        let baixaEstoque: any = null;
+        // A venda não baixa estoque. Reserva kit e material de obra para a OS, se ela já existir.
+        // Kit só sai na NF-e. Material de obra só sai ao iniciar a obra ou ao marcar sem obra de campo.
+        let reservaEstoque: { reservados: number; projetoId: string | null } | null = null;
         try {
-            baixaEstoque = await EstoqueService.processarBaixaOrcamento(
-                orcamentoId,
-                venda.id
-            );
+            reservaEstoque = await reservarMateriaisDaVenda(orcamentoId);
         } catch (error: any) {
             const errMsg = error instanceof Error ? error.message : String(error);
-            console.warn(`⚠️ Não foi possível processar baixa de estoque para venda ${venda.id}: ${errMsg}`);
-            baixaEstoque = {
-                success: false,
-                error: errMsg
-            };
+            console.warn(`⚠️ Não foi possível reservar materiais da venda ${venda.id}: ${errMsg}`);
             try {
                 const { criarNotificacao } = await import('../services/notificacoes.service');
                 const admins = await prisma.user.findMany({
                     where: { active: true, isAdmin: true },
                     select: { id: true }
                 });
-                const titulo = `Alerta: Falha ao processar baixa de estoque (Venda ${numeroVenda})`;
-                const mensagem = `Ao processar a baixa de estoque para a venda ${numeroVenda} ocorreu um erro:\n${errMsg}\nVerifique o módulo de Estoque/Compras.`;
+                const titulo = `Alerta: Falha ao reservar materiais (Venda ${numeroVenda})`;
+                const mensagem = `Ao reservar os materiais da venda ${numeroVenda} ocorreu um erro:\n${errMsg}\nA venda foi gerada, mas o estoque não foi reservado. Verifique o módulo de Estoque.`;
                 for (const a of admins) {
                     await criarNotificacao({
                         userId: a.id,
@@ -331,7 +325,7 @@ export class VendasService {
                     });
                 }
             } catch (notifyErr) {
-                console.error('Erro ao notificar administradores sobre problema de estoque:', notifyErr);
+                console.error('Erro ao notificar administradores sobre problema de reserva:', notifyErr);
             }
         }
 
@@ -340,7 +334,12 @@ export class VendasService {
         return {
             venda,
             contasReceber,
-            baixaEstoque,
+            baixaEstoque: {
+                success: true,
+                skipped: true,
+                reason: 'A venda não baixa estoque. O kit baixa na NF-e e o material de obra na OS.',
+            },
+            reservaEstoque,
             orcamentoStatus: orcamentoStatusFinal
         };
     }
@@ -620,6 +619,12 @@ export class VendasService {
                                         id: true,
                                         nome: true,
                                         ncm: true
+                                    }
+                                },
+                                kit: {
+                                    select: {
+                                        id: true,
+                                        nome: true
                                     }
                                 }
                             }

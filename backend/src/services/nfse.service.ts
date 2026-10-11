@@ -127,6 +127,7 @@ export async function buscarDadosVendaParaNfse(
   };
 
   const itensOrcamento = venda.orcamento.items || [];
+  // Só serviço avulso vira NFS-e. Serviço dentro do kit é custo do produto e não entra aqui.
   const itensServico = (itensOrcamento as any[])
     .filter((item) => item.tipo === 'SERVICO' && !item.vendaDiretaFornecedor)
     .map((item) => ({

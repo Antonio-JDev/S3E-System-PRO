@@ -12,6 +12,7 @@ import { NFeSignatureService } from '../services/nfe-signature.service';
 import { NFeProcNFeUtil } from '../utils/nfe-procnfe.util';
 import NFeFilaService from '../services/nfe-fila.service';
 import NFeAuditService from '../services/nfe-audit.service';
+import { baixarKitNaEmissaoNfe } from '../services/baixaMaterialOrcamento.service';
 
 /**
  * Worker simples para reprocessar a fila de NF-e em contingência.
@@ -184,6 +185,11 @@ export async function processarFilaNFe(limit = 10) {
             });
           } catch (logErr) {
             console.warn('⚠️ Falha ao registrar evento NFe (autorizada via JOB):', logErr);
+          }
+          try {
+            await baixarKitNaEmissaoNfe(item.notaFiscalId);
+          } catch (baixaErr) {
+            console.error('Erro ao baixar componentes do kit após autorizar NF-e da fila:', baixaErr);
           }
         } catch (nfError: any) {
           console.warn(

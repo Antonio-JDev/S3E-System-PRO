@@ -9,6 +9,7 @@ import { VendasService, VendaPayload } from './vendas.service';
 import { prisma } from '../lib/prisma';
 import { VendaStatus, ContaStatus } from '../types/index';
 import { ORCAMENTO_STATUS_CONCRETIZADO } from '../utils/orcamentoStatus.util';
+import { EstoqueService } from './estoque.service';
 
 // Mock do Prisma
 jest.mock('../lib/prisma', () => ({
@@ -145,6 +146,7 @@ describe('VendasService', () => {
         data: expect.objectContaining({ status: ORCAMENTO_STATUS_CONCRETIZADO }),
       });
       expect(resultado.orcamentoStatus).toBe(ORCAMENTO_STATUS_CONCRETIZADO);
+      expect(EstoqueService.processarBaixaOrcamento).not.toHaveBeenCalled();
     });
 
     it('deve criar venda com entrada separada das parcelas', async () => {
