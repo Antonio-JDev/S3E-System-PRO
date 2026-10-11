@@ -16,7 +16,8 @@ export type OrigemExtratoBanco =
   | 'IMPORT_XLS'
   | 'RECALC'
   | 'FATURAR'
-  | 'ZERAR';
+  | 'ZERAR'
+  | 'AJUSTE_MANUAL';
 
 function n(v: unknown): number {
   const x = Number(v ?? 0);
@@ -63,7 +64,7 @@ export async function sincronizarExtratoBancoHorasCompetencia(params: {
 
   const { inicio, fim } = inicioFimMesCivilUtc(referenciaAno, referenciaMes);
 
-  const [comentarios, lancamentos, extratoAnterior] = await Promise.all([
+  const [comentarios, lancamentos, ajustesManuais, extratoAnterior] = await Promise.all([
     prisma.comentarioConferenciaPontoRh.findMany({
       where: {
         funcionarioId,
@@ -91,6 +92,10 @@ export async function sincronizarExtratoBancoHorasCompetencia(params: {
         descricao: true,
         createdAt: true,
       },
+    }),
+    prisma.bancoHorasAjusteManual.findMany({
+      where: { funcionarioId, referenciaAno, referenciaMes },
+      orderBy: { createdAt: 'asc' },
     }),
     (() => {
       const prev = competenciaAnterior(referenciaAno, referenciaMes);
@@ -137,6 +142,20 @@ export async function sincronizarExtratoBancoHorasCompetencia(params: {
         descricao: `Débito banco (atraso/falta${c.tratamentoDebito ? ` ${c.tratamentoDebito}` : ''})`,
       });
     }
+  }
+
+  for (const ajuste of ajustesManuais) {
+    const horas = round2(Math.max(0, n(ajuste.horas)));
+    if (horas <= 0) continue;
+    creditosMes += horas;
+    const criado = ajuste.createdAt.toISOString().slice(0, 10);
+    movimentos.push({
+      tipo: 'AJUSTE',
+      horas,
+      dia: null,
+      dataReferencia: criado,
+      descricao: `Lançamento manual: ${ajuste.justificativa.trim()}`,
+    });
   }
 
   let pagamentosMes = 0;

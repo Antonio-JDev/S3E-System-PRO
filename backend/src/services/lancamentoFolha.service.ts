@@ -36,6 +36,34 @@ export async function criar(data: {
   });
 }
 
+export async function atualizar(
+  id: string,
+  data: {
+    valor?: number;
+    descricao?: string | null;
+    categoria?: LancamentoFolhaCategoria;
+  },
+) {
+  const existing = await prisma.lancamentoFolha.findUnique({ where: { id } });
+  if (!existing) {
+    throw new Error('Lançamento não encontrado');
+  }
+  if (data.categoria !== undefined && !CATEGORIAS.includes(data.categoria)) {
+    throw new Error('Categoria inválida');
+  }
+  if (data.valor !== undefined && (data.valor <= 0 || Number.isNaN(data.valor))) {
+    throw new Error('Valor deve ser um número positivo');
+  }
+  return prisma.lancamentoFolha.update({
+    where: { id },
+    data: {
+      ...(data.valor !== undefined ? { valor: data.valor } : {}),
+      ...(data.descricao !== undefined ? { descricao: data.descricao } : {}),
+      ...(data.categoria !== undefined ? { categoria: data.categoria } : {}),
+    },
+  });
+}
+
 export async function excluir(id: string) {
   const existing = await prisma.lancamentoFolha.findUnique({ where: { id } });
   if (!existing) {

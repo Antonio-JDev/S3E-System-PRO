@@ -10,6 +10,7 @@ const mockGet = vi.fn();
 const mockPut = vi.fn();
 const mockPost = vi.fn();
 const mockDelete = vi.fn();
+const mockPatch = vi.fn();
 const mockUpload = vi.fn();
 
 vi.mock('../axiosApi', () => ({
@@ -18,6 +19,7 @@ vi.mock('../axiosApi', () => ({
     put: (...args: unknown[]) => mockPut(...args),
     post: (...args: unknown[]) => mockPost(...args),
     delete: (...args: unknown[]) => mockDelete(...args),
+    patch: (...args: unknown[]) => mockPatch(...args),
     upload: (...args: unknown[]) => mockUpload(...args),
   },
 }));
@@ -29,6 +31,7 @@ describe('rhService', () => {
     mockPut.mockResolvedValue({ success: true, data: {} });
     mockPost.mockResolvedValue({ success: true, data: {} });
     mockDelete.mockResolvedValue({ success: true });
+    mockPatch.mockResolvedValue({ success: true, data: {} });
     mockUpload.mockResolvedValue({ success: true, data: { importados: 1 } });
   });
 
@@ -73,6 +76,14 @@ describe('rhService', () => {
       categoria: 'FALTA',
       valor: 100,
       descricao: 'teste',
+    });
+  });
+
+  it('atualizarLancamento faz PATCH com valor e descrição', async () => {
+    await rhService.atualizarLancamento('lan-1', { valor: 80, descricao: 'ajuste' });
+    expect(mockPatch).toHaveBeenCalledWith('/api/rh/lancamentos/lan-1', {
+      valor: 80,
+      descricao: 'ajuste',
     });
   });
 

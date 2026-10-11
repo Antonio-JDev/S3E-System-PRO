@@ -3,6 +3,34 @@ import { LancamentoFolhaCategoria } from '@prisma/client';
 import * as LancamentoFolhaService from '../services/lancamentoFolha.service';
 import { ContasPagarService } from '../services/contasPagar.service';
 
+function mensagemContaSalario(
+  acao: string,
+  result:
+    | { ok: false }
+    | { ok: true; valorFolha: number; motivo: string },
+): string {
+  if (!result.ok) {
+    return `${acao}. Não foi possível recalcular a folha para atualizar Contas a pagar.`;
+  }
+  const valor = result.valorFolha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  if (result.motivo === 'atualizado' || result.motivo === 'criado') {
+    return `${acao}. Salário em Contas a pagar atualizado para ${valor}.`;
+  }
+  if (result.motivo === 'conta_nao_pendente') {
+    return `${acao}. A conta deste mês já não está pendente, então o salário em Contas a pagar não mudou. Total da folha: ${valor}.`;
+  }
+  return `${acao}. Total da folha: ${valor}.`;
+}
+
+async function sincronizarSalario(funcionarioId: string, ano: number, mes: number) {
+  try {
+    return await ContasPagarService.sincronizarValorParcelaRHPelaFolha(funcionarioId, ano, mes);
+  } catch (syncErr) {
+    console.warn('Sincronizar parcela RH após lançamento:', syncErr);
+    return { ok: false as const };
+  }
+}
+
 export const LancamentoFolhaController = {
   async listar(req: Request, res: Response): Promise<void> {
     try {
@@ -56,27 +84,53 @@ export const LancamentoFolhaController = {
         });
         return;
       }
+      const ano = parseInt(String(referenciaAno), 10);
+      const mes = parseInt(String(referenciaMes), 10);
       const row = await LancamentoFolhaService.criar({
         funcionarioId: String(funcionarioId),
-        referenciaAno: parseInt(String(referenciaAno), 10),
-        referenciaMes: parseInt(String(referenciaMes), 10),
+        referenciaAno: ano,
+        referenciaMes: mes,
         categoria: categoria as LancamentoFolhaCategoria,
         valor: Number(valor),
         descricao: descricao ?? null,
       });
-      try {
-        await ContasPagarService.sincronizarValorParcelaRHPelaFolha(
-          String(funcionarioId),
-          parseInt(String(referenciaAno), 10),
-          parseInt(String(referenciaMes), 10),
-        );
-      } catch (syncErr) {
-        console.warn('Sincronizar parcela RH após lançamento:', syncErr);
-      }
-      res.status(201).json({ success: true, data: row });
+      const sync = await sincronizarSalario(String(funcionarioId), ano, mes);
+      res.status(201).json({
+        success: true,
+        data: row,
+        message: mensagemContaSalario('Lançamento incluído', sync),
+      });
     } catch (e: any) {
       console.error(e);
       res.status(400).json({ success: false, message: e?.message ?? 'Erro ao criar' });
+    }
+  },
+
+  async atualizar(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { valor, descricao, categoria } = req.body ?? {};
+      if (valor === undefined && descricao === undefined && categoria === undefined) {
+        res.status(400).json({
+          success: false,
+          message: 'Informe valor, descrição ou categoria para atualizar',
+        });
+        return;
+      }
+      const row = await LancamentoFolhaService.atualizar(id, {
+        ...(valor !== undefined ? { valor: Number(valor) } : {}),
+        ...(descricao !== undefined ? { descricao: descricao ?? null } : {}),
+        ...(categoria !== undefined ? { categoria: categoria as LancamentoFolhaCategoria } : {}),
+      });
+      const sync = await sincronizarSalario(row.funcionarioId, row.referenciaAno, row.referenciaMes);
+      res.json({
+        success: true,
+        data: row,
+        message: mensagemContaSalario('Lançamento salvo', sync),
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.status(400).json({ success: false, message: e?.message ?? 'Erro ao atualizar' });
     }
   },
 
@@ -84,16 +138,15 @@ export const LancamentoFolhaController = {
     try {
       const { id } = req.params;
       const removido = await LancamentoFolhaService.excluir(id);
-      try {
-        await ContasPagarService.sincronizarValorParcelaRHPelaFolha(
-          removido.funcionarioId,
-          removido.referenciaAno,
-          removido.referenciaMes,
-        );
-      } catch (syncErr) {
-        console.warn('Sincronizar parcela RH após excluir lançamento:', syncErr);
-      }
-      res.json({ success: true, message: 'Lançamento removido' });
+      const sync = await sincronizarSalario(
+        removido.funcionarioId,
+        removido.referenciaAno,
+        removido.referenciaMes,
+      );
+      res.json({
+        success: true,
+        message: mensagemContaSalario('Lançamento removido', sync),
+      });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ success: false, message: e?.message ?? 'Erro ao excluir' });

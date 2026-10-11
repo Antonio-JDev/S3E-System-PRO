@@ -15,6 +15,10 @@ import {
   zerarBancoHoras as zerarBancoHorasService,
 } from '../services/bancoHorasRh.service';
 import {
+  lancarHorasNoBanco,
+  listarAjustesBancoHoras,
+} from '../services/bancoHorasAjuste.service';
+import {
   aprovarDiaCompensacao,
   criarCompensacaoHoras,
   criarFaltaJustificada,
@@ -201,6 +205,7 @@ export const RhController = {
       let message: string;
       switch (result.motivo) {
         case 'atualizado':
+        case 'criado':
           message = `Conta a pagar atualizada para ${result.valorFolha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`;
           break;
         case 'sem_conta':
@@ -422,6 +427,50 @@ export const RhController = {
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao faturar banco' });
+    }
+  },
+
+  /** GET /api/rh/banco-horas/ajustes?funcionarioId= */
+  async listarAjustesBanco(req: Request, res: Response) {
+    try {
+      const funcionarioId = String(req.query.funcionarioId ?? '');
+      if (!funcionarioId) {
+        return res.status(400).json({ success: false, message: 'funcionarioId é obrigatório' });
+      }
+      const data = await listarAjustesBancoHoras(funcionarioId);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao listar ajustes' });
+    }
+  },
+
+  /**
+   * POST /api/rh/banco-horas/ajustar
+   * Credita horas no banco de uma competência (ex.: outubro) com justificativa.
+   */
+  async ajustarBancoHoras(req: Request, res: Response) {
+    try {
+      const { funcionarioId, referenciaAno, referenciaMes, horas, justificativa } = req.body ?? {};
+      if (!funcionarioId || referenciaAno === undefined || referenciaMes === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno e referenciaMes são obrigatórios',
+        });
+      }
+      const data = await lancarHorasNoBanco({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: parseInt(String(referenciaAno), 10),
+        referenciaMes: parseInt(String(referenciaMes), 10),
+        horas: Number(horas),
+        justificativa: String(justificativa ?? ''),
+      });
+      return res.status(201).json({
+        success: true,
+        message: `${Number(horas).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} h lançadas no banco de ${String(referenciaMes).padStart(2, '0')}/${referenciaAno}.`,
+        data,
+      });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao lançar horas no banco' });
     }
   },
 

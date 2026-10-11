@@ -30,6 +30,8 @@ router.get('/registro-ponto', RhController.buscarRegistroPontoDia);
 router.post('/registro-ponto/manual', RhController.criarRegistroPontoManual);
 router.put('/registro-ponto/:id', RhController.atualizarRegistroPonto);
 router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarIntervaloAlmoco);
+router.get('/banco-horas/ajustes', RhController.listarAjustesBanco);
+router.post('/banco-horas/ajustar', RhController.ajustarBancoHoras);
 router.post('/banco-horas/converter-folga', RhController.converterFolga);
 router.post('/banco-horas/incluir-folha', RhController.incluirBancoFolha);
 router.post('/banco-horas/faturar', RhController.faturarBancoHoras);
@@ -76,6 +78,7 @@ router.put('/config-ponto/:funcionarioId', ConfiguracaoPontoController.salvar);
 
 router.get('/lancamentos', LancamentoFolhaController.listar);
 router.post('/lancamentos', LancamentoFolhaController.criar);
+router.patch('/lancamentos/:id', LancamentoFolhaController.atualizar);
 router.delete('/lancamentos/:id', LancamentoFolhaController.excluir);
 
 export default router;
