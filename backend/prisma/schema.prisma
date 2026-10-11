@@ -676,8 +676,11 @@ model Orcamento {
   impostoPercentual       Float     @default(0) // Impostos em %
   condicaoPagamento       String? // Ex: "À Vista", "30/60/90 dias"
   orcamentistaNome        String? // Primeiro nome do usuário que criou o orçamento
-  // Controle de baixa única: 'OBRA' = baixa feita ao Iniciar obra (OS); 'VENDA' = baixa feita ao Gerar PV. Evita dupla baixa.
-  baixaEstoqueRealizadaEm String? // OBRA | VENDA | null
+  // Material de obra (fora do kit): 'OBRA' ao iniciar obra ou sem obra de campo.
+  // 'VENDA' só em pedidos antigos, que já baixaram tudo na geração da venda.
+  baixaEstoqueRealizadaEm String? // OBRA | VENDA (legado) | null
+  // Componentes do kit vendido como produto: baixa somente na NF-e autorizada.
+  baixaKitRealizadaEm     String? // NFE | null
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -904,6 +907,7 @@ model Projeto {
   apontamentos         ApontamentoOs[]
   historicoReprovacoesVistoria HistoricoReprovacaoVistoria[]
   eventosCalendario    EventoCalendario[]
+  movimentacoesEstoque MovimentacaoEstoque[]
 
   @@index([concluidoPorId])
   @@map("projetos")
@@ -1388,14 +1392,24 @@ model MovimentacaoEstoque {
   materialId  String
   tipo        String // ENTRADA, SAIDA, AJUSTE
   quantidade  Float
-  motivo      String // COMPRA, VENDA, PROJETO, DEVOLUCAO, AJUSTE
-  referencia  String? // ID da compra, projeto, etc
+  motivo      String // COMPRA, VENDA, PROJETO, DEVOLUCAO, AJUSTE, OBRA
+  referencia  String? // ID da compra, obra, venda, etc
   observacoes String?
+  /// Custo unitário congelado na saída (preço da última compra naquele instante)
+  custoUnitario   Float?
+  /// quantidade × custoUnitario. É o CMV daquela baixa.
+  valorCusto      Float?
+  projetoId       String?
+  /// true quando o custo foi estimado depois, com o preço atual do material
+  custoRetroativo Boolean  @default(false)
   data        DateTime @default(now())
   createdAt   DateTime @default(now())
 
   material Material @relation(fields: [materialId], references: [id])
+  projeto  Projeto? @relation(fields: [projetoId], references: [id], onDelete: SetNull)
 
+  @@index([projetoId])
+  @@index([data, tipo])
   @@map("movimentacoes_estoque")
 }
 
@@ -2086,6 +2100,7 @@ model Funcionario {
   lancamentosFolha              LancamentoFolha[]
   bancoHorasExcessoCompetencias BancoHorasExcessoCompetencia[]
   bancoHorasExtratosCompetencia BancoHorasExtratoCompetencia[]
+  bancoHorasAjustesManuais      BancoHorasAjusteManual[]
   ocorrenciasPontoRh            OcorrenciaPontoRh[]
   comentariosConferenciaPonto   ComentarioConferenciaPontoRh[]
   workShiftCompensacoes         CompensacaoHorasRh[]
@@ -2176,7 +2191,7 @@ model BancoHorasExtratoCompetencia {
   saldoFinalPositivas    Decimal  @default(0) @db.Decimal(12, 2)
   saldoFinalNegativas    Decimal  @default(0) @db.Decimal(12, 2)
   saldoFinalLiquido      Decimal  @default(0) @db.Decimal(12, 2)
-  /// FOLHA | IMPORT_XLS | RECALC | FATURAR | ZERAR
+  /// FOLHA | IMPORT_XLS | RECALC | FATURAR | ZERAR | AJUSTE_MANUAL
   origemAtualizacao      String   @default("FOLHA")
   /// Lista de movimentos do mês (crédito/débito/pagamento) para UI/PDF
   movimentosJson         Json?
@@ -2188,6 +2203,22 @@ model BancoHorasExtratoCompetencia {
   @@unique([funcionarioId, referenciaAno, referenciaMes])
   @@index([funcionarioId, referenciaAno, referenciaMes])
   @@map("banco_horas_extrato_competencia")
+}
+
+/// Horas lançadas à mão no banco (ex.: competência já fechada, a pagar no mês seguinte).
+model BancoHorasAjusteManual {
+  id             String   @id @default(uuid())
+  funcionarioId  String
+  referenciaAno  Int
+  referenciaMes  Int
+  horas          Decimal  @db.Decimal(12, 2)
+  justificativa  String
+  createdAt      DateTime @default(now())
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+
+  @@index([funcionarioId, referenciaAno, referenciaMes])
+  @@map("banco_horas_ajustes_manuais")
 }
 
 model LancamentoFolha {
@@ -2597,4 +2628,68 @@ model KitFerramentaItem {
   @@index([kitId])
   @@index([ferramentaId])
   @@map("kit_ferramenta_itens")
+}
+
+// ============================================
+// TESOURARIA — contas bancárias e transferência
+// Transferência não é receita nem despesa: só muda o saldo de cada banco.
+// ============================================
+
+model ContaBancaria {
+  id           String   @id @default(uuid())
+  nome         String
+  banco        String?
+  agencia      String?
+  numeroConta  String?
+  saldoInicial Float    @default(0)
+  ativo        Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  movimentacoes         MovimentacaoTesouraria[]
+  transferenciasOrigem  TransferenciaBancaria[]  @relation("TransferenciaOrigem")
+  transferenciasDestino TransferenciaBancaria[]  @relation("TransferenciaDestino")
+
+  @@index([ativo])
+  @@map("contas_bancarias")
+}
+
+model TransferenciaBancaria {
+  id             String   @id @default(uuid())
+  contaOrigemId  String
+  contaDestinoId String
+  valor          Float
+  data           DateTime
+  descricao      String
+  createdAt      DateTime @default(now())
+
+  contaOrigem   ContaBancaria            @relation("TransferenciaOrigem", fields: [contaOrigemId], references: [id])
+  contaDestino  ContaBancaria            @relation("TransferenciaDestino", fields: [contaDestinoId], references: [id])
+  movimentacoes MovimentacaoTesouraria[]
+
+  @@index([contaOrigemId])
+  @@index([contaDestinoId])
+  @@index([data])
+  @@map("transferencias_bancarias")
+}
+
+model MovimentacaoTesouraria {
+  id              String   @id @default(uuid())
+  contaBancariaId String
+  transferenciaId String
+  tipo            String // ENTRADA | SAIDA
+  classificacao   String   @default("TRANSFERENCIA")
+  valor           Float
+  data            DateTime
+  descricao       String
+  createdAt       DateTime @default(now())
+
+  contaBancaria ContaBancaria         @relation(fields: [contaBancariaId], references: [id])
+  transferencia TransferenciaBancaria @relation(fields: [transferenciaId], references: [id], onDelete: Cascade)
+
+  @@index([contaBancariaId])
+  @@index([transferenciaId])
+  @@index([data])
+  @@index([classificacao])
+  @@map("movimentacoes_tesouraria")
 }
