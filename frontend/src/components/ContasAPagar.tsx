@@ -879,19 +879,31 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         }
     };
 
+    const competenciaLocal = () => {
+        const hoje = new Date();
+        return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const atualizarSalariosPelaFolha = async () => {
+        const response = await axiosApiService.post('/api/contas-pagar/gerar/salarios', {
+            mesReferencia: competenciaLocal(),
+        });
+        if (!response.success) {
+            toast.error('Não foi possível atualizar os salários pela folha');
+            return false;
+        }
+        const message =
+            (response as { message?: string }).message ||
+            ((response.data as { message?: string } | undefined)?.message);
+        if (message) toast.success(message);
+        return true;
+    };
+
     const gerarContasSalarios = async () => {
         try {
             setGerandoContas(true);
-            const mesAtual = new Date().toISOString().slice(0, 7); // YYYY-MM
-            const response = await axiosApiService.post('/api/contas-pagar/gerar/salarios', {
-                mesReferencia: mesAtual
-            });
-            
-            if (response.success) {
-                const message = (response.data as any)?.message || response.message || 'Contas de salários geradas!';
-                toast.success(message);
-                loadContasPagar();
-            }
+            await atualizarSalariosPelaFolha();
+            await loadContasPagar();
         } catch (error) {
             console.error('Erro ao gerar contas de salários:', error);
             toast.error('Erro ao gerar contas de salários');
@@ -1638,13 +1650,15 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         Nova Conta a Pagar
                     </button>
                     <button
-                        onClick={loadContasPagar}
-                        className="btn-danger flex items-center gap-2"
+                        onClick={() => void gerarContasSalarios()}
+                        disabled={gerandoContas}
+                        className="btn-danger flex items-center gap-2 disabled:opacity-60"
+                        title="Recarrega a lista e grava o total da folha do mês nas contas de salário pendentes"
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        Atualizar
+                        {gerandoContas ? 'Atualizando…' : 'Atualizar'}
                     </button>
                 </div>
             </header>

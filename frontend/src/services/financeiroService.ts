@@ -14,6 +14,7 @@ export interface MovimentacaoCaixaItem {
   meioPagamento: string | null;
   origem: string;
   referenciaId: string;
+  classificacao?: string | null;
   tipoCategoria?: string; // FORNECEDOR, RH, etc. para edição de saídas
   observacoes?: string | null; // Justificativa/descrição (ex.: desconto por falta)
   /** true quando a entrada vem do histórico de recebimentos parciais (id = recebimento parcial) */
@@ -34,6 +35,37 @@ export interface ResumoMovimentacoes {
   entradasTotal: number;
   saidasTotal: number;
   saldoConta: number;
+  transferenciasTotal?: number;
+}
+
+export interface ContaBancaria {
+  id: string;
+  nome: string;
+  banco?: string | null;
+  agencia?: string | null;
+  numeroConta?: string | null;
+  saldoInicial: number;
+  ativo: boolean;
+  saldo: number;
+}
+
+export interface LinhaExtratoBancario {
+  id: string;
+  data: string;
+  tipo: 'ENTRADA' | 'SAIDA';
+  valor: number;
+  descricao: string;
+  contraparte: string | null;
+  saldo: number;
+}
+
+export interface ExtratoContaBancaria {
+  conta: { id: string; nome: string; banco?: string | null; agencia?: string | null; numeroConta?: string | null };
+  dataInicio: string | null;
+  dataFim: string | null;
+  saldoAnterior: number;
+  saldoFinal: number;
+  linhas: LinhaExtratoBancario[];
 }
 
 export interface ContaReceber {
@@ -481,6 +513,89 @@ class FinanceiroService {
       return { success: false, error: response.error || 'Erro ao atualizar movimentação' };
     } catch (error) {
       console.error('❌ Erro ao atualizar movimentação:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async listarContasBancarias(): Promise<{ success: boolean; data?: ContaBancaria[]; error?: string }> {
+    try {
+      const response = await axiosApiService.get<ContaBancaria[]>('/api/financeiro/tesouraria/contas');
+      if (response.success && response.data) {
+        const data = Array.isArray(response.data) ? response.data : [];
+        return { success: true, data };
+      }
+      return { success: false, error: response.error || response.message || 'Erro ao listar contas bancárias' };
+    } catch (error) {
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async criarContaBancaria(payload: {
+    nome: string;
+    banco?: string;
+    agencia?: string;
+    numeroConta?: string;
+    saldoInicial?: number;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.post('/api/financeiro/tesouraria/contas', payload);
+      if (response.success) return { success: true };
+      return { success: false, error: response.error || response.message || 'Erro ao cadastrar conta' };
+    } catch (error) {
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async extratoContaBancaria(
+    id: string,
+    filtros?: { dataInicio?: string; dataFim?: string },
+  ): Promise<{ success: boolean; data?: ExtratoContaBancaria; error?: string }> {
+    try {
+      const response = await axiosApiService.get<ExtratoContaBancaria>(
+        `/api/financeiro/tesouraria/contas/${id}/extrato`,
+        filtros,
+      );
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || response.message || 'Erro ao carregar extrato' };
+    } catch (error) {
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async definirContaBancariaAtiva(id: string, ativo: boolean): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.patch(`/api/financeiro/tesouraria/contas/${id}`, { ativo });
+      if (response.success) return { success: true };
+      return { success: false, error: response.error || response.message || 'Erro ao atualizar conta' };
+    } catch (error) {
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async criarTransferenciaBancaria(payload: {
+    contaOrigemId: string;
+    contaDestinoId: string;
+    valor: number;
+    data: string;
+    descricao?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.post('/api/financeiro/tesouraria/transferencias', payload);
+      if (response.success) return { success: true };
+      return { success: false, error: response.error || response.message || 'Erro ao lançar transferência' };
+    } catch (error) {
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async estornarTransferenciaBancaria(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.delete(`/api/financeiro/tesouraria/transferencias/${id}`);
+      if (response.success) return { success: true };
+      return { success: false, error: response.error || response.message || 'Erro ao estornar transferência' };
+    } catch (error) {
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }

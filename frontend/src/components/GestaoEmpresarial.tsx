@@ -580,6 +580,12 @@ const RHView: React.FC = () => {
         valor: '',
         descricao: '',
     });
+    const [lancamentoEmEdicao, setLancamentoEmEdicao] = useState<{
+        id: string;
+        valor: string;
+        descricao: string;
+    } | null>(null);
+    const [salvandoLancamentoEdicao, setSalvandoLancamentoEdicao] = useState(false);
     const [pontoImportAno, setPontoImportAno] = useState(String(new Date().getFullYear()));
     const [pontoImportMes, setPontoImportMes] = useState(String(new Date().getMonth() + 1));
     const [pontoImportBusy, setPontoImportBusy] = useState(false);
@@ -616,6 +622,27 @@ const RHView: React.FC = () => {
 
     // Modal Ver dados do colaborador
     const [funcionarioVerDados, setFuncionarioVerDados] = useState<any | null>(null);
+    const [ajusteBancoHoras, setAjusteBancoHoras] = useState('');
+    const [ajusteBancoJustificativa, setAjusteBancoJustificativa] = useState('');
+    const [ajusteBancoCompetencia, setAjusteBancoCompetencia] = useState(rhCompetencia);
+    const [salvandoAjusteBanco, setSalvandoAjusteBanco] = useState(false);
+    const [ajustesBancoLista, setAjustesBancoLista] = useState<
+        Array<{
+            id: string;
+            horas: number;
+            justificativa: string;
+            referenciaAno: number;
+            referenciaMes: number;
+            createdAt: string;
+        }>
+    >([]);
+    const [menuAcoesFuncionario, setMenuAcoesFuncionario] = useState<{
+        id: string;
+        top: number;
+        right: number;
+        abreParaCima: boolean;
+    } | null>(null);
+    const menuAcoesRef = useRef<HTMLDivElement | null>(null);
     // Modal Histórico de pagamentos
     const [funcionarioHistorico, setFuncionarioHistorico] = useState<any | null>(null);
     const [historicoPagamentosLista, setHistoricoPagamentosLista] = useState<any[]>([]);
@@ -2083,7 +2110,41 @@ const RHView: React.FC = () => {
         setLancamentoNovo({ categoria: 'ADIANTAMENTO', valor: '', descricao: '' });
         await recarregarFolhaAberta();
         await carregarDados();
-        toast.success('Lançamento incluído');
+        toast.success(
+            typeof (r as { message?: string }).message === 'string'
+                ? (r as { message: string }).message
+                : 'Lançamento incluído',
+        );
+    };
+
+    const handleSalvarEdicaoLancamentoFolha = async () => {
+        if (!lancamentoEmEdicao) return;
+        const v = parseFloat(String(lancamentoEmEdicao.valor).replace(',', '.'));
+        if (!Number.isFinite(v) || v <= 0) {
+            toast.error('Informe um valor positivo');
+            return;
+        }
+        setSalvandoLancamentoEdicao(true);
+        try {
+            const r = await rhService.atualizarLancamento(lancamentoEmEdicao.id, {
+                valor: v,
+                descricao: lancamentoEmEdicao.descricao.trim() || null,
+            });
+            if (!r.success) {
+                toast.error((r as { error?: string }).error || (r as { message?: string }).message || 'Erro ao salvar');
+                return;
+            }
+            setLancamentoEmEdicao(null);
+            await recarregarFolhaAberta();
+            await carregarDados();
+            toast.success(
+                typeof (r as { message?: string }).message === 'string'
+                    ? (r as { message: string }).message
+                    : 'Lançamento salvo',
+            );
+        } finally {
+            setSalvandoLancamentoEdicao(false);
+        }
     };
 
     const handleExcluirLancamentoFolha = async (id: string) => {
@@ -2092,9 +2153,14 @@ const RHView: React.FC = () => {
             toast.error((r as { error?: string }).error || 'Erro ao excluir');
             return;
         }
+        if (lancamentoEmEdicao?.id === id) setLancamentoEmEdicao(null);
         await recarregarFolhaAberta();
         await carregarDados();
-        toast.success('Lançamento removido');
+        toast.success(
+            typeof (r as { message?: string }).message === 'string'
+                ? (r as { message: string }).message
+                : 'Lançamento removido',
+        );
     };
 
     const handleSincronizarParcelaConta = async () => {
@@ -2241,9 +2307,92 @@ const RHView: React.FC = () => {
         setShowDeleteDialog(true);
     };
 
+    const carregarAjustesBanco = async (funcionarioId: string) => {
+        const resp = await rhService.listarAjustesBancoHoras(funcionarioId);
+        const lista = resp?.success && Array.isArray(resp.data) ? resp.data : [];
+        setAjustesBancoLista(lista);
+    };
+
+    const handleLancarHorasNoBanco = async () => {
+        if (!funcionarioVerDados?.id) return;
+        const horas = parseFloat(String(ajusteBancoHoras).replace(',', '.'));
+        if (!Number.isFinite(horas) || horas <= 0) {
+            toast.error('Informe a quantidade de horas');
+            return;
+        }
+        const justificativa = ajusteBancoJustificativa.trim();
+        if (justificativa.length < 3) {
+            toast.error('Informe a justificativa');
+            return;
+        }
+        const [anoStr, mesStr] = ajusteBancoCompetencia.split('-');
+        const referenciaAno = parseInt(anoStr, 10);
+        const referenciaMes = parseInt(mesStr, 10);
+        if (!Number.isFinite(referenciaAno) || !Number.isFinite(referenciaMes)) {
+            toast.error('Informe o mês em que essas horas serão pagas');
+            return;
+        }
+        setSalvandoAjusteBanco(true);
+        try {
+            const resp = await rhService.lancarHorasNoBanco({
+                funcionarioId: funcionarioVerDados.id,
+                referenciaAno,
+                referenciaMes,
+                horas,
+                justificativa,
+            });
+            if (!resp?.success) {
+                toast.error(
+                    typeof (resp as { message?: string })?.message === 'string'
+                        ? (resp as { message: string }).message
+                        : (resp as { error?: string })?.error || 'Não foi possível lançar as horas',
+                );
+                return;
+            }
+            const data = (resp as { data?: { saldoNovo?: number; saldoNormaisNovo?: number; saldoExtras100Novo?: number } }).data;
+            if (data) {
+                setFuncionarioVerDados((prev: any) =>
+                    prev
+                        ? {
+                              ...prev,
+                              saldoBancoHoras: data.saldoNovo ?? prev.saldoBancoHoras,
+                              saldoBancoHorasNormaisExcedente: data.saldoNormaisNovo ?? prev.saldoBancoHorasNormaisExcedente,
+                              saldoBancoHorasExtras100: data.saldoExtras100Novo ?? prev.saldoBancoHorasExtras100,
+                          }
+                        : prev,
+                );
+                setBancoResumoVerDados((prev) => {
+                    const positivas = Number(data.saldoNovo ?? prev?.horasPositivas ?? 0);
+                    const negativas = Number(prev?.horasNegativas ?? funcionarioVerDados.saldoHorasNegativas ?? 0);
+                    return {
+                        horasPositivas: positivas,
+                        horasNegativas: negativas,
+                        horasTotalLiquido: positivas - negativas,
+                    };
+                });
+            }
+            setAjusteBancoHoras('');
+            setAjusteBancoJustificativa('');
+            await carregarAjustesBanco(funcionarioVerDados.id);
+            toast.success(
+                typeof (resp as { message?: string }).message === 'string'
+                    ? (resp as { message: string }).message
+                    : 'Horas lançadas no banco',
+            );
+        } finally {
+            setSalvandoAjusteBanco(false);
+        }
+    };
+
     const handleVerDadosColaborador = async (func: any) => {
+        setMenuAcoesFuncionario(null);
         setFuncionarioVerDados(func);
+        setAjusteBancoHoras('');
+        setAjusteBancoJustificativa('');
+        setAjusteBancoCompetencia(rhCompetencia);
+        setAjustesBancoLista([]);
         setBancoResumoVerDados(null);
+        void carregarAjustesBanco(func.id);
         setModoQuitacaoDivida(
             func?.modoQuitacaoHorasNegativas === 'COMPENSAR_BANCO' ? 'COMPENSAR_BANCO' : 'DESCONTAR_SALARIO',
         );
@@ -2302,6 +2451,7 @@ const RHView: React.FC = () => {
     };
 
     const handleAbrirHistoricoPagamentos = async (func: any) => {
+        setMenuAcoesFuncionario(null);
         setFuncionarioHistorico(func);
         setLoadingHistorico(true);
         try {
@@ -2498,6 +2648,25 @@ const RHView: React.FC = () => {
 
     useEscapeKey(handleFecharModal, isModalOpen);
     useEscapeKey(() => setIsValeModalOpen(false), isValeModalOpen);
+    useEffect(() => {
+        if (!menuAcoesFuncionario) return;
+        const fechar = (evento: Event) => {
+            const alvo = evento.target as Node | null;
+            if (alvo && menuAcoesRef.current?.contains(alvo)) return;
+            if (alvo instanceof Element && alvo.closest('[data-acoes-funcionario]')) return;
+            setMenuAcoesFuncionario(null);
+        };
+        const fecharSempre = () => setMenuAcoesFuncionario(null);
+        document.addEventListener('mousedown', fechar);
+        window.addEventListener('resize', fecharSempre);
+        window.addEventListener('scroll', fecharSempre, true);
+        return () => {
+            document.removeEventListener('mousedown', fechar);
+            window.removeEventListener('resize', fecharSempre);
+            window.removeEventListener('scroll', fecharSempre, true);
+        };
+    }, [menuAcoesFuncionario]);
+
     useEscapeKey(() => setFuncionarioVerDados(null), !!funcionarioVerDados && !showZerarBancoDialog);
     useEscapeKey(() => setShowZerarBancoDialog(false), showZerarBancoDialog);
     useEscapeKey(() => { setFuncionarioHistorico(null); setHistoricoPagamentosLista([]); }, !!funcionarioHistorico);
@@ -3007,66 +3176,33 @@ const RHView: React.FC = () => {
                                                 {func.status}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleVerDadosColaborador(func)}
-                                                    className="p-2 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-colors"
-                                                    title="Ver dados"
-                                                    aria-label="Ver dados"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleAbrirHistoricoPagamentos(func)}
-                                                    className="p-2 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/70 transition-colors"
-                                                    title="Histórico"
-                                                    aria-label="Histórico"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDetalharFolha(func)}
-                                                    className="p-2 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-900/70 transition-colors"
-                                                    title="Detalhar Folha"
-                                                    aria-label="Detalhar Folha"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h4l2 2h10a1 1 0 011 1v2H3V4z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9h18v8a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleAbrirModalEdicao(func)}
-                                                    className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors"
-                                                    title="Editar"
-                                                    aria-label="Editar"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDeletarFuncionario(func.id, func.nome)}
-                                                    className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors"
-                                                    title="Deletar"
-                                                    aria-label="Deletar"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                    </svg>
-                                                </button>
-                                            </div>
+                                        <td className="px-4 sm:px-6 py-4 text-center">
+                                            <button
+                                                type="button"
+                                                data-acoes-funcionario
+                                                aria-expanded={menuAcoesFuncionario?.id === func.id}
+                                                aria-haspopup="menu"
+                                                onClick={(e) => {
+                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                    const abreParaCima = rect.bottom + 220 > window.innerHeight;
+                                                    setMenuAcoesFuncionario((atual) =>
+                                                        atual?.id === func.id
+                                                            ? null
+                                                            : {
+                                                                  id: func.id,
+                                                                  top: abreParaCima ? rect.top - 4 : rect.bottom + 4,
+                                                                  right: Math.max(8, window.innerWidth - rect.right),
+                                                                  abreParaCima,
+                                                              },
+                                                    );
+                                                }}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-card text-xs font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-dark-bg"
+                                            >
+                                                Ações
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </button>
                                         </td>
                                     </tr>
                                 );
@@ -3076,6 +3212,66 @@ const RHView: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {menuAcoesFuncionario && (() => {
+                const funcMenu = funcionarios.find((f) => f.id === menuAcoesFuncionario.id);
+                if (!funcMenu) return null;
+                return (
+                    <div
+                        ref={menuAcoesRef}
+                        role="menu"
+                        style={{
+                            top: menuAcoesFuncionario.top,
+                            right: menuAcoesFuncionario.right,
+                            transform: menuAcoesFuncionario.abreParaCima ? 'translateY(-100%)' : undefined,
+                        }}
+                        className="fixed z-[80] min-w-[11rem] rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card shadow-lg py-1"
+                    >
+                        {(
+                            [
+                                { label: 'Ver dados', onClick: () => void handleVerDadosColaborador(funcMenu) },
+                                { label: 'Histórico', onClick: () => void handleAbrirHistoricoPagamentos(funcMenu) },
+                                {
+                                    label: 'Detalhar folha',
+                                    onClick: () => {
+                                        setMenuAcoesFuncionario(null);
+                                        void handleDetalharFolha(funcMenu);
+                                    },
+                                },
+                                {
+                                    label: 'Editar',
+                                    onClick: () => {
+                                        setMenuAcoesFuncionario(null);
+                                        void handleAbrirModalEdicao(funcMenu);
+                                    },
+                                },
+                                {
+                                    label: 'Excluir',
+                                    danger: true,
+                                    onClick: () => {
+                                        setMenuAcoesFuncionario(null);
+                                        handleDeletarFuncionario(funcMenu.id, funcMenu.nome);
+                                    },
+                                },
+                            ] as Array<{ label: string; onClick: () => void; danger?: boolean }>
+                        ).map((item) => (
+                            <button
+                                key={item.label}
+                                type="button"
+                                role="menuitem"
+                                onClick={item.onClick}
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-bg ${
+                                    item.danger
+                                        ? 'text-red-700 dark:text-red-300'
+                                        : 'text-gray-800 dark:text-gray-100'
+                                }`}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
+                );
+            })()}
 
             {/* Modal Adicionar/Editar Funcionário */}
             {isModalOpen && (
@@ -4801,6 +4997,65 @@ const RHView: React.FC = () => {
                                                                 l.categoria === 'ADIANTAMENTO' ||
                                                                 l.categoria === 'FALTA' ||
                                                                 l.categoria === 'DESCONTO_OUTRO';
+                                                            const editando = lancamentoEmEdicao?.id === l.id;
+                                                            if (editando && lancamentoEmEdicao) {
+                                                                return (
+                                                                    <li
+                                                                        key={l.id}
+                                                                        className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end text-gray-800 dark:text-gray-200"
+                                                                    >
+                                                                        <span className="sm:col-span-2 text-[11px] font-medium">
+                                                                            {catLabel[l.categoria] ?? l.categoria}
+                                                                        </span>
+                                                                        <input
+                                                                            type="text"
+                                                                            inputMode="decimal"
+                                                                            aria-label="Valor do lançamento"
+                                                                            value={lancamentoEmEdicao.valor}
+                                                                            onChange={(e) =>
+                                                                                setLancamentoEmEdicao({
+                                                                                    ...lancamentoEmEdicao,
+                                                                                    valor: e.target.value,
+                                                                                })
+                                                                            }
+                                                                            className="sm:col-span-1 w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                                                        />
+                                                                        <input
+                                                                            type="text"
+                                                                            aria-label="Descrição do lançamento"
+                                                                            value={lancamentoEmEdicao.descricao}
+                                                                            onChange={(e) =>
+                                                                                setLancamentoEmEdicao({
+                                                                                    ...lancamentoEmEdicao,
+                                                                                    descricao: e.target.value,
+                                                                                })
+                                                                            }
+                                                                            placeholder="Descrição"
+                                                                            className="sm:col-span-2 w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                                                        />
+                                                                        <span className="sm:col-span-1 flex gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={salvandoLancamentoEdicao}
+                                                                                onClick={() =>
+                                                                                    void handleSalvarEdicaoLancamentoFolha()
+                                                                                }
+                                                                                className="text-emerald-700 dark:text-emerald-300 hover:underline text-[10px] font-semibold disabled:opacity-50"
+                                                                            >
+                                                                                {salvandoLancamentoEdicao ? 'Salvando…' : 'Salvar'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={salvandoLancamentoEdicao}
+                                                                                onClick={() => setLancamentoEmEdicao(null)}
+                                                                                className="text-gray-500 hover:underline text-[10px] font-semibold disabled:opacity-50"
+                                                                            >
+                                                                                Cancelar
+                                                                            </button>
+                                                                        </span>
+                                                                    </li>
+                                                                );
+                                                            }
                                                             return (
                                                                 <li
                                                                     key={l.id}
@@ -4824,6 +5079,21 @@ const RHView: React.FC = () => {
                                                                                 currency: 'BRL',
                                                                             })}
                                                                         </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() =>
+                                                                                setLancamentoEmEdicao({
+                                                                                    id: l.id,
+                                                                                    valor: Number(l.valor)
+                                                                                        .toFixed(2)
+                                                                                        .replace('.', ','),
+                                                                                    descricao: l.descricao ?? '',
+                                                                                })
+                                                                            }
+                                                                            className="text-slate-700 dark:text-slate-300 hover:underline text-[10px] font-semibold"
+                                                                        >
+                                                                            Editar
+                                                                        </button>
                                                                         <button
                                                                             type="button"
                                                                             onClick={() =>
@@ -4879,7 +5149,7 @@ const RHView: React.FC = () => {
                                                 {sincronizarParcelaBusy ? 'Atualizando…' : 'Atualizar valor na conta a pagar'}
                                             </button>
                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 sm:flex-1">
-                                                Grava na parcela de salário <strong className="font-medium">Pendente</strong> do mês o mesmo total exibido acima (após lançamentos). Atualiza também a coluna &quot;Total folha&quot; na lista ao recarregar os dados.
+                                                Incluir, editar ou excluir um lançamento já grava este total na conta de salário pendente do mês. Use este botão se mudou só as horas ou as batidas.
                                             </p>
                                         </div>
                                     </div>
@@ -6457,6 +6727,72 @@ const RHView: React.FC = () => {
                                                 {Number(funcionarioVerDados.horasFolgaAcumuladas ?? 0).toFixed(2)} h
                                             </p>
                                         </div>
+                                    </div>
+                                    <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/40 bg-white/70 dark:bg-dark-card/40 p-3 space-y-2">
+                                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                            Lançar horas no banco
+                                        </p>
+                                        <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                                            Use quando a competência anterior já fechou e essas horas devem ser pagas no mês escolhido. Elas entram no saldo positivo e ficam disponíveis em Incluir na folha.
+                                        </p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
+                                            <div className="sm:col-span-1">
+                                                <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">Horas</label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={ajusteBancoHoras}
+                                                    onChange={(e) => setAjusteBancoHoras(e.target.value)}
+                                                    placeholder="4"
+                                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-sm bg-white dark:bg-dark-card"
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-2">
+                                                <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">Pagar em</label>
+                                                <input
+                                                    type="month"
+                                                    value={ajusteBancoCompetencia}
+                                                    onChange={(e) => setAjusteBancoCompetencia(e.target.value)}
+                                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-sm bg-white dark:bg-dark-card"
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-3">
+                                                <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">Justificativa</label>
+                                                <input
+                                                    type="text"
+                                                    value={ajusteBancoJustificativa}
+                                                    onChange={(e) => setAjusteBancoJustificativa(e.target.value)}
+                                                    placeholder="Horas de setembro pagas em outubro"
+                                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-sm bg-white dark:bg-dark-card"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="button"
+                                                disabled={salvandoAjusteBanco}
+                                                onClick={() => void handleLancarHorasNoBanco()}
+                                                className="px-3 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-800 disabled:opacity-50"
+                                            >
+                                                {salvandoAjusteBanco ? 'Salvando…' : 'Salvar no banco'}
+                                            </button>
+                                        </div>
+                                        {ajustesBancoLista.length > 0 && (
+                                            <ul className="space-y-1 text-[11px] text-gray-700 dark:text-gray-300">
+                                                {ajustesBancoLista.map((ajuste) => (
+                                                    <li key={ajuste.id} className="flex justify-between gap-2">
+                                                        <span className="min-w-0">
+                                                            {String(ajuste.referenciaMes).padStart(2, '0')}/{ajuste.referenciaAno}
+                                                            {' — '}
+                                                            {ajuste.justificativa}
+                                                        </span>
+                                                        <span className="shrink-0 font-mono font-semibold">
+                                                            +{Number(ajuste.horas).toFixed(2)} h
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
                                     </div>
                                     <div className="rounded-lg border border-orange-200 dark:border-orange-800/40 bg-orange-50/70 dark:bg-orange-950/20 p-3 space-y-2">
                                         <p className="text-xs font-semibold text-orange-900 dark:text-orange-200">

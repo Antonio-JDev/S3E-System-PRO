@@ -1002,7 +1002,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                         <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-2xl p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase">Margem Líquida</p>
+                                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase">Margem do período</p>
                                     <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-1">
                                         {dre.resumo.margemLiquida.toFixed(2)}%
                                     </p>
@@ -1015,13 +1015,16 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     <div className="bg-white rounded-2xl shadow-soft overflow-hidden">
                         <div className="bg-gradient-to-r from-gray-800 to-gray-700 px-6 py-4">
                             <h2 className="text-xl font-bold text-white">
-                                DRE Consolidado - {getPeriodoLabel()}
+                                DRE gerencial - {getPeriodoLabel()}
                             </h2>
                             <p className="text-gray-300 text-sm mt-1">
                                 {dre.periodo?.inicio && dre.periodo?.fim && (
                                     <>Período: {formatData(dre.periodo.inicio)} a {formatData(dre.periodo.fim)}</>
                                 )}
                             </p>
+                            {dre.regime && (
+                                <p className="text-gray-300 text-xs mt-2">{dre.regime}</p>
+                            )}
                         </div>
 
                         <div className="p-6">
@@ -1038,6 +1041,13 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                         <td className="py-4 px-4 pl-8 text-gray-700">(-) Impostos sobre Vendas</td>
                                         <td className="py-4 px-4 text-right text-red-600">
                                             {formatMoeda(-dre.resumo.impostosVendas)}
+                                        </td>
+                                    </tr>
+
+                                    <tr className="hover:bg-gray-50">
+                                        <td className="py-4 px-4 pl-8 text-gray-700">(+) Outras receitas</td>
+                                        <td className="py-4 px-4 text-right text-green-700">
+                                            {formatMoeda(dre.resumo.outrasReceitas || 0)}
                                         </td>
                                     </tr>
 
@@ -1064,7 +1074,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                     {cpvExpanded && (
                                         <>
                                             <tr className="bg-gray-50">
-                                                <td className="py-2 px-4 pl-12 text-sm text-gray-600">• Custo de Materiais</td>
+                                                <td className="py-2 px-4 pl-12 text-sm text-gray-600">• Materiais baixados para a OS ou venda</td>
                                                 <td className="py-2 px-4 text-right text-sm text-red-600">
                                                     {formatMoeda(-dre.resumo.cpv.materiais)}
                                                 </td>
@@ -1100,12 +1110,22 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
 
                                     {despesasExpanded && (
                                         <>
-                                            <tr className="bg-gray-50">
-                                                <td className="py-2 px-4 pl-12 text-sm text-gray-600">• Despesas Fixas</td>
-                                                <td className="py-2 px-4 text-right text-sm text-red-600">
-                                                    {formatMoeda(-dre.resumo.despesasOperacionais.despesasFixas)}
-                                                </td>
-                                            </tr>
+                                            {(dre.resumo.despesasOperacionais.porClassificacao || []).map((linha: { classificacao: string; valor: number }) => (
+                                                <tr className="bg-gray-50" key={linha.classificacao}>
+                                                    <td className="py-2 px-4 pl-12 text-sm text-gray-600">• {linha.classificacao}</td>
+                                                    <td className="py-2 px-4 text-right text-sm text-red-600">
+                                                        {formatMoeda(-linha.valor)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {(dre.resumo.despesasOperacionais.porClassificacao || []).length === 0 && (
+                                                <tr className="bg-gray-50">
+                                                    <td className="py-2 px-4 pl-12 text-sm text-gray-600">• Despesas</td>
+                                                    <td className="py-2 px-4 text-right text-sm text-red-600">
+                                                        {formatMoeda(-dre.resumo.despesasOperacionais.despesasFixas)}
+                                                    </td>
+                                                </tr>
+                                            )}
                                             <tr className="bg-gray-50">
                                                 <td className="py-2 px-4 pl-12 text-sm text-gray-600">• Gastos com Veículos</td>
                                                 <td className="py-2 px-4 text-right text-sm text-red-600">
@@ -1116,16 +1136,26 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                     )}
 
                                     <tr className="bg-purple-50 dark:bg-purple-950/30 font-bold">
-                                        <td className="py-4 px-4 text-gray-900 dark:text-dark-text">EBITDA / LUCRO OPERACIONAL</td>
+                                        <td className="py-4 px-4 text-gray-900 dark:text-dark-text">EBITDA</td>
                                         <td className="py-4 px-4 text-right text-purple-700 dark:text-purple-300">
                                             {formatMoeda(dre.resumo.ebitda)}
                                         </td>
                                     </tr>
 
+                                    <tr className="hover:bg-gray-50">
+                                        <td className="py-4 px-4 pl-8 text-gray-700">(+/-) Resultado financeiro</td>
+                                        <td className={`py-4 px-4 text-right ${(dre.resumo.resultadoFinanceiro || 0) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                            {formatMoeda(dre.resumo.resultadoFinanceiro || 0)}
+                                        </td>
+                                    </tr>
+
                                     <tr className="bg-blue-100 dark:bg-blue-950/40 font-bold text-lg">
-                                        <td className="py-6 px-4 text-gray-900 dark:text-dark-text">LUCRO LÍQUIDO FINAL</td>
+                                        <td className="py-6 px-4 text-gray-900 dark:text-dark-text">
+                                            RESULTADO DO PERÍODO
+                                            <span className="block text-xs font-normal text-gray-600 dark:text-gray-300">Sem depreciação e sem IR/CSLL</span>
+                                        </td>
                                         <td className="py-6 px-4 text-right text-blue-700 dark:text-blue-300">
-                                            {formatMoeda(dre.resumo.lucroLiquido)}
+                                            {formatMoeda(dre.resumo.resultadoPeriodo ?? dre.resumo.lucroLiquido)}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -1140,8 +1170,8 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                             <p className="text-2xl font-bold text-gray-900 mt-1">{dre.metricas.totalVendas}</p>
                         </div>
                         <div className="bg-white rounded-xl p-4 shadow-soft border-2 border-gray-200">
-                            <p className="text-sm font-semibold text-gray-600">Total de Compras</p>
-                            <p className="text-2xl font-bold text-gray-900 mt-1">{dre.metricas.totalCompras}</p>
+                            <p className="text-sm font-semibold text-gray-600">Baixas de material</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{dre.metricas.totalBaixasMateriais ?? dre.metricas.totalCompras}</p>
                         </div>
                         <div className="bg-white rounded-xl p-4 shadow-soft border-2 border-gray-200">
                             <p className="text-sm font-semibold text-gray-600">Total de Despesas</p>

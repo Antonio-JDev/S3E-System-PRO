@@ -588,7 +588,7 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                         <div className="card-value positive">{dados.resumo.margemBruta.toFixed(2)}%</div>
                                     </div>
                                     <div className="card-print">
-                                        <div className="card-label">Margem Líquida</div>
+                                        <div className="card-label">Margem do período</div>
                                         <div className="card-value positive">{dados.resumo.margemLiquida.toFixed(2)}%</div>
                                     </div>
                                 </div>
@@ -611,6 +611,12 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                                 {formatMoeda(-dados.resumo.impostosVendas)}
                                             </td>
                                         </tr>
+                                        <tr>
+                                            <td style={{ paddingLeft: '20px' }}>(+) Outras receitas</td>
+                                            <td className="text-right" style={{ color: '#059669' }}>
+                                                {formatMoeda(dados.resumo.outrasReceitas || 0)}
+                                            </td>
+                                        </tr>
                                         <tr className="row-subtotal">
                                             <td className="font-bold">RECEITA LÍQUIDA</td>
                                             <td className="text-right font-bold" style={{ color: '#2563eb' }}>
@@ -618,13 +624,13 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                             </td>
                                         </tr>
                                         <tr>
-                                            <td>(-) CPV - Custo de Materiais</td>
+                                            <td>(-) CMV - Materiais baixados</td>
                                             <td className="text-right" style={{ color: '#dc2626' }}>
                                                 {formatMoeda(-dados.resumo.cpv.materiais)}
                                             </td>
                                         </tr>
                                         <tr>
-                                            <td>(-) CPV - Custo de Mão de Obra</td>
+                                            <td>(-) CMV - Mão de obra</td>
                                             <td className="text-right" style={{ color: '#dc2626' }}>
                                                 {formatMoeda(-dados.resumo.cpv.maoDeObra)}
                                             </td>
@@ -635,12 +641,22 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                                 {formatMoeda(dados.resumo.lucroBruto)}
                                             </td>
                                         </tr>
-                                        <tr>
-                                            <td>(-) Despesas Fixas</td>
-                                            <td className="text-right" style={{ color: '#dc2626' }}>
-                                                {formatMoeda(-dados.resumo.despesasOperacionais.despesasFixas)}
-                                            </td>
-                                        </tr>
+                                        {(dados.resumo.despesasOperacionais.porClassificacao || []).map((linha: { classificacao: string; valor: number }) => (
+                                            <tr key={linha.classificacao}>
+                                                <td>(-) {linha.classificacao}</td>
+                                                <td className="text-right" style={{ color: '#dc2626' }}>
+                                                    {formatMoeda(-linha.valor)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {(dados.resumo.despesasOperacionais.porClassificacao || []).length === 0 && (
+                                            <tr>
+                                                <td>(-) Despesas</td>
+                                                <td className="text-right" style={{ color: '#dc2626' }}>
+                                                    {formatMoeda(-dados.resumo.despesasOperacionais.despesasFixas)}
+                                                </td>
+                                            </tr>
+                                        )}
                                         <tr>
                                             <td>(-) Gastos com Veículos</td>
                                             <td className="text-right" style={{ color: '#dc2626' }}>
@@ -648,15 +664,21 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                             </td>
                                         </tr>
                                         <tr className="row-subtotal">
-                                            <td className="font-bold">EBITDA / LUCRO OPERACIONAL</td>
+                                            <td className="font-bold">EBITDA</td>
                                             <td className="text-right font-bold" style={{ color: '#8b5cf6' }}>
                                                 {formatMoeda(dados.resumo.ebitda)}
                                             </td>
                                         </tr>
+                                        <tr>
+                                            <td>(+/-) Resultado financeiro</td>
+                                            <td className="text-right">
+                                                {formatMoeda(dados.resumo.resultadoFinanceiro || 0)}
+                                            </td>
+                                        </tr>
                                         <tr className="row-total">
-                                            <td className="font-bold" style={{ fontSize: '12px' }}>LUCRO LÍQUIDO FINAL</td>
+                                            <td className="font-bold" style={{ fontSize: '12px' }}>RESULTADO DO PERÍODO (sem depreciação e sem IR/CSLL)</td>
                                             <td className="text-right font-bold" style={{ fontSize: '12px', color: '#2563eb' }}>
-                                                {formatMoeda(dados.resumo.lucroLiquido)}
+                                                {formatMoeda(dados.resumo.resultadoPeriodo ?? dados.resumo.lucroLiquido)}
                                             </td>
                                         </tr>
                                     </tbody>
@@ -673,8 +695,8 @@ const DREPrintable = React.forwardRef<HTMLDivElement, DREPrintableProps>(
                                             <div className="card-value">{dados.metricas.totalVendas}</div>
                                         </div>
                                         <div className="card-print">
-                                            <div className="card-label">Total de Compras</div>
-                                            <div className="card-value">{dados.metricas.totalCompras}</div>
+                                            <div className="card-label">Baixas de material</div>
+                                            <div className="card-value">{dados.metricas.totalBaixasMateriais ?? dados.metricas.totalCompras}</div>
                                         </div>
                                         <div className="card-print">
                                             <div className="card-label">Total de Despesas</div>

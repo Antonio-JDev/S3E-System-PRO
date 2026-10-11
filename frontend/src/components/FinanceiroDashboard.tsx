@@ -182,7 +182,7 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                             <ChartBarIcon className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Lucro Líquido</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Caixa realizado</p>
                             <p className={`text-2xl font-bold ${
                                 (resumo?.lucroLiquido || 0) >= 0 ? 'text-purple-600' : 'text-red-600'
                             }`}>

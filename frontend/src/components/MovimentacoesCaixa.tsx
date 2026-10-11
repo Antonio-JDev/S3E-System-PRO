@@ -12,6 +12,7 @@ import { AuthContext } from '../contexts/AuthContext';
 import { useContext } from 'react';
 import { hasPermission } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
+import TesourariaBancaria from './TesourariaBancaria';
 
 interface MovimentacoesCaixaProps {
   toggleSidebar?: () => void;
@@ -55,6 +56,9 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
   const [movimentacaoToView, setMovimentacaoToView] = useState<MovimentacaoCaixaItem | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [transferenciaToEstornar, setTransferenciaToEstornar] = useState<MovimentacaoCaixaItem | null>(null);
+  const [processingEstorno, setProcessingEstorno] = useState(false);
+  const [versaoTesouraria, setVersaoTesouraria] = useState(0);
 
   const ROWS_PER_PDF_PAGE = 18;
   const chunkRows = <T,>(arr: T[], size: number): T[][] => {
@@ -401,6 +405,8 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
         </div>
       </header>
 
+      <TesourariaBancaria versao={versaoTesouraria} onTransferenciaLancada={loadMovimentacoes} />
+
       {/* Filtros */}
       <div className="card-primary p-4 mb-6">
         <div className="flex flex-wrap gap-4 items-end">
@@ -434,6 +440,7 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
               <option value="Fornecedor">Fornecedor</option>
               <option value="Despesa Fixa">Despesa Fixa</option>
               <option value="Recursos Humanos">Recursos Humanos</option>
+              <option value="Transferência">Transferência</option>
             </select>
           </div>
           <div className="flex-1 min-w-[180px]">
@@ -457,7 +464,7 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
       </div>
 
       {/* Cards de resumo */}
-      <div ref={printRef} className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div ref={printRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl p-4">
           <p className="text-sm font-semibold text-green-700 dark:text-green-400">Entradas Totais (período)</p>
           <p className="text-2xl font-bold text-green-800 dark:text-green-300 mt-1">
@@ -474,6 +481,12 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
           <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">Saldo em Conta</p>
           <p className="text-2xl font-bold text-blue-800 dark:text-blue-300 mt-1">
             R$ {(resumo?.saldoConta ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </p>
+        </div>
+        <div className="bg-slate-50 dark:bg-slate-900/30 border-2 border-slate-200 dark:border-slate-700 rounded-xl p-4">
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Transferências (fora do resultado)</p>
+          <p className="text-2xl font-bold text-slate-800 dark:text-slate-200 mt-1">
+            R$ {(resumo?.transferenciasTotal ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </p>
         </div>
       </div>
@@ -535,7 +548,16 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
                         </button>
-                        {hasPermission(user, 'view_financeiro') && (
+                        {m.origem === 'transferencia' && hasPermission(user, 'view_financeiro') && (
+                          <button
+                            onClick={() => setTransferenciaToEstornar(m)}
+                            className="px-3 py-1 bg-slate-100 text-slate-800 rounded-lg hover:bg-slate-200 font-semibold"
+                            title="Estorna a saída e a entrada desta transferência"
+                          >
+                            Estornar
+                          </button>
+                        )}
+                        {m.origem !== 'transferencia' && hasPermission(user, 'view_financeiro') && (
                           <>
                             <button
                               onClick={() => abrirModalEditar(m)}
@@ -566,6 +588,29 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
       </div>
       {/* Dialogo de desfazer pagamento */}
       <AlertDialog
+        isOpen={!!transferenciaToEstornar}
+        onClose={() => setTransferenciaToEstornar(null)}
+        onConfirm={async () => {
+          if (!transferenciaToEstornar?.referenciaId) return;
+          setProcessingEstorno(true);
+          const res = await financeiroService.estornarTransferenciaBancaria(transferenciaToEstornar.referenciaId);
+          setProcessingEstorno(false);
+          if (!res.success) {
+            toast.error(res.error || 'Erro ao estornar transferência');
+            return;
+          }
+          toast.success('Transferência estornada');
+          setTransferenciaToEstornar(null);
+          setVersaoTesouraria((valor) => valor + 1);
+          await loadMovimentacoes();
+        }}
+        title="Estornar transferência"
+        message="Isso remove a saída na conta de origem e a entrada na conta de destino. O resultado da empresa não muda."
+        confirmText={processingEstorno ? 'Estornando...' : 'Estornar'}
+        variant="warning"
+      />
+
+      <AlertDialog
         isOpen={showDesfazerDialog}
         onClose={() => setShowDesfazerDialog(false)}
         onConfirm={confirmarDesfazer}
@@ -591,7 +636,11 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
             <div className="p-6 border-b border-gray-200 dark:border-dark-border flex justify-between items-start">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-dark-text">
-                  {movimentacaoToView.tipo === 'ENTRADA' ? 'Detalhes do recebimento' : 'Detalhes da conta paga'}
+                  {movimentacaoToView.origem === 'transferencia'
+                    ? 'Detalhes da transferência'
+                    : movimentacaoToView.tipo === 'ENTRADA'
+                      ? 'Detalhes do recebimento'
+                      : 'Detalhes da conta paga'}
                 </h2>
                 <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
                   Dados da movimentação registrada
@@ -609,7 +658,11 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">
-                  {movimentacaoToView.tipo === 'ENTRADA' ? 'Data do recebimento' : 'Data do pagamento'}
+                  {movimentacaoToView.origem === 'transferencia'
+                    ? 'Data da transferência'
+                    : movimentacaoToView.tipo === 'ENTRADA'
+                      ? 'Data do recebimento'
+                      : 'Data do pagamento'}
                 </label>
                 <p className="text-gray-900 dark:text-dark-text">
                   {typeof movimentacaoToView.dataPagamento === 'string'
