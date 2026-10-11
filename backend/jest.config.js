@@ -4,7 +4,7 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/__tests__/**/*.ts", "**/?(*.)+(spec|test).ts"],
   transform: {
-    "^.+\\.tsx?$": [
+    "^.+\\.[tj]sx?$": [
       "ts-jest",
       {
         tsconfig: {
@@ -13,6 +13,9 @@ module.exports = {
       },
     ],
   },
+  transformIgnorePatterns: [
+    "node_modules/(?!(@exodus/bytes|html-encoding-sniffer|whatwg-url)/)",
+  ],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
