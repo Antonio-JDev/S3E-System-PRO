@@ -19,6 +19,8 @@ import {
     normalizarEan,
     normalizarCodigoFornecedor,
 } from './materialFornecedorAlias.service';
+import { resolverOuCriarFornecedorPorCnpj } from './fornecedorCnpj.service';
+import { chaveDocumentoFornecedor, mesmoCnpjFornecedor } from '../utils/cnpjFornecedor.util';
 
 export interface CompraItemPayload {
     materialId?: string;
@@ -240,7 +242,7 @@ export class ComprasService {
         fornecedorCNPJ: string;
     }): Promise<{ numeroSequencial: number } | null> {
         const nf = String(params.numeroNF).trim();
-        const cnpj = String(params.fornecedorCNPJ).replace(/\D/g, '');
+        const cnpj = chaveDocumentoFornecedor(params.fornecedorCNPJ);
         if (!nf || !cnpj) return null;
 
         const candidatas = await prisma.compra.findMany({
@@ -251,9 +253,7 @@ export class ComprasService {
             select: { numeroSequencial: true, fornecedorCNPJ: true },
         });
 
-        const match = candidatas.find(
-            (c) => String(c.fornecedorCNPJ).replace(/\D/g, '') === cnpj
-        );
+        const match = candidatas.find((c) => mesmoCnpjFornecedor(c.fornecedorCNPJ, cnpj));
         return match ? { numeroSequencial: match.numeroSequencial } : null;
     }
 
@@ -463,7 +463,10 @@ export class ComprasService {
             throw new Error('Número da NF é obrigatório');
         }
 
-        const cnpjString = String(fornecedorCNPJ);
+        const cnpjString = chaveDocumentoFornecedor(fornecedorCNPJ);
+        if (!cnpjString || (cnpjString.length !== 11 && cnpjString.length !== 14)) {
+            throw new Error('CNPJ do fornecedor é obrigatório');
+        }
         const duplicada = await ComprasService.buscarCompraDuplicadaPorNotaFiscal({
             numeroNF: String(numeroNF),
             fornecedorCNPJ: cnpjString,
@@ -472,28 +475,11 @@ export class ComprasService {
             throw new CompraNfDuplicadaError(duplicada.numeroSequencial);
         }
 
-        // Buscar ou criar fornecedor (garantir que CNPJ seja string)
-        let fornecedorTemp = await prisma.fornecedor.findUnique({
-            where: { cnpj: cnpjString }
+        const fornecedor = await resolverOuCriarFornecedorPorCnpj(prisma, {
+            nome: fornecedorNome,
+            cnpj: cnpjString,
+            telefone: fornecedorTel,
         });
-
-        if (!fornecedorTemp) {
-            fornecedorTemp = await prisma.fornecedor.create({
-                data: {
-                    nome: fornecedorNome,
-                    cnpj: cnpjString,
-                    telefone: fornecedorTel || null
-                }
-            });
-        }
-
-        // Garantir que fornecedor não é null após criação/busca
-        if (!fornecedorTemp) {
-            throw new Error('Erro ao buscar ou criar fornecedor');
-        }
-
-        // Variável final garantidamente não-null para o TypeScript
-        const fornecedor = fornecedorTemp;
 
         // Calcular valores básicos
         const valorSubtotal = roundMoney(
