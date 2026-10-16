@@ -25,7 +25,7 @@ router.use(authenticate);
 
 /**
  * @route GET /api/clientes/cnpj/:cnpj
- * @desc Consulta CNPJ na CNPJ.ws (IE por UF, indIEDest)
+ * @desc Consulta CNPJ na ReceitaWS e código IBGE do município pelo CEP
  * @access Private
  */
 router.get('/cnpj/:cnpj', consultarCnpjCliente);
