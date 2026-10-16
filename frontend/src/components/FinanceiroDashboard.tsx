@@ -3,6 +3,7 @@ import { financeiroService, type ResumoFinanceiro } from '../services/financeiro
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { CHART_ACCENT, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
+import { useFinanceiroResumo } from '../hooks/useFinanceiroQuery';
 
 // ==================== ICONS ====================
 const CurrencyDollarIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -49,28 +50,32 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
     const themeContext = useContext(ThemeContext);
     const isDark = themeContext?.effectiveTheme === 'dark';
     const ct = getChartTheme(!!isDark);
+    const { data: resumoQuery, refetch: refetchResumo } = useFinanceiroResumo();
     const [loading, setLoading] = useState(true);
     const [resumo, setResumo] = useState<ResumoFinanceiro | null>(null);
     const [dadosGraficos, setDadosGraficos] = useState<any[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        if (resumoQuery) setResumo(resumoQuery as ResumoFinanceiro);
+    }, [resumoQuery]);
+
+    useEffect(() => {
         loadDashboardData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const loadDashboardData = async () => {
         setLoading(true);
         setError(null);
         try {
-            const [resumoRes, graficosRes] = await Promise.all([
-                financeiroService.getResumo(),
+            const [resumoRefetched, graficosRes] = await Promise.all([
+                refetchResumo(),
                 financeiroService.getDadosGraficos()
             ]);
 
-            if (resumoRes.success && resumoRes.data) {
-                setResumo(resumoRes.data);
-            } else {
-                console.warn('⚠️ Erro ao carregar resumo:', resumoRes.error);
+            if (resumoRefetched.data) {
+                setResumo(resumoRefetched.data as ResumoFinanceiro);
             }
 
             if (graficosRes.success && graficosRes.data) {
