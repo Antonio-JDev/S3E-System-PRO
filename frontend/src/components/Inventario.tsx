@@ -5,6 +5,7 @@ import {
   inventarioService,
   type MaterialContagem,
 } from '../services/inventarioService';
+import { useInventarioMateriais, useInvalidateInventarioMateriais } from '../hooks/useInventarioQuery';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,49 +58,37 @@ const Inventario: React.FC<InventarioProps> = ({ toggleSidebar }) => {
     userRole === 'desenvolvedor' ||
     user?.isAdmin === true;
 
-  const [materiais, setMateriais] = useState<MaterialContagem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, ContagemDraft>>({});
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [applyingLote, setApplyingLote] = useState(false);
   const [confirmLoteOpen, setConfirmLoteOpen] = useState(false);
   const [observacaoGlobal, setObservacaoGlobal] = useState('');
-
-  const loadMateriais = useCallback(async (busca?: string) => {
-    try {
-      setLoading(true);
-      const response = await inventarioService.listarMateriais(busca);
-      if (response.success && response.data) {
-        const lista = Array.isArray(response.data) ? response.data : [];
-        setMateriais(lista);
-        setDrafts((prev) => {
-          const next: Record<string, ContagemDraft> = {};
-          for (const m of lista) {
-            next[m.id] = prev[m.id] || {
-              quantidadeContada: String(m.estoqueAtual),
-              selecionado: false,
-              observacoes: '',
-            };
-          }
-          return next;
-        });
-      } else {
-        toast.error('Não foi possível carregar materiais');
-        setMateriais([]);
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Erro ao carregar materiais para inventário');
-      setMateriais([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const invalidateInventario = useInvalidateInventarioMateriais();
+  const { data: materiaisQueryData, isLoading: loading, isError } = useInventarioMateriais();
+  const materiais = materiaisQueryData ?? [];
 
   useEffect(() => {
-    loadMateriais();
-  }, [loadMateriais]);
+    if (isError) toast.error('Não foi possível carregar materiais');
+  }, [isError]);
+
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next: Record<string, ContagemDraft> = {};
+      for (const m of materiais) {
+        next[m.id] = prev[m.id] || {
+          quantidadeContada: String(m.estoqueAtual),
+          selecionado: false,
+          observacoes: '',
+        };
+      }
+      return next;
+    });
+  }, [materiais]);
+
+  const loadMateriais = useCallback(async (_busca?: string) => {
+    await invalidateInventario();
+  }, [invalidateInventario]);
 
   const filtered = useMemo(() => {
     const termo = searchTerm.trim().toLowerCase();
