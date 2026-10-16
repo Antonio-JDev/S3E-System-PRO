@@ -1,13 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect, useContext } from 'react';
 import { type StockMovement, MovementType, type MaterialItem } from '../types';
-import { movimentacoesService, type Movimentacao } from '../services/movimentacoesService';
-import { axiosApiService } from '../services/axiosApi';
-import { ENDPOINTS } from '../config/api';
+import { movimentacoesService } from '../services/movimentacoesService';
 import { toast } from 'sonner';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
 import { projetosService } from '../services/projetosService';
+import { useEstoqueMovimentacoes, useInvalidateEstoqueMovimentacoes } from '../hooks/useEstoqueQuery';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
@@ -143,10 +142,20 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
     const user = authContext?.user;
     const isAdminOrDeveloper = userRole === 'admin' || userRole === 'desenvolvedor' || user?.isAdmin === true;
     
-    const [movements, setMovements] = useState<StockMovement[]>([]);
-    const [materials, setMaterials] = useState<MaterialItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const {
+        data: movQueryData,
+        isLoading: loading,
+        error: movQueryError,
+        refetch: refetchMovimentacoes,
+    } = useEstoqueMovimentacoes();
+    const invalidateMovimentacoes = useInvalidateEstoqueMovimentacoes();
+    const movements = (movQueryData?.movements ?? []) as StockMovement[];
+    const materials = (movQueryData?.materials ?? []) as MaterialItem[];
+    const error = movQueryError
+        ? movQueryError instanceof Error
+            ? movQueryError.message
+            : 'Erro ao carregar movimentações'
+        : null;
     const [filter, setFilter] = useState<MovementType | 'Todos'>('Todos');
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState('');
@@ -173,98 +182,11 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
     const materialDropdownRef = useRef<HTMLDivElement>(null);
     const osDropdownRef = useRef<HTMLDivElement>(null);
 
-    // Carregar dados da API
+    // Carregar dados da API (React Query)
     const loadData = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            
-            console.log('📥 Carregando movimentações e materiais...');
-            
-            // Carregar movimentações
-            const movimentacoesResponse = await movimentacoesService.listar();
-            console.log('📊 Resposta movimentações:', movimentacoesResponse);
-            
-            if (movimentacoesResponse.success && movimentacoesResponse.data) {
-                // Converter movimentações da API para o formato do componente
-                const movimentacoesArray = Array.isArray(movimentacoesResponse.data) 
-                    ? movimentacoesResponse.data 
-                    : [];
-                
-                const movimentacoesFormatadas: StockMovement[] = movimentacoesArray
-                    .filter((mov: Movimentacao) => mov && mov.id) // Filtrar movimentos inválidos
-                    .map((mov: Movimentacao) => ({
-                        id: mov.id || `mov-${Date.now()}`,
-                        materialId: mov.materialId || '',
-                        materialName: mov.material?.nome || 'Material não encontrado',
-                        type: mov.tipo === 'ENTRADA'
-                            ? MovementType.Entrada
-                            : mov.tipo === 'AJUSTE'
-                              ? MovementType.Ajuste
-                              : MovementType.Saida,
-                        quantity: mov.quantidade || 0,
-                        reason: mov.motivo || 'Não informado',
-                        responsible: 'Sistema',
-                        date: mov.createdAt || mov.data || new Date().toISOString(),
-                        notes: mov.observacoes || ''
-                    }));
-                
-                setMovements(movimentacoesFormatadas);
-                console.log(`✅ ${movimentacoesFormatadas.length} movimentações carregadas`);
-            } else {
-                console.warn('Nenhuma movimentação encontrada ou erro na resposta:', movimentacoesResponse);
-                setMovements([]);
-            }
-            
-            // Carregar materiais
-            const materiaisResponse = await axiosApiService.get<any>(ENDPOINTS.MATERIAIS);
-            console.log('📦 Resposta materiais:', materiaisResponse);
-            
-            if (materiaisResponse.success && materiaisResponse.data) {
-                const materiaisArray = Array.isArray(materiaisResponse.data) 
-                    ? materiaisResponse.data 
-                    : [];
-                
-                // Mapear para MaterialItem garantindo compatibilidade
-                const materiaisFormatados: MaterialItem[] = materiaisArray
-                    .filter((mat: any) => mat && mat.id) // Filtrar materiais inválidos
-                    .map((mat: any) => ({
-                        id: mat.id,
-                        name: mat.nome || mat.name || 'Material sem nome',
-                        sku: mat.sku || '',
-                        type: mat.categoria || mat.category || mat.type || 'Outros',
-                        category: mat.categoria || mat.category || 'Sem categoria' as any,
-                        description: mat.descricao || mat.description || '',
-                        stock: mat.estoque || mat.stock || 0,
-                        minStock: mat.estoqueMinimo || mat.minStock || 0,
-                        unitOfMeasure: mat.unidadeMedida || mat.unitOfMeasure || 'un',
-                        location: mat.localizacao || mat.location || 'Não definido',
-                        price: mat.preco || mat.price || 0
-                    }));
-                
-                setMaterials(materiaisFormatados);
-                console.log(`✅ ${materiaisFormatados.length} materiais carregados`);
-            } else {
-                console.warn('Nenhum material encontrado ou erro na resposta:', materiaisResponse);
-                setMaterials([]);
-            }
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
-            setError('Erro ao carregar movimentações');
-            console.error('❌ Erro ao carregar movimentações:', err);
-            toast.error('❌ Erro ao carregar dados', {
-                description: errorMessage
-            });
-            setMovements([]);
-            setMaterials([]);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateMovimentacoes();
+        await refetchMovimentacoes();
     };
-
-    useEffect(() => {
-        loadData();
-    }, []);
 
     useEffect(() => {
         if (osSelecionada) return;
