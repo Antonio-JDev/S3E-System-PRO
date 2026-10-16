@@ -647,7 +647,7 @@ function buildPagamentoBlock(model: OrcamentoPdfModel, measureAttr?: boolean): s
             <tbody>
                 <tr>
                     <td><strong>${model.condicaoPagamento}</strong></td>
-                    <td>Pagamento conforme condições acordadas</td>
+                    <td>Pagamentos conforme condições a serem acordadas.</td>
                 </tr>
             </tbody>
         </table>
@@ -659,22 +659,17 @@ function normalizeDescriptionHtml(html: string | null | undefined): string {
   return normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(html));
 }
 
-/** HTML combinado das seções de texto (igual OrcamentoPrintable + PrintRenderer). */
+/**
+ * HTML combinado das seções de texto do PDF.
+ * `descricao` (Descrição Resumida no formulário) é uso interno — não entra no PDF.
+ * Descrição técnica: só o corpo TipTap, sem título de seção.
+ */
 export function buildDescriptionCombinedHtml(model: OrcamentoPdfModel): string {
   const partes: string[] = [];
-
-  if (model.descricao?.trim()) {
-    partes.push(`
-      <div class="section">
-        <h2>Descrição Geral</h2>
-        ${normalizeDescriptionHtml(model.descricao)}
-      </div>`);
-  }
 
   if (model.descricaoProjeto?.trim()) {
     partes.push(`
       <div class="section">
-        <h2>Descrição Técnica do Projeto</h2>
         ${normalizeDescriptionHtml(model.descricaoProjeto)}
       </div>`);
   }
