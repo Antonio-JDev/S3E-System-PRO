@@ -42,6 +42,18 @@ export interface EntregaQuadroMetadados {
   recebedorNome?: string;
   recebidoNoLocal?: boolean;
   localRecebimento?: string;
+  /** Linha de produto impressa no romaneio (padrão: título da OS) */
+  produto?: string;
+  /** Volume impresso no romaneio */
+  volume?: string;
+  /** Data impressa no romaneio (YYYY-MM-DD) */
+  dataRomaneio?: string;
+  responsavelEntregaId?: string;
+  responsavelEntregaNome?: string;
+  /** Data e hora do recebimento, registradas no retorno à empresa (ISO) */
+  recebidoEm?: string;
+  /** Ligada quando há nome do recebedor e data/hora do recebimento */
+  entregue?: boolean;
 }
 
 export interface ChecklistEntregaQuadroResultado {
@@ -51,10 +63,6 @@ export interface ChecklistEntregaQuadroResultado {
 
 function temTexto(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
-}
-
-function temMedia(v: unknown): boolean {
-  return temTexto(v) && String(v).trim().length > 20;
 }
 
 export function extrairEntregaQuadro(fonte: unknown): EntregaQuadroMetadados | null {
@@ -69,12 +77,26 @@ export function extrairEntregaQuadro(fonte: unknown): EntregaQuadroMetadados | n
     'materiaisConferidos' in obj ||
     'romaneio' in obj ||
     'clienteNome' in obj ||
+    'recebedorNome' in obj ||
     'dataEntrega' in obj ||
-    'assinaturaCliente' in obj
+    'assinaturaCliente' in obj ||
+    'produto' in obj ||
+    'volume' in obj ||
+    'dataRomaneio' in obj ||
+    'responsavelEntregaId' in obj ||
+    'recebidoEm' in obj ||
+    'entregue' in obj
   ) {
     return obj as EntregaQuadroMetadados;
   }
   return null;
+}
+
+/** Flag Entregue: nome de quem recebeu e data/hora do retorno. */
+export function entregaEstaEntregue(
+  entrega: EntregaQuadroMetadados | null | undefined,
+): boolean {
+  return temTexto(entrega?.recebedorNome) && temTexto(entrega?.recebidoEm);
 }
 
 export function isTaskEntregaWorkflow(titulo: string): boolean {
@@ -85,63 +107,21 @@ export function isOsTipoQuadrosPainels(tipo?: string | null): boolean {
   return tipo === 'QUADROS_PAINEIS';
 }
 
-/** Avalia checklist completo necessário para concluir OS Quadros/Painéis. */
+/**
+ * O checklist de foto/assinatura não bloqueia mais a conclusão.
+ * O registro de entrega fica na aba Dados gerais (flag Entregue).
+ */
 export function avaliarChecklistEntregaQuadro(
-  entrega: EntregaQuadroMetadados | null | undefined,
+  _entrega: EntregaQuadroMetadados | null | undefined,
 ): ChecklistEntregaQuadroResultado {
-  const pendencias: string[] = [];
-  if (!entrega) {
-    return {
-      ok: false,
-      pendencias: [
-        'Preencha o checklist de entrega do quadro (foto, materiais, romaneio e recebimento do cliente).',
-      ],
-    };
-  }
-
-  if (!temMedia(entrega.fotoProduto)) {
-    pendencias.push('Foto do produto (montado / a entregar)');
-  }
-  if (entrega.materiaisConferidos !== true) {
-    pendencias.push('Conferência de materiais (marcar como conferidos)');
-  }
-  if (!temTexto(entrega.romaneio?.geradoEm)) {
-    pendencias.push('Romaneio gerado/impresso');
-  }
-  if (!temTexto(entrega.clienteNome) && !temTexto(entrega.recebedorNome)) {
-    pendencias.push('Nome de quem recebeu (cliente)');
-  }
-  if (!temTexto(entrega.clienteTelefone)) {
-    pendencias.push('Telefone do cliente');
-  }
-  if (!temTexto(entrega.dataEntrega)) {
-    pendencias.push('Data da entrega');
-  }
-  if (!temMedia(entrega.assinaturaCliente) && !temTexto(entrega.assinaturaCliente)) {
-    // assinatura pode ser canvas (data URL) ou nome digitado curto — exige algo
-    pendencias.push('Assinatura do cliente');
-  } else if (
-    temTexto(entrega.assinaturaCliente) &&
-    !temMedia(entrega.assinaturaCliente) &&
-    String(entrega.assinaturaCliente).trim().length < 2
-  ) {
-    pendencias.push('Assinatura do cliente');
-  }
-  if (!temMedia(entrega.fotoProdutoEntregue)) {
-    pendencias.push('Foto do produto entregue');
-  }
-
-  return { ok: pendencias.length === 0, pendencias };
+  return { ok: true, pendencias: [] };
 }
 
 export function podeConcluirOsQuadros(
-  tipoOs: string | null | undefined,
-  entrega: EntregaQuadroMetadados | null | undefined,
+  _tipoOs: string | null | undefined,
+  _entrega: EntregaQuadroMetadados | null | undefined,
 ): ChecklistEntregaQuadroResultado {
-  if (!isOsTipoQuadrosPainels(tipoOs)) {
-    return { ok: true, pendencias: [] };
-  }
-  return avaliarChecklistEntregaQuadro(entrega);
+  return { ok: true, pendencias: [] };
 }
 
 export function mensagemBloqueioConclusaoQuadros(
@@ -151,15 +131,9 @@ export function mensagemBloqueioConclusaoQuadros(
   return `Não é possível concluir a OS de Quadros/Painéis. Pendências na entrega: ${resultado.pendencias.join('; ')}.`;
 }
 
-/** Validação ao concluir a task Kanban "Entrega" (lança Error). */
-export function validarEntregaQuadro(metadados: unknown): void {
-  const entrega = extrairEntregaQuadro(metadados);
-  const resultado = avaliarChecklistEntregaQuadro(entrega);
-  if (!resultado.ok) {
-    throw new Error(
-      `Checklist de entrega incompleto: ${resultado.pendencias.join('; ')}`,
-    );
-  }
+/** A tarefa Entrega do Kanban não exige mais o checklist antigo. */
+export function validarEntregaQuadro(_metadados: unknown): void {
+  return;
 }
 
 export function normalizarEntregaQuadroInput(
@@ -171,7 +145,7 @@ export function normalizarEntregaQuadroInput(
   const raw = body as EntregaQuadroMetadados;
   const romaneio = raw.romaneio && typeof raw.romaneio === 'object' ? raw.romaneio : undefined;
 
-  return {
+  return comFlagEntregue({
     fotoProduto: raw.fotoProduto?.trim() || undefined,
     materiaisConferidos: Boolean(raw.materiaisConferidos),
     romaneio: romaneio
@@ -198,9 +172,23 @@ export function normalizarEntregaQuadroInput(
     assinaturaCliente: raw.assinaturaCliente?.trim() || undefined,
     fotoProdutoEntregue: raw.fotoProdutoEntregue?.trim() || undefined,
     entregadorNome: raw.entregadorNome?.trim() || undefined,
-    recebedorNome: raw.recebedorNome?.trim() || raw.clienteNome?.trim() || undefined,
+    recebedorNome:
+      raw.recebedorNome !== undefined
+        ? raw.recebedorNome.trim() || undefined
+        : raw.clienteNome?.trim() || undefined,
     recebidoNoLocal:
       typeof raw.recebidoNoLocal === 'boolean' ? raw.recebidoNoLocal : true,
     localRecebimento: raw.localRecebimento?.trim() || undefined,
-  };
+    produto: raw.produto?.trim() || undefined,
+    volume: raw.volume?.trim() || undefined,
+    dataRomaneio: raw.dataRomaneio?.trim() || undefined,
+    responsavelEntregaId: raw.responsavelEntregaId?.trim() || undefined,
+    responsavelEntregaNome: raw.responsavelEntregaNome?.trim() || undefined,
+    recebidoEm: raw.recebidoEm?.trim() || undefined,
+    entregue: false,
+  });
+}
+
+function comFlagEntregue(entrega: EntregaQuadroMetadados): EntregaQuadroMetadados {
+  return { ...entrega, entregue: entregaEstaEntregue(entrega) };
 }
