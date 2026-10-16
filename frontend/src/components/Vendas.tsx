@@ -35,6 +35,7 @@ import {
 } from './ui/alert-dialog';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useInvalidateVendasLista, useVendasLista } from '../hooks/useFinanceiroQuery';
 import {
     generateExampleTemplate,
     exportToJSON,
@@ -244,8 +245,11 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
     const [error, setError] = useState<string | null>(null);
     
     // Estados para dados da API
+    const { data: vendasQueryData, refetch: refetchVendasLista } = useVendasLista({ limit: 1000 });
+    const invalidateVendasLista = useInvalidateVendasLista();
     const [vendas, setVendas] = useState<Venda[]>([]);
     const [orcamentosAprovados, setOrcamentosAprovados] = useState<any[]>([]);
+    const [orcamentoDetalhe, setOrcamentoDetalhe] = useState<any>(null);
     const [dashboardData, setDashboardData] = useState<DashboardVendas | null>(null);
     const [empresasFiscais, setEmpresasFiscais] = useState<EmpresaFiscal[]>([]);
 
@@ -468,26 +472,16 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
             setError(null);
             
             console.log('🔍 Carregando dados de vendas...');
+
+            await invalidateVendasLista();
+            const vendasRefetched = await refetchVendasLista();
+            setVendas((vendasRefetched.data ?? []) as Venda[]);
             
-            const [vendasRes, orcamentosRes, dashboardRes, empresasFiscaisRes] = await Promise.all([
-                vendasService.listarVendas({ limit: 1000 }), // ✅ ERP: mostrar até 1000 itens por página
+            const [orcamentosRes, dashboardRes, empresasFiscaisRes] = await Promise.all([
                 orcamentosService.listar({ status: 'Aprovado' }),
                 vendasService.getDashboard(),
                 empresaFiscalService.listar().catch(() => ({ success: false, data: [] }))
             ]);
-
-            console.log('📊 Resposta do serviço - Vendas:', vendasRes);
-            console.log('📋 Resposta do serviço - Orçamentos:', orcamentosRes);
-            console.log('📈 Resposta do serviço - Dashboard:', dashboardRes);
-
-            // Tratar vendas
-            if (vendasRes.success && vendasRes.data) {
-                setVendas(vendasRes.data.vendas || []);
-                console.log(`✅ ${vendasRes.data.vendas?.length || 0} vendas carregadas`);
-            } else {
-                console.warn('⚠️ Erro ao carregar vendas:', (vendasRes as any).error);
-                setVendas([]);
-            }
 
             // Tratar orçamentos aprovados
             if (orcamentosRes.success && orcamentosRes.data) {
@@ -501,21 +495,14 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                       })
                     : [];
                 setOrcamentosAprovados(orcamentosFiltrados);
-                if (orcamentosFiltrados.length < (Array.isArray(orcamentosRes.data) ? orcamentosRes.data.length : 0)) {
-                    console.warn(`⚠️ Filtrados ${(Array.isArray(orcamentosRes.data) ? orcamentosRes.data.length : 0) - orcamentosFiltrados.length} orçamentos sem status "Aprovado"`);
-                }
-                console.log(`✅ ${orcamentosFiltrados.length} orçamentos aprovados carregados`);
             } else {
-                console.warn('⚠️ Erro ao carregar orçamentos:', (orcamentosRes as any).error);
                 setOrcamentosAprovados([]);
             }
 
             // Tratar dashboard
             if (dashboardRes.success && dashboardRes.data) {
                 setDashboardData(dashboardRes.data);
-                console.log('✅ Dashboard de vendas carregado');
             } else {
-                console.warn('⚠️ Erro ao carregar dashboard:', (dashboardRes as any).error);
                 setDashboardData(null);
             }
 
@@ -538,7 +525,12 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
     };
 
     useEffect(() => {
+        if (vendasQueryData) setVendas(vendasQueryData as Venda[]);
+    }, [vendasQueryData]);
+
+    useEffect(() => {
         loadData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Set de orcamentoIds que já possuem venda (para desabilitar seleção)
@@ -711,11 +703,28 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
         }
     };
 
-    // Orçamento selecionado
+    // Lista traz só o resumo. Itens e descrição entram ao escolher o orçamento.
+    useEffect(() => {
+        const id = vendaForm.orcamentoId;
+        if (!id) {
+            setOrcamentoDetalhe(null);
+            return;
+        }
+        let cancelado = false;
+        orcamentosService.buscar(id).then((res) => {
+            if (cancelado) return;
+            setOrcamentoDetalhe(res.success && res.data ? res.data : null);
+        });
+        return () => {
+            cancelado = true;
+        };
+    }, [vendaForm.orcamentoId]);
+
     const orcamentoSelecionado = useMemo(() => {
         if (!vendaForm.orcamentoId) return null;
+        if (orcamentoDetalhe?.id === vendaForm.orcamentoId) return orcamentoDetalhe;
         return orcamentosAprovados.find(orc => orc.id === vendaForm.orcamentoId) || null;
-    }, [vendaForm.orcamentoId, orcamentosAprovados]);
+    }, [vendaForm.orcamentoId, orcamentosAprovados, orcamentoDetalhe]);
 
     // Verificar se orçamento selecionado tem kit e notificar
     useEffect(() => {
@@ -2335,7 +2344,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                                     </div>
                                                                     <div>
                                                                         <span className="text-gray-600">Itens:</span>
-                                                                        <p className="font-semibold text-gray-900">{orcamento.items?.length || 0} item(s)</p>
+                                                                        <p className="font-semibold text-gray-900">{orcamento.itemsCount ?? orcamento.items?.length ?? 0} item(s)</p>
                                                                     </div>
                                                                     <div>
                                                                         <span className="text-gray-600">Data:</span>
