@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { WhatsappChatPreview } from '../../services/whatsappChatService';
-import { whatsappProfilePictureImageUrl } from '../../services/whatsappChatService';
+import { WhatsAppLazyAvatar } from './WhatsAppLazyAvatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 
 export interface WhatsAppForwardModalProps {
@@ -95,10 +95,7 @@ export const WhatsAppForwardModal: React.FC<WhatsAppForwardModalProps> = ({
                 const checked = selectedChatId === c.chatId;
                 const name = displayChatName(c);
                 const sub = displayChatSubtext(c);
-                const avatar = whatsappProfilePictureImageUrl(
-                  c.chatId,
-                  Boolean((c.cachedProfilePictureUrl || '').trim())
-                );
+                const hasPicture = Boolean(c.hasProfilePicture || (c.cachedProfilePictureUrl || '').trim());
                 return (
                   <li key={c.chatId}>
                     <button
@@ -123,13 +120,12 @@ export const WhatsAppForwardModal: React.FC<WhatsAppForwardModalProps> = ({
                         <CheckIcon className="h-3.5 w-3.5" />
                       </span>
 
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-slate-700 dark:text-slate-200">
-                        {avatar ? (
-                          <img src={avatar} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          name.slice(0, 1).toUpperCase()
-                        )}
-                      </span>
+                      <WhatsAppLazyAvatar
+                        chatId={c.chatId}
+                        hasPicture={hasPicture}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-slate-700 dark:text-slate-200"
+                        fallback={name.slice(0, 1).toUpperCase()}
+                      />
 
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-gray-900 dark:text-dark-text">{name}</span>
