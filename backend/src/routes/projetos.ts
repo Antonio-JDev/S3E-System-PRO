@@ -68,6 +68,7 @@ import { obterCmvOsHandler } from '../controllers/cmvOsController';
 import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
 import {
   getEntregaQuadro,
+  getRomaneioPdf,
   putEntregaQuadro,
 } from '../controllers/osEntregaQuadroController';
 import {
@@ -164,6 +165,12 @@ router.get('/:id/entrega-quadro', getEntregaQuadro);
  * @desc Salvar checklist de entrega/romaneio
  */
 router.put('/:id/entrega-quadro', putEntregaQuadro);
+
+/**
+ * @route GET /api/projetos/:id/romaneio.pdf
+ * @desc PDF do romaneio de transporte (Quadros e Painéis)
+ */
+router.get('/:id/romaneio.pdf', getRomaneioPdf);
 
 /**
  * @route GET/PUT /api/projetos/:id/previsoes-chegada
