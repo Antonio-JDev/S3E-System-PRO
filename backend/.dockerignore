@@ -17,6 +17,7 @@ coverage
 .vscode
 .idea
 .DS_Store
+credentials/*.json
 # tsconfig.json is needed for build - don't ignore it
 # tsconfig.*.json
 test/
