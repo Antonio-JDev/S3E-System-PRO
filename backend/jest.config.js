@@ -14,7 +14,7 @@ module.exports = {
     ],
   },
   transformIgnorePatterns: [
-    "node_modules/(?!(@exodus/bytes|html-encoding-sniffer|whatwg-url)/)",
+    "node_modules/(?!(@exodus/bytes|html-encoding-sniffer|whatwg-url|parse5|entities)/)",
   ],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
