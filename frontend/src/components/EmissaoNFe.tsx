@@ -2,11 +2,24 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import PrintableNfse from './PrintableNfse';
 import { empresaFiscalService, type EmpresaFiscal } from '../services/empresaFiscalService';
+import RegrasFiscaisNfeSection from './fiscal/RegrasFiscaisNfeSection';
 import { nfeFiscalService } from '../services/nfeFiscalService';
 import { nfseService, type PrestadorNfse, type TomadorNfse, type ItemServicoNfse, type RpsNfsePayload } from '../services/nfseService';
 import { vendasService } from '../services/vendasService';
+import { clientesService } from '../services/clientesService';
 import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
+import { maskCep, maskCpfCnpj, onlyDigits } from '../utils/masks';
+import {
+    useEmissaoEmpresasFiscais,
+    useEmissaoListaNfse,
+    useEmissaoNotasNfe,
+    useEmissaoVendasFaturamento,
+    useInvalidateEmissaoEmpresasFiscais,
+    useInvalidateEmissaoListaNfse,
+    useInvalidateEmissaoNotasNfe,
+    useInvalidateEmissaoVendasFaturamento,
+} from '../hooks/useEmissaoNfeQuery';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -65,6 +78,42 @@ type SectionType = 'emitir' | 'nfse' | 'historico' | 'historicoNfse' | 'operacoe
 const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const [activeSection, setActiveSection] = useState<SectionType>('emitir');
 
+    const needEmpresas =
+        activeSection === 'configurar' ||
+        activeSection === 'operacoes' ||
+        activeSection === 'emitir' ||
+        activeSection === 'nfse';
+    const needVendas = activeSection === 'emitir' || activeSection === 'nfse';
+    const needNotas = activeSection === 'historico';
+    const needNfse = activeSection === 'historicoNfse' || activeSection === 'nfse';
+
+    const {
+        data: empresasQueryData,
+        isLoading: empresasQueryLoading,
+        refetch: refetchEmpresas,
+    } = useEmissaoEmpresasFiscais(needEmpresas);
+    const {
+        data: vendasQueryData,
+        isLoading: vendasQueryLoading,
+        isError: vendasQueryError,
+        refetch: refetchVendas,
+    } = useEmissaoVendasFaturamento(needVendas);
+    const {
+        data: notasQueryData,
+        isLoading: notasQueryLoading,
+        isError: notasQueryError,
+        refetch: refetchNotas,
+    } = useEmissaoNotasNfe(needNotas);
+    const {
+        data: nfseQueryData,
+        isLoading: nfseQueryLoading,
+        refetch: refetchNfse,
+    } = useEmissaoListaNfse(needNfse);
+    const invalidateEmpresas = useInvalidateEmissaoEmpresasFiscais();
+    const invalidateVendas = useInvalidateEmissaoVendasFaturamento();
+    const invalidateNotas = useInvalidateEmissaoNotasNfe();
+    const invalidateNfse = useInvalidateEmissaoListaNfse();
+
     // Estados para Emissão
     const [step, setStep] = useState(1);
     const [vendaSelecionada, setVendaSelecionada] = useState('');
@@ -108,6 +157,8 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const [usarCertificadoExistente, setUsarCertificadoExistente] = useState(false);
     const [empresaCertificadoId, setEmpresaCertificadoId] = useState('');
     const [isVisualizing, setIsVisualizing] = useState(false); // Novo estado
+    const [cnpjBuscando, setCnpjBuscando] = useState(false);
+    const ultimoCnpjBuscadoRef = useRef<string>('');
 
 
     // Estados para Operações Fiscais (Cancelamento e Correção)
@@ -179,13 +230,13 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const [notasFiscais, setNotasFiscais] = useState<any[]>([]);
     const [loadingNotas, setLoadingNotas] = useState(false);
 
-    // NFS-e (Itajaí/SC - Pública v7.4)
+    // NFS-e nacional (Itajaí/SC — Sistema Nacional, DPS)
     const [empresaNfseId, setEmpresaNfseId] = useState('');
     const [ambienteNfse, setAmbienteNfse] = useState<'1' | '2'>('2');
     const [numeroLoteNfse, setNumeroLoteNfse] = useState(1);
     const [ultimoRpsEnviadoNfse, setUltimoRpsEnviadoNfse] = useState(0);
     const [numeroRpsNfse, setNumeroRpsNfse] = useState(1);
-    const [serieRpsNfse, setSerieRpsNfse] = useState('A1');
+    const [serieRpsNfse, setSerieRpsNfse] = useState('1');
     const [tipoRpsNfse, setTipoRpsNfse] = useState(1);
     const [dataEmissaoNfse, setDataEmissaoNfse] = useState(new Date().toISOString().slice(0, 16));
     const [naturezaOperacaoNfse, setNaturezaOperacaoNfse] = useState(501);
@@ -264,27 +315,65 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
         } catch (_) { /* ignore */ }
     }, []);
 
-    // Carregar empresas ao montar componente ou trocar de seção
     useEffect(() => {
-        if (activeSection === 'configurar' || activeSection === 'operacoes') {
-            loadEmpresas();
+        if (!empresasQueryData) return;
+        setEmpresas(empresasQueryData as EmpresaFiscal[]);
+        setLoadingEmpresas(false);
+        if (!empresaEmissoraId) {
+            const empresaAtiva = (empresasQueryData as EmpresaFiscal[]).find((e) => e.ativo);
+            if (empresaAtiva) setEmpresaEmissoraId(empresaAtiva.id);
         }
-        if (activeSection === 'emitir') {
-            loadVendas();
-            loadEmpresas();
+    }, [empresasQueryData]);
+
+    useEffect(() => {
+        setLoadingEmpresas(empresasQueryLoading && needEmpresas);
+    }, [empresasQueryLoading, needEmpresas]);
+
+    useEffect(() => {
+        if (!vendasQueryData) return;
+        setVendas(vendasQueryData as any[]);
+        setLoadingVendas(false);
+    }, [vendasQueryData]);
+
+    useEffect(() => {
+        setLoadingVendas(vendasQueryLoading && needVendas);
+    }, [vendasQueryLoading, needVendas]);
+
+    useEffect(() => {
+        if (vendasQueryError && needVendas) {
+            toast.error('❌ Erro ao carregar vendas para faturamento');
+            setVendas([]);
+            setLoadingVendas(false);
         }
-        if (activeSection === 'historico') {
-            loadNotasFiscais();
+    }, [vendasQueryError, needVendas]);
+
+    useEffect(() => {
+        if (!notasQueryData) return;
+        setNotasFiscais(notasQueryData as any[]);
+        setLoadingNotas(false);
+    }, [notasQueryData]);
+
+    useEffect(() => {
+        setLoadingNotas(notasQueryLoading && needNotas);
+    }, [notasQueryLoading, needNotas]);
+
+    useEffect(() => {
+        if (notasQueryError && needNotas) {
+            toast.error('❌ Erro ao carregar histórico de NF-es');
+            setNotasFiscais([]);
+            setLoadingNotas(false);
         }
-        if (activeSection === 'historicoNfse') {
-            loadListaNfse();
-        }
-        if (activeSection === 'nfse') {
-            loadEmpresas();
-            loadListaNfse();
-            loadVendas();
-        }
-    }, [activeSection]);
+    }, [notasQueryError, needNotas]);
+
+    useEffect(() => {
+        if (!nfseQueryData) return;
+        setListaNfse(nfseQueryData as any[]);
+        setLoadingNfse(false);
+    }, [nfseQueryData]);
+
+    useEffect(() => {
+        setLoadingNfse(nfseQueryLoading && needNfse);
+    }, [nfseQueryLoading, needNfse]);
 
     // Pré-selecionar empresa executora da venda quando veio do "Faturar Pedido" (Orçamento → PV → NF-e/NFS-e)
     useEffect(() => {
@@ -310,14 +399,13 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const loadEmpresas = async () => {
         try {
             setLoadingEmpresas(true);
-            const response = await empresaFiscalService.listar();
-            if (response.success && response.data) {
-                setEmpresas(response.data);
-                // Selecionar primeira empresa ativa por padrão
-                const empresaAtiva = response.data.find(e => e.ativo);
-                if (empresaAtiva) {
-                    setEmpresaEmissoraId(empresaAtiva.id);
-                }
+            await invalidateEmpresas();
+            const result = await refetchEmpresas();
+            const list = (result.data ?? []) as EmpresaFiscal[];
+            setEmpresas(list);
+            if (!empresaEmissoraId) {
+                const empresaAtiva = list.find((e) => e.ativo);
+                if (empresaAtiva) setEmpresaEmissoraId(empresaAtiva.id);
             }
         } catch (error) {
             console.error('Erro ao carregar empresas:', error);
@@ -330,22 +418,9 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const loadVendas = async () => {
         try {
             setLoadingVendas(true);
-            console.log('📥 Carregando vendas disponíveis para faturamento...');
-
-            // Buscar vendas com status Ativa ou Pendente que ainda não têm NF-e
-            const response = await axiosApiService.get<any>('/api/vendas', {
-                status: 'Ativa',
-                limit: 50
-            });
-
-            if (response.success && response.data) {
-                const vendasDisponiveis = response.data.vendas || response.data || [];
-                setVendas(vendasDisponiveis);
-                console.log(`✅ ${vendasDisponiveis.length} vendas disponíveis para faturamento`);
-            } else {
-                console.warn('⚠️ Erro ao carregar vendas:', response.error);
-                setVendas([]);
-            }
+            await invalidateVendas();
+            const result = await refetchVendas();
+            setVendas((result.data ?? []) as any[]);
         } catch (error) {
             console.error('❌ Erro ao carregar vendas:', error);
             toast.error('❌ Erro ao carregar vendas para faturamento');
@@ -537,6 +612,8 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
         setCertificadoSenha('');
         setUsarCertificadoExistente(false);
         setEmpresaCertificadoId('');
+        setCnpjBuscando(false);
+        ultimoCnpjBuscadoRef.current = '';
         setIsModalEmpresaOpen(true);
     };
 
@@ -547,6 +624,69 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
         setCertificadoSenha('');
         setUsarCertificadoExistente(false);
         setEmpresaCertificadoId('');
+        setCnpjBuscando(false);
+        ultimoCnpjBuscadoRef.current = '';
+    };
+
+    const buscarCnpjEmpresaFiscal = async (
+        cnpjRaw?: string,
+        opts?: { exigirCnpjCompleto?: boolean }
+    ) => {
+        if (isVisualizing || !!editandoEmpresaId) return;
+        const raw = onlyDigits(cnpjRaw ?? empresaForm.cnpj);
+        if (raw.length !== 14) {
+            if (opts?.exigirCnpjCompleto) {
+                toast.error('Digite um CNPJ válido (14 dígitos).');
+            }
+            return;
+        }
+        if (cnpjBuscando) return;
+        if (ultimoCnpjBuscadoRef.current === raw) return;
+
+        setCnpjBuscando(true);
+        try {
+            const result = await clientesService.consultarCnpj(raw);
+            if (!result.success || !result.data) {
+                toast.error(result.error || 'CNPJ não encontrado na ReceitaWS');
+                return;
+            }
+
+            const d: any = result.data;
+            const rawReceita = d.raw ?? d;
+            const simplesOptante = Boolean(rawReceita?.simples?.optante);
+            const simeiOptante = Boolean(rawReceita?.simei?.optante);
+            const regimeTributario = simeiOptante
+                ? 'MEI'
+                : simplesOptante
+                  ? 'SimplesNacional'
+                  : 'RegimeNormal';
+            const ieApi = String(d.inscricaoEstadual || '').trim();
+
+            setEmpresaForm((prev) => ({
+                ...prev,
+                cnpj: maskCpfCnpj(d.cnpj || raw),
+                razaoSocial: d.razaoSocial || prev.razaoSocial,
+                nomeFantasia: d.nomeFantasia || prev.nomeFantasia || '',
+                inscricaoEstadual: ieApi || prev.inscricaoEstadual || '',
+                endereco: d.logradouro || prev.endereco || '',
+                numero: d.numero || prev.numero || '',
+                complemento: d.complemento || prev.complemento || '',
+                bairro: d.bairro || prev.bairro || '',
+                cidade: d.cidade || prev.cidade || '',
+                estado: (d.estado || prev.estado || '').toUpperCase(),
+                cep: d.cep ? maskCep(String(d.cep)) : prev.cep,
+                telefone: d.telefone || prev.telefone || '',
+                email: d.email || prev.email || '',
+                regimeTributario,
+            }));
+            ultimoCnpjBuscadoRef.current = raw;
+            toast.success('Dados preenchidos pela ReceitaWS. Confira IE/IM e importe o certificado.');
+        } catch (err: any) {
+            console.error('Erro ao consultar CNPJ (empresa fiscal):', err);
+            toast.error(err?.message || 'Erro ao consultar CNPJ na ReceitaWS');
+        } finally {
+            setCnpjBuscando(false);
+        }
     };
 
     const handleEditarEmpresa = (empresa: EmpresaFiscal) => {
@@ -782,12 +922,9 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const loadNotasFiscais = async () => {
         try {
             setLoadingNotas(true);
-            const response = await axiosApiService.get<any>('/api/nfe/notas');
-            if (response.success && Array.isArray(response.data)) {
-                setNotasFiscais(response.data);
-            } else {
-                setNotasFiscais([]);
-            }
+            await invalidateNotas();
+            const result = await refetchNotas();
+            setNotasFiscais((result.data ?? []) as any[]);
         } catch (error) {
             console.error('Erro ao carregar notas fiscais:', error);
             toast.error('❌ Erro ao carregar histórico de NF-es');
@@ -1224,8 +1361,9 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const loadListaNfse = async () => {
         try {
             setLoadingNfse(true);
-            const res = await nfseService.listar({ limit: 50 });
-            if (res.success && res.data) setListaNfse(Array.isArray(res.data) ? res.data : []);
+            await invalidateNfse();
+            const result = await refetchNfse();
+            setListaNfse((result.data ?? []) as any[]);
         } catch {
             setListaNfse([]);
         } finally {
@@ -1264,7 +1402,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             const prestador: PrestadorNfse = { cnpj: empresa.cnpj.replace(/\D/g, ''), inscricaoMunicipal: inscMun };
             const listaRps: RpsNfsePayload[] = [{
                 numero: numeroRpsNfse,
-                serie: serieRpsNfse || 'A1',
+                serie: serieRpsNfse || '1',
                 tipo: tipoRpsNfse,
                 dataEmissao: new Date(dataEmissaoNfse).toISOString(),
                 naturezaOperacao: naturezaOperacaoNfse,
@@ -1284,9 +1422,14 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                 listaRps,
                 ambiente: ambienteNfse
             });
-            if (res.success && res.data?.protocolo) {
-                setProtocoloNfse(res.data.protocolo);
-                toast.success('Lote enviado. Use o protocolo para consultar o resultado.', { description: `Protocolo: ${res.data.protocolo}` });
+            if (res.success && (res.data?.chaveAcesso || res.data?.protocolo)) {
+                setProtocoloNfse(res.data.chaveAcesso || res.data.protocolo);
+                const numero = res.data.numeroNfse ? ` nº ${res.data.numeroNfse}` : '';
+                toast.success(`NFS-e nacional${numero} autorizada.`, {
+                    description: res.data.chaveAcesso
+                        ? `Chave: ${res.data.chaveAcesso}`
+                        : `Id da DPS: ${res.data.protocolo}`
+                });
                 loadListaNfse();
                 if (vendaNfseId) {
                     const upd = await vendasService.atualizarStatus(vendaNfseId, 'Faturado');
@@ -1381,7 +1524,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                 setNumeroLoteNfse(d.numeroLote ?? 1);
                 setUltimoRpsEnviadoNfse(ultimo);
                 setNumeroRpsNfse(d.numeroRps ?? ultimo + 1);
-                setSerieRpsNfse(d.serieRps || 'A1');
+                setSerieRpsNfse(d.serieRps || '1');
                 setTipoRpsNfse(d.tipoRps ?? 1);
                 setDataEmissaoNfse(d.dataEmissao ? d.dataEmissao.slice(0, 16) : new Date().toISOString().slice(0, 16));
                 setNaturezaOperacaoNfse(d.naturezaOperacao ?? 501);
@@ -1417,10 +1560,10 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             setSalvandoNumeracaoNfse(true);
             const res = await nfseService.configurarNumeracaoRps(empresaNfseId, {
                 ultimoRpsEnviado: ultimoRpsEnviadoNfse,
-                serieRps: serieRpsNfse || 'A1'
+                serieRps: serieRpsNfse || '1'
             });
             if (res.success) {
-                toast.success('Numeração RPS salva. Próximo RPS: ' + (ultimoRpsEnviadoNfse + 1));
+                toast.success('Numeração da DPS salva. Próximo número: ' + (ultimoRpsEnviadoNfse + 1));
             } else {
                 toast.error(res.error || res.message || 'Erro ao salvar numeração.');
             }
@@ -1471,7 +1614,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        NFS-e (Itajaí)
+                        NFS-e nacional (Itajaí)
                     </button>
                     <button
                         onClick={() => setActiveSection('historico')}
@@ -1524,13 +1667,13 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                 </ScrollableRow>
             </div>
 
-            {/* SEÇÃO: NFS-e Itajaí/SC (Pública v7.4) */}
+            {/* SEÇÃO: NFS-e nacional (Itajaí/SC) */}
             {activeSection === 'nfse' && (
                 <div className="max-w-4xl mx-auto space-y-6">
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-200 dark:border-dark-border overflow-hidden">
                         <div className="bg-gradient-to-r from-teal-600 to-cyan-700 px-6 py-4">
-                            <h2 className="text-xl font-bold text-white">NFS-e Itajaí/SC</h2>
-                            <p className="text-teal-100 text-sm">Nota Fiscal de Serviço Eletrônica — Pública Informática v7.4 (Nota Nacional)</p>
+                            <h2 className="text-xl font-bold text-white">NFS-e nacional (Itajaí)</h2>
+                            <p className="text-teal-100 text-sm">Nota Fiscal de Serviço Eletrônica pelo Sistema Nacional. Itajaí emite por este canal desde 01/07/2026.</p>
                         </div>
                         <div className="p-6 space-y-6">
                             {/* Preencher a partir de uma venda (orçamento aprovado com itens de serviço) */}
@@ -1571,7 +1714,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                     onClick={() => setAmbienteNfse('2')}
                                     className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${ambienteNfse === '2' ? 'bg-amber-500 text-white' : 'bg-gray-100 dark:bg-dark-bg text-gray-600 dark:text-dark-text-secondary'}`}
                                 >
-                                    Homologação
+                                    Homologação (produção restrita)
                                 </button>
                                 <button
                                     type="button"
@@ -1601,22 +1744,22 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="flex flex-wrap gap-4 items-end">
                                     <div className="w-24">
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Nº Lote</label>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Nº interno</label>
                                         <input type="number" min={1} value={numeroLoteNfse} onChange={(e) => setNumeroLoteNfse(Number(e.target.value) || 1)} className="w-full rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" />
                                     </div>
                                     <div className="flex-1 min-w-[180px]">
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Último RPS emitido no Site</label>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Último DPS emitido</label>
                                         <div className="flex gap-2">
                                             <input type="number" min={0} value={ultimoRpsEnviadoNfse} onChange={(e) => handleUltimoRpsNfseChange(Number(e.target.value))} className="w-full rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" placeholder="Ex: 869" />
                                             <button type="button" onClick={handleSalvarNumeracaoRpsNfse} disabled={salvandoNumeracaoNfse || !empresaNfseId} className="px-3 py-2 rounded-lg text-sm font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 whitespace-nowrap">
                                                 {salvandoNumeracaoNfse ? 'Sincronizando...' : 'Sincronizar'}
                                             </button>
                                         </div>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Informe o último RPS visto no site da prefeitura. Próximo RPS a ser emitido: <strong>{numeroRpsNfse}</strong></p>
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Informe o último número de DPS já emitido. O próximo será <strong>{numeroRpsNfse}</strong>.</p>
                                     </div>
                                     <div className="w-20">
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Série</label>
-                                        <input type="text" value={serieRpsNfse} onChange={(e) => setSerieRpsNfse(e.target.value || 'A1')} className="w-full rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" placeholder="A1" />
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Série DPS</label>
+                                        <input type="text" value={serieRpsNfse} onChange={(e) => setSerieRpsNfse(e.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 5))} className="w-full rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" placeholder="1" />
                                     </div>
                                 </div>
                             </div>
@@ -1682,7 +1825,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                             </div>
 
                             <div className="border-t border-gray-200 dark:border-dark-border pt-4">
-                                <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-text mb-3">Natureza da Operação e Regime (Pública v7.4)</h3>
+                                <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-text mb-3">Tributação do ISSQN (NFS-e nacional)</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 dark:text-dark-text-secondary mb-1">Natureza da Operação *</label>
@@ -1832,23 +1975,23 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
 
                             <div className="flex flex-wrap gap-3 pt-2">
                                 <button type="button" onClick={handleEnviarLoteNfse} disabled={enviandoNfse || !empresaNfseId} className="px-6 py-2.5 rounded-lg font-semibold bg-gradient-to-r from-teal-600 to-cyan-700 text-white shadow-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
-                                    {enviandoNfse ? 'Enviando...' : 'Enviar lote (RecepcionarLoteRps)'}
+                                    {enviandoNfse ? 'Enviando...' : 'Emitir NFS-e nacional'}
                                 </button>
                             </div>
                             {protocoloNfse && (
                                 <div className="p-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800">
-                                    <p className="text-sm font-semibold text-teal-800 dark:text-teal-200">Protocolo recebido</p>
+                                    <p className="text-sm font-semibold text-teal-800 dark:text-teal-200">NFS-e nacional autorizada</p>
                                     <p className="font-mono text-teal-700 dark:text-teal-300 break-all">{protocoloNfse}</p>
-                                    <p className="text-xs text-teal-600 dark:text-teal-400 mt-1">Use a consulta abaixo para verificar o resultado do lote.</p>
+                                    <p className="text-xs text-teal-600 dark:text-teal-400 mt-1">Chave de acesso ou identificador da DPS. A consulta abaixo usa esse número.</p>
                                 </div>
                             )}
                         </div>
                     </div>
 
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-200 dark:border-dark-border p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4">Consultar protocolo</h3>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4">Consultar DPS ou chave</h3>
                         <div className="flex flex-wrap gap-2">
-                            <input type="text" value={protocoloConsultarNfse} onChange={(e) => setProtocoloConsultarNfse(e.target.value)} className="flex-1 min-w-[200px] rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" placeholder="Número do protocolo" />
+                            <input type="text" value={protocoloConsultarNfse} onChange={(e) => setProtocoloConsultarNfse(e.target.value)} className="flex-1 min-w-[200px] rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2" placeholder="Id da DPS (42 dígitos) ou chave (50)" />
                             <button type="button" onClick={handleConsultarProtocoloNfse} disabled={consultandoNfse || !empresaNfseId} className="px-4 py-2 rounded-lg font-medium bg-gray-800 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50">
                                 {consultandoNfse ? 'Consultando...' : 'Consultar'}
                             </button>
@@ -1859,7 +2002,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                 {resultadoConsultaNfse.listaNfse?.length ? (
                                     <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-dark-text-secondary">
                                         {resultadoConsultaNfse.listaNfse.map((nf, i) => (
-                                            <li key={i}>NFS-e: {nf.numero} {nf.codigoVerificacao ? ` — Cód. Verif.: ${nf.codigoVerificacao}` : ''}</li>
+                                            <li key={i}>NFS-e: {nf.numero}{nf.chaveAcesso || nf.codigoVerificacao ? ` — Chave: ${nf.chaveAcesso || nf.codigoVerificacao}` : ''}</li>
                                         ))}
                                     </ul>
                                 ) : null}
@@ -1887,14 +2030,14 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-200 dark:border-dark-border p-6">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4">Histórico NFS-e</h3>
                         <p className="text-xs text-gray-500 dark:text-dark-text-secondary mb-3">
-                            Observação: NFS-e emitidas em <span className="font-semibold">Homologação</span> são apenas testes e não possuem vínculo real com a prefeitura.
+                            Observação: em <span className="font-semibold">homologação</span> a nota vai para a produção restrita da Sefin Nacional e não vale perante a prefeitura.
                         </p>
                         {loadingNfse ? <p className="text-sm text-gray-500">Carregando...</p> : listaNfse.length === 0 ? <p className="text-sm text-gray-500">Nenhuma NFS-e registrada.</p> : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b border-gray-200 dark:border-dark-border">
-                                            <th className="text-left py-2 font-medium text-gray-700 dark:text-dark-text">Protocolo</th>
+                                            <th className="text-left py-2 font-medium text-gray-700 dark:text-dark-text">Chave / Id DPS</th>
                                             <th className="text-left py-2 font-medium text-gray-700 dark:text-dark-text">Nº NFS-e</th>
                                             <th className="text-left py-2 font-medium text-gray-700 dark:text-dark-text">Ambiente</th>
                                             <th className="text-left py-2 font-medium text-gray-700 dark:text-dark-text">Situação</th>
@@ -1904,11 +2047,11 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                     <tbody>
                                         {listaNfse.map((nf) => (
                                             <tr key={nf.id} className="border-b border-gray-100 dark:border-dark-border">
-                                                <td className="py-2 font-mono text-gray-600 dark:text-dark-text-secondary">{nf.protocolo || '—'}</td>
+                                                <td className="py-2 font-mono text-gray-600 dark:text-dark-text-secondary break-all">{nf.chaveAcesso || nf.protocolo || '—'}</td>
                                                 <td className="py-2 font-mono">{nf.numeroNfse || '—'}</td>
                                                 <td className="py-2">
-                                                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${nf.ambiente === 'PRODUCAO' ? 'bg-green-100 text-green-800' : nf.ambiente === 'HOMOLOGACAO' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700'}`}>
-                                                        {nf.ambiente === 'PRODUCAO' ? 'Produção' : nf.ambiente === 'HOMOLOGACAO' ? 'Homologação' : '-'}
+                                                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${nf.ambiente === '1' || nf.ambiente === 'PRODUCAO' ? 'bg-green-100 text-green-800' : nf.ambiente === '2' || nf.ambiente === 'HOMOLOGACAO' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700'}`}>
+                                                        {nf.ambiente === '1' || nf.ambiente === 'PRODUCAO' ? 'Produção' : nf.ambiente === '2' || nf.ambiente === 'HOMOLOGACAO' ? 'Homologação' : '-'}
                                                     </span>
                                                 </td>
                                                 <td className="py-2"><span className={`px-2 py-0.5 rounded text-xs font-medium ${nf.situacao === 'Processado' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : nf.situacao === 'Cancelada' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' : nf.situacao === 'Erro' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'}`}>{nf.situacao}</span></td>
@@ -2784,7 +2927,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-200 dark:border-dark-border overflow-hidden">
                         <div className="bg-gradient-to-r from-cyan-600 to-teal-700 px-6 py-4">
                             <h2 className="text-xl font-bold text-white">Histórico de NFS-e</h2>
-                            <p className="text-cyan-100 text-sm">Notas Fiscais de Serviço emitidas (Itajaí/SC)</p>
+                            <p className="text-cyan-100 text-sm">Notas de serviço do Sistema Nacional (Itajaí/SC)</p>
                         </div>
                         <div className="p-6">
                             {loadingNfse ? (
@@ -2794,7 +2937,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                             ) : (
                                 <div className="overflow-x-auto -mx-2 md:mx-0">
                                     <p className="text-xs text-gray-500 dark:text-dark-text-secondary mb-3">
-                                        Observação: NFS-e emitidas em <span className="font-semibold">Homologação</span> são apenas testes e não possuem vínculo real com a prefeitura.
+                                        Observação: em <span className="font-semibold">homologação</span> a nota vai para a produção restrita da Sefin Nacional e não vale perante a prefeitura.
                                     </p>
                                     <table className="min-w-full text-sm">
                                         <thead>
@@ -2814,8 +2957,8 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                                     <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-800 dark:text-dark-text font-semibold">{nfse.numeroNfse || '-'}</td>
                                                     <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-700 dark:text-dark-text-secondary">{nfse.tomadorRazaoSocial || '-'}</td>
                                                     <td className="px-2 py-2 align-top text-xs md:text-sm">
-                                                        <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-semibold ${nfse.ambiente === 'PRODUCAO' ? 'bg-green-100 text-green-700' : nfse.ambiente === 'HOMOLOGACAO' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>
-                                                            {nfse.ambiente === 'PRODUCAO' ? 'Produção' : nfse.ambiente === 'HOMOLOGACAO' ? 'Homologação' : '-'}
+                                                        <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-semibold ${nfse.ambiente === '1' || nfse.ambiente === 'PRODUCAO' ? 'bg-green-100 text-green-700' : nfse.ambiente === '2' || nfse.ambiente === 'HOMOLOGACAO' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>
+                                                            {nfse.ambiente === '1' || nfse.ambiente === 'PRODUCAO' ? 'Produção' : nfse.ambiente === '2' || nfse.ambiente === 'HOMOLOGACAO' ? 'Homologação' : '-'}
                                                         </span>
                                                     </td>
                                                     <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-700 dark:text-dark-text-secondary">{nfse.createdAt ? new Date(nfse.createdAt).toLocaleDateString('pt-BR') : '-'}</td>
@@ -3300,11 +3443,11 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             {activeSection === 'configurar' && (
                 <div>
                     {/* Header da Seção */}
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+                    <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-200 dark:border-dark-border p-6 mb-6">
                         <div className="flex justify-between items-center">
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-800">Configurações Fiscais</h2>
-                                <p className="text-sm text-gray-600 mt-1">Gerencie os CNPJs e certificados digitais para emissão de NF-e</p>
+                                <h2 className="text-2xl font-bold text-gray-800 dark:text-dark-text">Configurações Fiscais</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Gerencie os CNPJs e certificados digitais para emissão de NF-e</p>
                             </div>
                             <button
                                 onClick={() => { setIsVisualizing(false); handleOpenModalEmpresa(); }}
@@ -3318,17 +3461,17 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
 
                     {/* Lista de Empresas Configuradas */}
                     {loadingEmpresas ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                        <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-200 dark:border-dark-border p-12 text-center">
                             <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                            <p className="text-gray-600">Carregando empresas cadastradas...</p>
+                            <p className="text-gray-600 dark:text-dark-text-secondary">Carregando empresas cadastradas...</p>
                         </div>
                     ) : empresas.length === 0 ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                            <svg className="w-20 h-20 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-200 dark:border-dark-border p-12 text-center">
+                            <svg className="w-20 h-20 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">Nenhuma Empresa Configurada</h3>
-                            <p className="text-gray-600 mb-6">Configure os dados fiscais da sua empresa para começar a emitir NF-e</p>
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-dark-text mb-2">Nenhuma Empresa Configurada</h3>
+                            <p className="text-gray-600 dark:text-dark-text-secondary mb-6">Configure os dados fiscais da sua empresa para começar a emitir NF-e</p>
                             <button
                                 onClick={handleOpenModalEmpresa}
                                 className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700"
@@ -3340,7 +3483,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     ) : (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {empresas.map((empresa) => (
-                                <div key={empresa.id} className="bg-white rounded-xl shadow-sm border-2 border-gray-200 hover:border-blue-400 transition-all overflow-hidden">
+                                <div key={empresa.id} className="bg-white dark:bg-dark-card rounded-xl shadow-sm border-2 border-gray-200 dark:border-dark-border hover:border-blue-400 dark:hover:border-blue-500 transition-all overflow-hidden">
                                     {/* Header do Card */}
                                     <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
                                         <h3 className="text-xl font-bold text-white">{empresa.razaoSocial}</h3>
@@ -3353,30 +3496,38 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                     <div className="p-6 space-y-4">
                                         {/* Grid de Informações */}
                                         <div className="grid grid-cols-2 gap-4">
-                                            <div className="bg-gray-50 rounded-lg p-3">
-                                                <p className="text-xs font-medium text-gray-500 mb-1">CNPJ</p>
-                                                <p className="text-sm font-bold text-gray-900">{empresa.cnpj}</p>
+                                            <div className="bg-gray-50 dark:bg-slate-800/80 rounded-lg p-3 border border-transparent dark:border-dark-border">
+                                                <p className="text-xs font-medium text-gray-500 dark:text-dark-text-secondary mb-1">CNPJ</p>
+                                                <p className="text-sm font-bold text-gray-900 dark:text-dark-text">{empresa.cnpj}</p>
                                             </div>
-                                            <div className="bg-gray-50 rounded-lg p-3">
-                                                <p className="text-xs font-medium text-gray-500 mb-1">Inscrição Estadual</p>
-                                                <p className="text-sm font-bold text-gray-900">{empresa.inscricaoEstadual}</p>
+                                            <div className="bg-gray-50 dark:bg-slate-800/80 rounded-lg p-3 border border-transparent dark:border-dark-border">
+                                                <p className="text-xs font-medium text-gray-500 dark:text-dark-text-secondary mb-1">Inscrição Estadual</p>
+                                                <p className="text-sm font-bold text-gray-900 dark:text-dark-text">{empresa.inscricaoEstadual}</p>
                                             </div>
-                                            <div className="bg-gray-50 rounded-lg p-3">
-                                                <p className="text-xs font-medium text-gray-500 mb-1">Regime Tributário</p>
-                                                <p className="text-sm font-semibold text-gray-900">{empresa.regimeTributario}</p>
+                                            <div className="bg-gray-50 dark:bg-slate-800/80 rounded-lg p-3 border border-transparent dark:border-dark-border">
+                                                <p className="text-xs font-medium text-gray-500 dark:text-dark-text-secondary mb-1">Regime Tributário</p>
+                                                <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">{empresa.regimeTributario}</p>
                                             </div>
-                                            <div className={`rounded-lg p-3 ${empresa.certificadoValidade ? 'bg-green-50' : 'bg-red-50'}`}>
-                                                <p className="text-xs font-medium text-gray-500 mb-1">Certificado Digital</p>
-                                                <p className={`text-sm font-bold ${empresa.certificadoValidade ? 'text-green-700' : 'text-red-700'}`}>
+                                            <div className={`rounded-lg p-3 border ${
+                                                empresa.certificadoValidade
+                                                    ? 'bg-green-50 dark:bg-green-900/30 border-transparent dark:border-green-800'
+                                                    : 'bg-red-50 dark:bg-red-900/30 border-transparent dark:border-red-800'
+                                            }`}>
+                                                <p className="text-xs font-medium text-gray-500 dark:text-dark-text-secondary mb-1">Certificado Digital</p>
+                                                <p className={`text-sm font-bold ${
+                                                    empresa.certificadoValidade
+                                                        ? 'text-green-700 dark:text-green-300'
+                                                        : 'text-red-700 dark:text-red-300'
+                                                }`}>
                                                     {empresa.certificadoValidade ? `Válido até ${empresa.certificadoValidade}` : 'Não configurado'}
                                                 </p>
                                             </div>
                                         </div>
 
                                         {/* Endereço */}
-                                        <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                                            <p className="text-xs font-medium text-gray-600 mb-1">📍 Endereço</p>
-                                            <p className="text-sm text-gray-800">
+                                        <div className="bg-blue-50 dark:bg-slate-800/80 rounded-lg p-3 border border-blue-200 dark:border-dark-border">
+                                            <p className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">📍 Endereço</p>
+                                            <p className="text-sm text-gray-800 dark:text-dark-text">
                                                 {empresa.endereco}, {empresa.numero} {empresa.complemento && `- ${empresa.complemento}`}
                                                 <br />
                                                 {empresa.bairro} - {empresa.cidade}/{empresa.estado}
@@ -3386,10 +3537,10 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                         </div>
 
                                         {/* Botões de Ação */}
-                                        <div className="pt-4 border-t border-gray-200 flex justify-between gap-2">
+                                        <div className="pt-4 border-t border-gray-200 dark:border-dark-border flex justify-between gap-2">
                                             <button
                                                 onClick={() => handleVisualizeEmpresa(empresa)}
-                                                className="flex-1 flex items-center justify-center gap-2 px-2 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium border border-gray-200"
+                                                className="flex-1 flex items-center justify-center gap-2 px-2 py-2 text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors font-medium border border-gray-200 dark:border-dark-border"
                                                 title="Ver dados"
                                             >
                                                 <EyeIcon className="w-4 h-4" />
@@ -3397,7 +3548,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                             </button>
                                             <button
                                                 onClick={() => { setIsVisualizing(false); handleEditarEmpresa(empresa); }}
-                                                className="flex-1 flex items-center justify-center gap-2 px-2 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium border border-blue-200"
+                                                className="flex-1 flex items-center justify-center gap-2 px-2 py-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors font-medium border border-blue-200 dark:border-blue-800"
                                             >
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -3406,7 +3557,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                             </button>
                                             <button
                                                 onClick={() => handleOpenDeleteDialog(empresa.id)}
-                                                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
+                                                className="flex items-center gap-2 px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors font-medium"
                                             >
                                                 <TrashIcon className="w-4 h-4" />
                                                 Excluir
@@ -3417,6 +3568,14 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                             ))}
                         </div>
                     )}
+
+                    <RegrasFiscaisNfeSection
+                        empresas={empresas.map((empresa) => ({
+                            id: empresa.id,
+                            razaoSocial: empresa.razaoSocial,
+                            cnpj: empresa.cnpj,
+                        }))}
+                    />
 
                     {/* Modal de Adicionar/Editar Empresa */}
                     {isModalEmpresaOpen && (
@@ -3457,17 +3616,57 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">CNPJ *</label>
-                                                <input
-                                                    type="text"
-                                                    value={empresaForm.cnpj}
-                                                    onChange={(e) => setEmpresaForm({ ...empresaForm, cnpj: e.target.value })}
-                                                    placeholder="00.000.000/0000-00"
-                                                    className="input-field disabled:bg-gray-100 dark:disabled:bg-slate-900 disabled:cursor-not-allowed"
-                                                    required
-                                                    disabled={!!editandoEmpresaId}
-                                                />
-                                                {editandoEmpresaId && (
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={empresaForm.cnpj}
+                                                        onChange={(e) => {
+                                                            const masked = maskCpfCnpj(e.target.value);
+                                                            const digits = onlyDigits(masked);
+                                                            setEmpresaForm({ ...empresaForm, cnpj: masked });
+                                                            if (digits.length < 14) {
+                                                                ultimoCnpjBuscadoRef.current = '';
+                                                            }
+                                                            if (
+                                                                digits.length === 14 &&
+                                                                !editandoEmpresaId &&
+                                                                !isVisualizing &&
+                                                                !cnpjBuscando &&
+                                                                ultimoCnpjBuscadoRef.current !== digits
+                                                            ) {
+                                                                void buscarCnpjEmpresaFiscal(digits);
+                                                            }
+                                                        }}
+                                                        onBlur={() => {
+                                                            if (!editandoEmpresaId && !isVisualizing) {
+                                                                void buscarCnpjEmpresaFiscal();
+                                                            }
+                                                        }}
+                                                        placeholder="00.000.000/0000-00"
+                                                        className="input-field flex-1 disabled:bg-gray-100 dark:disabled:bg-slate-900 disabled:cursor-not-allowed"
+                                                        required
+                                                        disabled={!!editandoEmpresaId || isVisualizing}
+                                                        inputMode="numeric"
+                                                        autoComplete="off"
+                                                    />
+                                                    {!editandoEmpresaId && !isVisualizing && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void buscarCnpjEmpresaFiscal(undefined, { exigirCnpjCompleto: true })}
+                                                            disabled={cnpjBuscando || onlyDigits(empresaForm.cnpj).length !== 14}
+                                                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50 whitespace-nowrap"
+                                                            title="Buscar dados na ReceitaWS"
+                                                        >
+                                                            {cnpjBuscando ? 'Buscando…' : 'Buscar CNPJ'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {editandoEmpresaId ? (
                                                     <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">⚠️ CNPJ não pode ser alterado</p>
+                                                ) : (
+                                                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                        Informe o CNPJ para preencher automaticamente (ReceitaWS). Depois importe o certificado e a senha.
+                                                    </p>
                                                 )}
                                             </div>
                                             <div>
@@ -3606,11 +3805,9 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                                     disabled={isVisualizing}
                                                 >
                                                     <option value="">Selecione...</option>
-                                                    <option value="SC">Santa Catarina</option>
-                                                    <option value="PR">Paraná</option>
-                                                    <option value="RS">Rio Grande do Sul</option>
-                                                    <option value="SP">São Paulo</option>
-                                                    {/* Adicionar outros estados conforme necessário */}
+                                                    {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map((uf) => (
+                                                        <option key={uf} value={uf}>{uf}</option>
+                                                    ))}
                                                 </select>
                                             </div>
                                             <div>
@@ -3618,10 +3815,12 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                                 <input
                                                     type="text"
                                                     value={empresaForm.cep}
-                                                    onChange={(e) => setEmpresaForm({ ...empresaForm, cep: e.target.value })}
+                                                    onChange={(e) => setEmpresaForm({ ...empresaForm, cep: maskCep(e.target.value) })}
                                                     placeholder="00000-000"
                                                     className="input-field"
                                                     required
+                                                    disabled={isVisualizing}
+                                                    inputMode="numeric"
                                                 />
                                             </div>
                                             <div>
