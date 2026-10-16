@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { financeiroService } from '../services/financeiroService';
+import { useContasReceberLista, useInvalidateContasReceberLista } from '../hooks/useFinanceiroQuery';
 import { axiosApiService } from '../services/axiosApi';
 import { vendasService, type Venda } from '../services/vendasService';
 import { orcamentosService } from '../services/orcamentosService';
@@ -185,8 +186,12 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     };
     
     // Estados
-    const [contasReceber, setContasReceber] = useState<ContaReceber[]>([]);
-    const [loading, setLoading] = useState(true);
+    const {
+        data: contasReceberQueryData,
+        isLoading: loading,
+    } = useContasReceberLista();
+    const invalidateContasReceberLista = useInvalidateContasReceberLista();
+    const contasReceber = (Array.isArray(contasReceberQueryData) ? contasReceberQueryData : []) as any[];
     const [searchTerm, setSearchTerm] = useState('');
     const [searchValorExato, setSearchValorExato] = useState('');
     const [searchValorMin, setSearchValorMin] = useState('');
@@ -252,12 +257,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [editContaObservacoes, setEditContaObservacoes] = useState('');
     const [salvandoEdicaoConta, setSalvandoEdicaoConta] = useState(false);
 
-    // Carregar dados
+    // Vendas auxiliares (número sequencial em alguns fluxos); lista principal via Query
     useEffect(() => {
-        // Carregar vendas primeiro para calcular número sequencial
-        loadVendas().then(() => {
-            loadContasReceber();
-        });
+        void loadVendas();
     }, []);
 
     // Sincronizar “atalhos” de período com os campos de data (calendário)
@@ -285,89 +287,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     }, [filterPeriodo]);
 
     const loadContasReceber = async () => {
-        setLoading(true);
-        try {
-            console.log('📥 Carregando contas a receber do backend...');
-            
-            // Garantir que as vendas estão carregadas
-            let vendasParaCalcular = vendas;
-            if (vendas.length === 0) {
-                vendasParaCalcular = await loadVendas();
-            }
-            
-            const response = await financeiroService.listarContasReceber();
-            
-            if (response.success && response.data) {
-                // Ordenar vendas por data de criação para calcular número sequencial
-                const vendasOrdenadas = [...vendasParaCalcular].sort((a, b) => {
-                    const dataA = new Date(a.dataVenda || a.createdAt || 0).getTime();
-                    const dataB = new Date(b.dataVenda || b.createdAt || 0).getTime();
-                    return dataA - dataB; // Mais antiga primeiro
-                });
-
-                // Processar e enriquecer dados
-                const contasProcessadas = response.data.map((conta: any) => {
-                    // Detectar atraso
-                    const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
-
-                    // Extrair informações da venda e orçamento (contas de venda) ou pagador (contas manuais)
-                    const venda = conta.venda || {};
-                    const orcamento = venda.orcamento || {};
-                    const cliente = conta.clientePagador || conta.cliente || venda.cliente || orcamento.cliente || {};
-                    const clienteNome = cliente?.nome ?? conta.pagadorNome ?? 'Cliente não informado';
-
-                    // Número do pedido de venda: usar numeroSequencial da venda (igual à coluna N° na lista de vendas)
-                    const vendaId = conta.vendaId || venda.id;
-                    const numeroSequencialVenda = venda?.numeroSequencial != null
-                        ? venda.numeroSequencial
-                        : (vendaId ? (() => {
-                            const indiceVenda = vendasOrdenadas.findIndex((v: any) => v.id === vendaId);
-                            return indiceVenda >= 0 ? indiceVenda + 1 : null;
-                        })() : null);
-
-                    // Identificar se é entrada (numeroParcela = 0) ou parcela normal; contas manuais tipo ENTRADA
-                    const isEntrada = conta.tipo === 'ENTRADA' || conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
-                    const numeroParcela = conta.numeroParcela ?? 1;
-
-                    return {
-                        id: conta.id,
-                        vendaId: vendaId || undefined,
-                        contaManual: !vendaId,
-                        tipoManual: conta.tipo === 'OUTRAS_RECEITAS' ? 'OUTRAS_RECEITAS' : 'ENTRADA',
-                        pagadorNome: conta.pagadorNome || undefined,
-                        numeroParcela: numeroParcela,
-                        isEntrada: isEntrada,
-                        numeroDuplicata: isEntrada ? 'ENTRADA' : `DUP-${numeroParcela.toString().padStart(3, '0')}`,
-                        numeroVenda: venda.numeroVenda || (conta.tipo !== 'VENDA' ? conta.tipo : 'N/A'),
-                        numeroSequencialVenda: numeroSequencialVenda,
-                        numeroOS: orcamento.numeroSequencial || null,
-                        clienteNome,
-                        projetoTitulo: conta.descricao || orcamento.titulo || 'Projeto',
-                        dataVencimento: conta.dataVencimento,
-                        valor: conta.valorParcela || conta.valor || 0,
-                        valorJuros: conta.valorJuros ?? 0,
-                        valorDesconto: conta.valorDesconto ?? 0,
-                        valorRecebido: conta.valorRecebido ?? (conta.status === 'Pago' ? conta.valorParcela : undefined),
-                        dataPagamento: conta.dataPagamento,
-                        status: isAtrasada ? 'Atrasado' : (conta.status === 'Pago' ? 'Recebido' : (conta.status === 'Recebido Parcial' ? 'Recebido Parcial' : conta.status)),
-                        observacoes: conta.observacoes,
-                        venda: conta.venda,
-                        totalParcelas: conta.totalParcelas || venda.parcelas || 1
-                    };
-                });
-                
-                setContasReceber(contasProcessadas);
-                console.log(`✅ ${contasProcessadas.length} contas a receber carregadas`);
-            } else {
-                console.warn('⚠️ Erro ao carregar contas:', response.error);
-                setContasReceber([]);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao carregar contas a receber:', error);
-            setContasReceber([]);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateContasReceberLista();
     };
 
     const loadVendas = async (): Promise<Venda[]> => {
