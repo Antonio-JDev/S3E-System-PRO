@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
-import { consultarCnpj } from '../services/cnpj-ws.service';
+import { ConsultaCnpjError, consultarCnpj } from '../services/receita-cnpj.service';
 import { buildClientesWhereFromQuery } from '../utils/clientesSearch.util';
 
 // Configurar multer para upload de JSON
@@ -28,7 +28,7 @@ export const uploadJSON = multer({
 });
 
 /**
- * Consulta CNPJ na API CNPJ.ws (inscrições estaduais por UF) e retorna dados normalizados + IE + indIEDest.
+ * Consulta CNPJ na ReceitaWS e completa o código IBGE do município pelo CEP.
  */
 export const consultarCnpjCliente = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -45,7 +45,8 @@ export const consultarCnpjCliente = async (req: Request, res: Response): Promise
     res.json({ success: true, data });
   } catch (err: any) {
     console.error('Erro ao consultar CNPJ:', err);
-    res.status(500).json({
+    const status = err instanceof ConsultaCnpjError ? err.statusCode : 500;
+    res.status(status).json({
       success: false,
       error: err?.message || 'Erro ao consultar CNPJ'
     });
