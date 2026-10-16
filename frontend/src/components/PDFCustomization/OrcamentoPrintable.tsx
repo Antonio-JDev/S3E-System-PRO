@@ -47,14 +47,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                 return normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(html));
             };
 
-            if (orcamento.descricaoGeral) {
-                partes.push(`
-                    <div class="section">
-                        <h2>Descrição Geral</h2>
-                        ${normalizeForPdf(orcamento.descricaoGeral)}
-                    </div>
-                `);
-            }
+            // descricaoGeral (Descrição Resumida) é interno — não imprime no PDF.
 
             if (orcamento.descricaoTecnica) {
                 partes.push(`
@@ -74,7 +67,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
             }
 
             return partes.join('\n');
-        }, [orcamento.descricaoGeral, orcamento.descricaoTecnica, orcamento.observacoes]);
+        }, [orcamento.descricaoTecnica, orcamento.observacoes]);
 
         const items = orcamento.items || [];
 
@@ -390,7 +383,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                     <tbody>
                         <tr>
                             <td><strong>{orcamento.pagamento || orcamento.financeiro?.condicaoPagamento}</strong></td>
-                            <td>Pagamento conforme condições acordadas</td>
+                            <td>Pagamentos conforme condições a serem acordadas.</td>
                         </tr>
                     </tbody>
                 </table>
