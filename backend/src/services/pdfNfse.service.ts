@@ -62,6 +62,18 @@ export async function gerarPdfNfseBuffer(id: string): Promise<Buffer> {
           tomador.cep = end.get('./pub:Cep', ns)?.text() || '';
         }
       }
+      if (!tomador.razaoSocial) {
+        const toma = xmlDoc.get("//*[local-name()='toma']");
+        if (toma) {
+          tomador.razaoSocial = toma.get(".//*[local-name()='xNome']")?.text();
+          const docToma = toma.get(".//*[local-name()='CNPJ']") || toma.get(".//*[local-name()='CPF']");
+          tomador.cnpj = docToma ? docToma.text() : undefined;
+          tomador.endereco = toma.get(".//*[local-name()='xLgr']")?.text() || '';
+          tomador.numero = toma.get(".//*[local-name()='nro']")?.text() || '';
+          tomador.bairro = toma.get(".//*[local-name()='xBairro']")?.text() || '';
+          tomador.cep = toma.get(".//*[local-name()='CEP']")?.text() || '';
+        }
+      }
       if (serv) {
         servicoPrimeiro.discriminacao = serv.get('./pub:Discriminacao', ns)?.text() || '';
         servicoPrimeiro.itemListaServico = serv.get('./pub:ItemListaServico', ns)?.text() || '';
@@ -74,6 +86,11 @@ export async function gerarPdfNfseBuffer(id: string): Promise<Buffer> {
           servicoPrimeiro.issRetido = valores.get('./pub:IssRetido', ns)?.text();
           servicoPrimeiro.valorLiquidoNfse = valores.get('./pub:ValorLiquidoNfse', ns)?.text();
         }
+      }
+      if (!servicoPrimeiro.discriminacao) {
+        servicoPrimeiro.discriminacao = xmlDoc.get("//*[local-name()='xDescServ']")?.text() || '';
+        servicoPrimeiro.itemListaServico = xmlDoc.get("//*[local-name()='cTribNac']")?.text() || '';
+        servicoPrimeiro.valorServicos = xmlDoc.get("//*[local-name()='vServ']")?.text();
       }
     } catch (e) {
       // ignore parse errors, fallback to nfse fields
@@ -140,7 +157,9 @@ export async function gerarPdfNfseBuffer(id: string): Promise<Buffer> {
   doc.text(nfse.createdAt ? new Date(nfse.createdAt).toLocaleString('pt-BR') : '-', rightBoxX + 6, rightBoxY + 48);
   // QR code linking to consulta pública (place at right within meta box)
   try {
-    const consultaUrl = 'https://nfse.itajai.sc.gov.br/jsp/nfs/nfp/externo/consulta.jsp';
+    const consultaUrl = (nfse as { chaveAcesso?: string | null }).chaveAcesso
+      ? 'https://www.nfse.gov.br/consultapublica/'
+      : 'https://nfse.itajai.sc.gov.br/jsp/nfs/nfp/externo/consulta.jsp';
     const qrDataUrl = await qrcode.toDataURL(consultaUrl, { margin: 1, width: qrSize });
     const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, '');
     const qrBuf = Buffer.from(qrBase64, 'base64');
@@ -240,7 +259,9 @@ export async function gerarPdfNfseBuffer(id: string): Promise<Buffer> {
 
   // Footer: outras informações
   doc.rect(boxX, cursorY, boxWidth, 40).stroke();
-  doc.font('Helvetica-Bold').text('OUTRAS INFORMAÇÕES (USO EXCLUSIVO DO MUNICÍPIO)', boxX + 6, cursorY + 6);
+  doc.font('Helvetica-Bold').text('OUTRAS INFORMAÇÕES', boxX + 6, cursorY + 6);
+  const chavePdf = (nfse as { chaveAcesso?: string | null }).chaveAcesso;
+  doc.font('Helvetica').text(chavePdf ? `NFS-e nacional. Chave de acesso: ${chavePdf}` : '-', boxX + 6, cursorY + 22, { width: boxWidth - 12 });
   doc.end();
 
   return pdfPromise;
