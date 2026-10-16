@@ -53,6 +53,8 @@ const ICONE_AREA: Record<string, LucideIcon> = {
   Estoque: Package,
   Sistema: Settings2,
   Financeiro: Landmark,
+  Fiscal: Receipt,
+  Suprimentos: ShoppingCart,
   Vendas: Receipt,
   Folha: Banknote,
   RH: Users,
