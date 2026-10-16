@@ -148,7 +148,8 @@ export class DREService {
         const lucroBruto = receitaLiquida - cpvTotal;
         const margemBruta = receitaBruta > 0 ? (lucroBruto / receitaBruta) * 100 : 0;
 
-        const contasDespesa = contasPagarPagas.filter((c) => c.tipo !== 'RH' && !c.compraId);
+        // FROTA já entra em gastos de veículo. Conta paga do mesmo gasto não soma de novo.
+        const contasDespesa = contasPagarPagas.filter((c) => c.tipo !== 'RH' && c.tipo !== 'FROTA' && !c.compraId);
         const porClassificacaoMap = new Map<string, number>();
         for (const conta of contasDespesa) {
             const chave = (conta.classificacao || '').trim() || 'Sem classificação';
