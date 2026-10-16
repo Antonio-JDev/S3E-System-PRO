@@ -316,7 +316,7 @@ model Cliente {
   cep               String?
   tipo              String   @default("PJ") // PF (Pessoa Física) ou PJ (Pessoa Jurídica)
   /**
-   * JSON completo retornado pela API CNPJ.ws (raw) para exibir no modal de detalhes sem nova consulta
+   * JSON da última consulta de CNPJ (ReceitaWS + código IBGE) para o modal de detalhes
    */
   dadosCnpjWs       Json?    @map("dados_cnpj_ws")
   ativo             Boolean  @default(true)
@@ -1536,7 +1536,7 @@ model RecebimentoParcial {
 
 model ContaPagar {
   id              String    @id @default(uuid())
-  tipo            String    @default("FORNECEDOR") // FORNECEDOR, RH, DESPESA_FIXA
+  tipo            String    @default("FORNECEDOR") // FORNECEDOR, RH, DESPESA_FIXA, FROTA
   subtipo         String? // RH: ADIANTAMENTO, VALE, SALARIO
   origemCadastro  String? // FORNECEDOR_CADASTRADO, FORNECEDOR_NOVO, RH, DESPESA_FIXA
   fornecedorId    String? // Opcional para permitir despesas sem fornecedor específico
@@ -1544,6 +1544,7 @@ model ContaPagar {
   compraId        String?
   funcionarioId   String? // Para salários (RH)
   despesaFixaId   String? // Para despesas fixas
+  gastoVeiculoId  String? @unique // Gasto da frota que originou a conta
   descontoFolhaTipo String? // RH: UMA_VEZ, PARCELADO
   descontoFolhaParcelas Int?
   descontoFolhaReferenciaAno Int?
@@ -1574,6 +1575,7 @@ model ContaPagar {
   compra      Compra?      @relation(fields: [compraId], references: [id])
   funcionario Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
   despesaFixa DespesaFixa? @relation(fields: [despesaFixaId], references: [id], onDelete: Cascade)
+  gastoVeiculo GastoVeiculo? @relation(fields: [gastoVeiculoId], references: [id], onDelete: Cascade)
   rhParcelamento RhAdiantamentoParcelamento? @relation("RhParcelamentoVinculo", fields: [rhParcelamentoId], references: [id], onDelete: SetNull)
   parcelamentoOrigemRh RhAdiantamentoParcelamento[] @relation("RhParcelamentoContaOrigem")
   cartaoCredito CartaoCredito? @relation(fields: [cartaoCreditoId], references: [id], onDelete: SetNull)
@@ -1657,8 +1659,8 @@ model EmpresaFiscal {
   certificadoPath     String? // Caminho do arquivo .pfx no servidor
   certificadoSenha    String? // Senha criptografada
   certificadoValidade DateTime?
-  ultimoRpsEnviado    Int? // Último nº RPS emitido (site/prefeitura); próximo = ultimoRpsEnviado + 1
-  serieRps            String? // Série RPS (ex: A1) - Pública Itajaí
+  ultimoRpsEnviado    Int? // Último nº da DPS emitido no Sistema Nacional; próximo = ultimoRpsEnviado + 1
+  serieRps            String? // Série numérica da DPS (1 a 5 dígitos). O valor antigo da Pública (ex.: A1) não entra no Id nacional.
   ultimoNumeroNFe     Int? // Último número de NF-e informado manualmente (para sincronização)
   serieNFe            String? // Série NF-e (ex: 1) - para controle do usuário
   aliquotaMaterial    Float?    @default(8) // Alíquota % DAS sobre venda de materiais (Simples Nacional)
@@ -1675,8 +1677,37 @@ model EmpresaFiscal {
   orcamentos   Orcamento[]
   vendas       Venda[]
   configsFolhaContabil ConfiguracaoSistema[] @relation("ConfigFolhaContabilEmpresa")
+  regrasFiscaisNfe RegraFiscalNfe[]
 
   @@map("empresas_fiscais")
+}
+
+// Regra editável pelo contador. empresaFiscalId nulo = vale para todas as empresas.
+model RegraFiscalNfe {
+  id               String   @id @default(uuid())
+  empresaFiscalId  String?
+  regime           String // SimplesNacional | RegimeNormal
+  cfop             String? // nulo = qualquer CFOP
+  ncm              String? // nulo = qualquer NCM; prefixo mais longo vence
+  origem           String   @default("0")
+  cstIcms          String // CST (regime normal) ou CSOSN (Simples Nacional)
+  aliquotaIcms     Float    @default(0)
+  cstPis           String
+  aliquotaPis      Float    @default(0)
+  cstCofins        String
+  aliquotaCofins   Float    @default(0)
+  cstIpi           String   @default("99")
+  aliquotaIpi      Float    @default(0)
+  informarTotTrib  Boolean  @default(false) // no Simples, vTotTrib só sai da soma se isto for true
+  ativo            Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id], onDelete: Cascade)
+
+  @@index([regime, ativo])
+  @@index([empresaFiscalId])
+  @@map("regras_fiscais_nfe")
 }
 
 // ============================================
@@ -1761,15 +1792,18 @@ model NFeFila {
 }
 
 // ============================================
-// NFS-e (NOTA FISCAL DE SERVIÇO - PÚBLICA/ITAJAI)
+// NFS-e (NOTA FISCAL DE SERVIÇO)
+// Itajaí/SC: emissão ativa pelo Sistema Nacional (DPS) desde 01/07/2026.
+// Registros antigos podem ser de lote SOAP da Pública (sem chaveAcesso).
 // ============================================
 
 model Nfse {
   id                 String   @id @default(uuid())
   empresaFiscalId    String
-  numeroLote         Int
-  protocolo          String? // Número retornado por RecepcionarLoteRps
-  numeroNfse         String? // Número da NFS-e após processamento do lote
+  numeroLote         Int // Nacional: número da DPS. Pública (legado): número do lote.
+  protocolo          String? // Nacional: id da DPS (42 dígitos). Pública: protocolo do lote.
+  chaveAcesso        String?  @unique // Chave de acesso da NFS-e nacional (50 dígitos).
+  numeroNfse         String? // Número da NFS-e
   codigoVerificacao  String?
   situacao           String   @default("Pendente") // Pendente, Processado, Erro, Cancelada
   ambiente           String // 1 Produção, 2 Homologação
@@ -2482,6 +2516,7 @@ model GastoVeiculo {
   updatedAt   DateTime @updatedAt
 
   veiculo Veiculo @relation(fields: [veiculoId], references: [id], onDelete: Cascade)
+  contaPagar ContaPagar?
 
   @@index([veiculoId])
   @@index([data])
