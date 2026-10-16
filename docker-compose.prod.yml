@@ -197,8 +197,6 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN}
       FRONTEND_URL: ${FRONTEND_URL}
       BACKEND_URL: ${BACKEND_URL}
-      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}
       SMTP_SECURE: ${SMTP_SECURE}
@@ -230,8 +228,13 @@ services:
       WHATSAPP_SEND_LOCK_DISABLE: ${WHATSAPP_SEND_LOCK_DISABLE:-}
       WHATSAPP_SEND_DEBUG: ${WHATSAPP_SEND_DEBUG:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      GOOGLE_DRIVE_KEY_PATH: /app/credentials/google-drive-key.json
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-false}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
     volumes:
       - backend_uploads:/app/uploads
+      - ${GOOGLE_DRIVE_KEY_HOST_DIR:-/root/s3e-secrets}:/app/credentials:ro
       - backend_logs:/app/logs
       - backend_certificados:/app/data/certificados
       - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro
