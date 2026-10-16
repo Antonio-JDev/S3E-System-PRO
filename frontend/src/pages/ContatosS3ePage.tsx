@@ -1,13 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { MessageCirclePlus, Plus } from 'lucide-react';
 import {
   deleteContatoS3e,
-  listContatosS3e,
   updateContatoS3e,
   type ContatoS3eDto,
-  type ContatosS3eListParams
 } from '../services/contatosS3eService';
+import {
+  useContatosS3eLista,
+  useInvalidateContatosS3eLista,
+} from '../hooks/useContatosS3eQuery';
 import ImportarContatosCsvModal from '../components/contatos/ImportarContatosCsvModal';
 import NovaConversaDrawer from '../components/crm/NovaConversaDrawer';
 
@@ -50,10 +52,7 @@ function formatDate(iso: string | null): string {
 }
 
 const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavigate }) => {
-  const [items, setItems] = useState<ContatoS3eDto[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [revisado, setRevisado] = useState<'todos' | 'sim' | 'nao'>('todos');
@@ -63,52 +62,43 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
   const [importOpen, setImportOpen] = useState(false);
   const [novaConversaOpen, setNovaConversaOpen] = useState(false);
   const [novaConversaInitialNumero, setNovaConversaInitialNumero] = useState<string | undefined>(undefined);
+  const invalidateContatos = useInvalidateContatosS3eLista();
 
-  const loadPage = useCallback(
-    async (params: ContatosS3eListParams) => {
-      setLoading(true);
-      try {
-        const resp = await listContatosS3e({
-          search: params.search ?? search,
-          revisado: params.revisado ?? revisado,
-          page: params.page ?? page,
-          pageSize: PAGE_SIZE,
-          orderBy: params.orderBy ?? orderBy
-        });
-        if (resp.success && resp.data) {
-          setItems(resp.data.items);
-          setTotal(resp.data.total);
-          setPage(resp.data.page);
-        } else {
-          toast.error(resp.error || 'Falha ao carregar contatos');
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [search, revisado, page, orderBy]
-  );
+  const { data, isLoading: loading, isError, error } = useContatosS3eLista({
+    search,
+    revisado,
+    page,
+    pageSize: PAGE_SIZE,
+    orderBy,
+  });
 
-  useEffect(() => {
-    loadPage({ page: 1 });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   useEffect(() => {
     const t = setTimeout(() => {
       setSearch(searchInput);
-      loadPage({ search: searchInput, page: 1 });
+      setPage(1);
     }, 350);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
   useEffect(() => {
-    loadPage({ revisado, page: 1, orderBy });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setPage(1);
   }, [revisado, orderBy]);
+
+  useEffect(() => {
+    if (isError) {
+      toast.error(error instanceof Error ? error.message : 'Falha ao carregar contatos');
+    }
+  }, [isError, error]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
   const naoRevisadosCount = useMemo(() => items.filter((c) => !c.revisado).length, [items]);
+
+  const loadPage = async () => {
+    await invalidateContatos();
+  };
 
   function startEdit(c: ContatoS3eDto) {
     setEditingId(c.id);
@@ -126,9 +116,9 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
       revisado: true
     });
     if (resp.success && resp.data) {
-      setItems((arr) => arr.map((it) => (it.id === id ? resp.data! : it)));
       setEditingId(null);
       toast.success('Contato atualizado.');
+      await invalidateContatos();
     } else {
       toast.error(resp.error || 'Falha ao salvar');
     }
@@ -137,7 +127,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
   async function markRevisado(c: ContatoS3eDto) {
     const resp = await updateContatoS3e(c.id, { revisado: true });
     if (resp.success && resp.data) {
-      setItems((arr) => arr.map((it) => (it.id === c.id ? resp.data! : it)));
+      await invalidateContatos();
     } else {
       toast.error(resp.error || 'Falha ao marcar como revisado');
     }
@@ -147,8 +137,8 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
     if (!window.confirm(`Remover contato "${c.nomeAgenda || c.pushName || c.numero}"?`)) return;
     const resp = await deleteContatoS3e(c.id);
     if (resp.success) {
-      setItems((arr) => arr.filter((it) => it.id !== c.id));
       toast.success('Contato removido.');
+      await invalidateContatos();
     } else {
       toast.error(resp.error || 'Falha ao remover');
     }
@@ -396,7 +386,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
             <button
               type="button"
               disabled={page <= 1 || loading}
-              onClick={() => loadPage({ page: page - 1 })}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               className="rounded border border-gray-300 px-2 py-1 disabled:opacity-50 dark:border-dark-border"
             >
               Anterior
@@ -405,7 +395,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
             <button
               type="button"
               disabled={page >= totalPages || loading}
-              onClick={() => loadPage({ page: page + 1 })}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               className="rounded border border-gray-300 px-2 py-1 disabled:opacity-50 dark:border-dark-border"
             >
               Próxima
@@ -417,7 +407,10 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
       <ImportarContatosCsvModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onImportFinished={() => loadPage({ page: 1 })}
+        onImportFinished={() => {
+          setPage(1);
+          void loadPage();
+        }}
       />
       <NovaConversaDrawer
         open={novaConversaOpen}
@@ -432,7 +425,7 @@ const ContatosS3ePage: React.FC<ContatosS3ePageProps> = ({ toggleSidebar, onNavi
           }
         }}
         onContatoSalvo={() => {
-          loadPage({ page });
+          void loadPage();
         }}
       />
     </div>
