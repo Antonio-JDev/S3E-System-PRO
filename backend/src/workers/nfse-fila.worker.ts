@@ -4,7 +4,7 @@ import { CryptoUtil } from '../utils/crypto.util';
 import { resolveCertificadoPath } from '../utils/certificadoPath.util';
 import { NFeSignatureService } from '../services/nfe-signature.service';
 import { NfseFilaService } from '../services/nfse-fila.service';
-import { recepcionarLoteRps } from '../services/nfse-publica-soap.service';
+import { enviarDpsAssinada } from '../services/nfse-nacional-api.service';
 
 export async function processarFilaNfse(limit = 10) {
   const pendentes = await NfseFilaService.listarPendentes(limit);
@@ -50,63 +50,71 @@ export async function processarFilaNfse(limit = 10) {
         senhaDescriptografada
       );
 
-      // 3. Enviar
+      const xmlNacional = item.xmlEnvio.includes('http://www.sped.fazenda.gov.br/nfse');
+      if (!xmlNacional) {
+        await NfseFilaService.atualizarStatus(item.id, 'FALHA', {
+          erro: 'Lote da Pública não é mais recebido em Itajaí. Desde 01/07/2026 a emissão é exclusiva pelo Sistema Nacional.'
+        });
+        continue;
+      }
+
       await NfseFilaService.atualizarStatus(item.id, 'ENVIANDO');
 
-      const resultado = await recepcionarLoteRps(
+      const resultado = await enviarDpsAssinada(
         item.xmlEnvio,
-        item.ambiente === '2',
+        item.ambiente === '1' ? '1' : '2',
         cert,
         key
       );
 
-      if (resultado.sucesso && resultado.protocolo) {
-        // Sucesso
-        console.log(`✅ NFS-e da fila ${item.id} enviada. Protocolo: ${resultado.protocolo}`);
-        
+      if (resultado.sucesso && (resultado.chaveAcesso || resultado.idDps)) {
+        console.log(`NFS-e nacional da fila ${item.id} autorizada. Chave: ${resultado.chaveAcesso || '-'}`);
         await NfseFilaService.atualizarStatus(item.id, 'ENVIADA');
 
-        // Atualizar tabela Nfse se existir registro para esse lote
         const nfseExistente = await prisma.nfse.findFirst({
-            where: {
-                empresaFiscalId: item.empresaFiscalId,
-                numeroLote: item.numeroLote
-            }
+          where: {
+            empresaFiscalId: item.empresaFiscalId,
+            numeroLote: item.numeroLote
+          },
+          orderBy: { createdAt: 'desc' }
         });
+
+        const dadosNota = {
+          protocolo: resultado.idDps || undefined,
+          chaveAcesso: resultado.chaveAcesso,
+          numeroNfse: resultado.numeroNfse,
+          situacao: 'Processado',
+          xmlEnvio: item.xmlEnvio,
+          xmlResposta: resultado.xmlRetorno,
+          erro: null
+        };
 
         if (nfseExistente) {
-             await prisma.nfse.update({
-                where: { id: nfseExistente.id },
-                data: {
-                    protocolo: resultado.protocolo,
-                    situacao: 'Pendente', // Aguardando consulta
-                    xmlEnvio: item.xmlEnvio,
-                    xmlResposta: resultado.xmlResposta
-                }
-             });
+          await prisma.nfse.update({
+            where: { id: nfseExistente.id },
+            data: dadosNota
+          });
         } else {
-            // Cria um registro se não existir
-            await prisma.nfse.create({
-                data: {
-                    empresaFiscalId: item.empresaFiscalId,
-                    numeroLote: item.numeroLote,
-                    protocolo: resultado.protocolo,
-                    situacao: 'Pendente',
-                    ambiente: item.ambiente,
-                    xmlEnvio: item.xmlEnvio,
-                    xmlResposta: resultado.xmlResposta
-                }
-            });
+          await prisma.nfse.create({
+            data: {
+              empresaFiscalId: item.empresaFiscalId,
+              numeroLote: item.numeroLote,
+              ambiente: item.ambiente,
+              ...dadosNota
+            }
+          });
         }
-
       } else {
-        // Falha no envio SOAP
-        console.warn(`⚠️ Falha ao reenviar NFS-e da fila ${item.id}: ${resultado.erro}`);
-        const proximaTentativa = new Date(Date.now() + 15 * 60 * 1000); // 15 min
-        await NfseFilaService.atualizarStatus(item.id, 'PENDENTE', {
-          erro: resultado.erro,
-          proximaTentativa
-        });
+        console.warn(`Falha ao reenviar NFS-e da fila ${item.id}: ${resultado.erro}`);
+        if (resultado.reenviar) {
+          const proximaTentativa = new Date(Date.now() + 15 * 60 * 1000);
+          await NfseFilaService.atualizarStatus(item.id, 'PENDENTE', {
+            erro: resultado.erro,
+            proximaTentativa
+          });
+        } else {
+          await NfseFilaService.atualizarStatus(item.id, 'FALHA', { erro: resultado.erro });
+        }
       }
 
     } catch (error: any) {
