@@ -1,7 +1,6 @@
 /**
- * Testes Unitários para PDFCustomizationModal
- * 
- * Para rodar os testes:
+ * Testes Unitários para PDFCustomizationModal (drawer lateral)
+ *
  * npm test -- PDFCustomizationModal.test.tsx
  */
 
@@ -9,13 +8,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import PDFCustomizationModal from '../PDFCustomizationModal';
 import { OrcamentoPDFData } from '../../../types/pdfCustomization';
+import { pdfCustomizationService } from '../../../services/pdfCustomizationService';
 
-// Mock do react-to-print
-vi.mock('react-to-print', () => ({
-    useReactToPrint: vi.fn(() => vi.fn()),
-}));
-
-// Mock do toast
 vi.mock('sonner', () => ({
     toast: {
         success: vi.fn(),
@@ -24,18 +18,29 @@ vi.mock('sonner', () => ({
     },
 }));
 
-// Mock do serviço
 vi.mock('../../../services/pdfCustomizationService', () => ({
     pdfCustomizationService: {
         downloadPersonalizedPDF: vi.fn(),
-        listFolhasTimbradas: vi.fn(() => Promise.resolve({
-            success: true,
-            data: [],
-        })),
-        generatePreview: vi.fn(() => Promise.resolve({
-            success: true,
-            data: '<html><body>Preview HTML</body></html>',
-        })),
+        listFolhasTimbradas: vi.fn(() =>
+            Promise.resolve({
+                success: true,
+                data: [],
+            })
+        ),
+        fetchPreviewPdfBlob: vi.fn(() =>
+            Promise.resolve({
+                success: true,
+                blob: new Blob(['%PDF-1.4 mock'], { type: 'application/pdf' }),
+            })
+        ),
+        generatePreview: vi.fn(() =>
+            Promise.resolve({
+                success: true,
+                data: new Blob(['%PDF-1.4 mock'], { type: 'application/pdf' }),
+            })
+        ),
+        uploadFolhaTimbrada: vi.fn(),
+        deleteFolhaTimbrada: vi.fn(),
         saveTemplate: vi.fn(),
         listTemplates: vi.fn(),
         loadTemplate: vi.fn(),
@@ -88,121 +93,119 @@ describe('PDFCustomizationModal', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        global.URL.createObjectURL = vi.fn(() => 'blob:mock-preview-url');
+        global.URL.revokeObjectURL = vi.fn();
     });
 
     describe('Renderização', () => {
-        it('deve renderizar o modal quando isOpen é true', async () => {
+        it('deve renderizar o drawer quando isOpen é true', async () => {
             await act(async () => {
                 render(<PDFCustomizationModal {...defaultProps} />);
             });
-            
+
             await waitFor(() => {
-                // Verificar se o modal está renderizado procurando por elementos comuns
-                const designButtons = screen.queryAllByText(/Design/i);
-                const previewButtons = screen.queryAllByText(/Pré-visualização/i);
-                expect(designButtons.length > 0 || previewButtons.length > 0).toBe(true);
-            }, { timeout: 3000 });
+                expect(screen.getByRole('dialog')).toBeInTheDocument();
+                expect(screen.getByText('Personalizar PDF')).toBeInTheDocument();
+            });
         });
 
-        it('não deve renderizar o modal quando isOpen é false', () => {
+        it('não deve renderizar quando isOpen é false', () => {
             render(<PDFCustomizationModal {...defaultProps} isOpen={false} />);
-            
+
             expect(screen.queryByText('Personalizar PDF')).not.toBeInTheDocument();
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         });
 
-        it('deve renderizar as abas Design e Pré-visualização', async () => {
+        it('deve exibir identificação do orçamento', async () => {
             await act(async () => {
                 render(<PDFCustomizationModal {...defaultProps} />);
             });
-            
+
             await waitFor(() => {
-                const designTabs = screen.getAllByText('🎨 Design');
-                const previewTabs = screen.getAllByText('👁️ Pré-visualização');
-                expect(designTabs.length).toBeGreaterThan(0);
-                expect(previewTabs.length).toBeGreaterThan(0);
+                expect(screen.getByText(/Orçamento #123/i)).toBeInTheDocument();
             });
         });
 
-        it('não deve renderizar a aba Conteúdo', () => {
+        it('deve exibir a galeria de folhas timbradas', async () => {
+            await act(async () => {
+                render(<PDFCustomizationModal {...defaultProps} />);
+            });
+
+            await waitFor(() => {
+                expect(screen.getByText('Folhas Timbradas')).toBeInTheDocument();
+                expect(screen.getByText(/Enviar nova folha/i)).toBeInTheDocument();
+            });
+        });
+
+        it('não deve renderizar abas Design/Pré-visualização', () => {
             render(<PDFCustomizationModal {...defaultProps} />);
-            
-            expect(screen.queryByText('📄 Conteúdo')).not.toBeInTheDocument();
-        });
-    });
 
-    describe('Comportamento das Abas', () => {
-        it('deve abrir na aba Pré-visualização por padrão', async () => {
-            await act(async () => {
-                render(<PDFCustomizationModal {...defaultProps} />);
-            });
-            
-            await waitFor(() => {
-                const previewTabs = screen.getAllByText('👁️ Pré-visualização');
-                const previewTab = previewTabs[0]?.closest('button');
-                expect(previewTab).toBeInTheDocument();
-            });
-        });
-
-        it('deve mudar para aba Design ao clicar no botão Design', async () => {
-            await act(async () => {
-                render(<PDFCustomizationModal {...defaultProps} />);
-            });
-            
-            await waitFor(async () => {
-                const designButtons = screen.getAllByText('🎨 Design');
-                if (designButtons.length > 0) {
-                    const designTab = designButtons[0].closest('button');
-                    if (designTab) {
-                        await act(async () => {
-                            fireEvent.click(designTab);
-                        });
-                        expect(designTab).toHaveClass('bg-white');
-                    }
-                }
-            });
+            expect(screen.queryByText('🎨 Design')).not.toBeInTheDocument();
+            expect(screen.queryByText('👁️ Pré-visualização')).not.toBeInTheDocument();
         });
     });
 
     describe('Botões do Footer', () => {
-        it('deve renderizar botão Cancelar', () => {
-            render(<PDFCustomizationModal {...defaultProps} />);
-            
-            expect(screen.getByText('Cancelar')).toBeInTheDocument();
+        it('deve renderizar ações do footer', async () => {
+            await act(async () => {
+                render(<PDFCustomizationModal {...defaultProps} />);
+            });
+
+            const footer = screen.getByRole('dialog').querySelector('footer');
+            expect(footer).toBeTruthy();
+            expect(footer).toHaveTextContent('Cancelar');
+            expect(footer).toHaveTextContent('Baixar PDF');
+            expect(footer).toHaveTextContent('Restaurar Padrão');
+            expect(footer?.textContent).toMatch(/Atualizar Preview|Gerando/);
         });
 
-        it('deve renderizar botão Imprimir', () => {
-            render(<PDFCustomizationModal {...defaultProps} />);
-            
-            expect(screen.getByText('Imprimir')).toBeInTheDocument();
-        });
+        it('deve baixar o PDF do backend ao clicar em Baixar PDF', async () => {
+            vi.mocked(pdfCustomizationService.downloadPersonalizedPDF).mockResolvedValue({
+                success: true,
+                fileName: 'Orcamento-123.pdf',
+            });
 
-        it('não deve renderizar botão Visualizar Preview', () => {
             render(<PDFCustomizationModal {...defaultProps} />);
-            
-            expect(screen.queryByText('Visualizar Preview')).not.toBeInTheDocument();
+            fireEvent.click(screen.getByText('Baixar PDF'));
+
+            await waitFor(() => {
+                expect(pdfCustomizationService.downloadPersonalizedPDF).toHaveBeenCalledWith(
+                    'test-id-123',
+                    expect.objectContaining({
+                        watermark: expect.any(Object),
+                        design: expect.any(Object),
+                    })
+                );
+            });
         });
 
         it('deve chamar onClose ao clicar em Cancelar', () => {
             const onClose = vi.fn();
             render(<PDFCustomizationModal {...defaultProps} onClose={onClose} />);
-            
-            const cancelButton = screen.getByText('Cancelar');
-            fireEvent.click(cancelButton);
-            
+
+            fireEvent.click(screen.getByText('Cancelar'));
+
+            expect(onClose).toHaveBeenCalledTimes(1);
+        });
+
+        it('deve chamar onClose ao clicar no overlay', () => {
+            const onClose = vi.fn();
+            render(<PDFCustomizationModal {...defaultProps} onClose={onClose} />);
+
+            fireEvent.click(screen.getByLabelText('Fechar personalização de PDF'));
+
             expect(onClose).toHaveBeenCalledTimes(1);
         });
     });
 
-    describe('Largura da Lateral', () => {
-        it('deve ter largura reduzida em 10px (w-[calc(40%-10px)]) quando na aba Design', async () => {
-            const { container } = render(<PDFCustomizationModal {...defaultProps} />);
-            
-            const tabDesign = screen.getAllByText('🎨 Design')[0];
-            fireEvent.click(tabDesign);
+    describe('Preview via blob', () => {
+        it('deve solicitar preview pdfmake ao abrir', async () => {
+            await act(async () => {
+                render(<PDFCustomizationModal {...defaultProps} />);
+            });
 
             await waitFor(() => {
-                const painelLateral = container.querySelector('.w-\\[calc\\(40\\%-10px\\)\\]');
-                expect(painelLateral).toBeInTheDocument();
+                expect(pdfCustomizationService.fetchPreviewPdfBlob).toHaveBeenCalled();
             });
         });
     });
