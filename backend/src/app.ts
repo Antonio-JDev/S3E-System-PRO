@@ -13,6 +13,7 @@ import { Server } from 'socket.io';
 import cors, { CorsOptions } from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from './lib/prisma';
@@ -23,6 +24,7 @@ import materiaisRoutes from './routes/materiais';
 import comprasRoutes from './routes/compras';
 import orcamentosRoutes from './routes/orcamentos';
 import configFiscalRoutes from './routes/configFiscal';
+import regraFiscalNfeRoutes from './routes/regraFiscalNfe.routes';
 import vendasRoutes from './routes/vendas.routes';
 import contasPagarRoutes from './routes/contasPagar.routes';
 import contasReceberRoutes from './routes/contasReceber.routes';
@@ -35,7 +37,6 @@ import clientesRoutes from './routes/clientes';
 import fornecedoresRoutes from './routes/fornecedores';
 import projetosRoutes from './routes/projetos';
 import eventosCalendarioRoutes from './routes/eventosCalendario.routes';
-import cotacoesRoutes from './routes/cotacoes.routes';
 import pessoasRoutes from './routes/pessoa.routes';
 import servicosRoutes from './routes/servicos';
 import movimentacoesRoutes from './routes/movimentacoes';
@@ -64,6 +65,7 @@ import gastosVeiculoRoutes from './routes/gastosVeiculo.routes';
 import planosRoutes from './routes/planos.routes';
 import despesasFixasRoutes from './routes/despesasFixas.routes';
 import logsRoutes from './routes/logs';
+import backupRoutes from './routes/backup.routes';
 import configuracaoDevMcpRoutes from './routes/configuracaoDevMcp.routes';
 import mcpDebugRoutes from './routes/mcpDebug.routes';
 import tarefasObraRoutes from './routes/tarefasObra';
@@ -93,6 +95,10 @@ import { healthCheck } from './controllers/logsController';
 import { setSocketServer } from './lib/socket';
 import { verifyToken } from './services/jwt.service';
 import { auditLogger, auditUnhandledError } from './middlewares/auditLogger';
+import { runtimeHttpLog } from './middlewares/runtimeHttpLog';
+import { installRuntimeConsoleCapture } from './utils/runtimeLogBuffer';
+
+installRuntimeConsoleCapture();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -212,7 +218,19 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use(cors(corsOptions));
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers.upgrade) return false;
+    const url = req.originalUrl || req.url || '';
+    if (url.startsWith('/socket.io')) return false;
+    const type = res.getHeader('Content-Type');
+    if (typeof type === 'string' && type.includes('text/event-stream')) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(morgan('dev'));
+app.use(runtimeHttpLog);
 app.use(auditLogger);
 
 // ROTA DELETE: Deletar logos (DEVE VIR ANTES da rota GET para ter prioridade)
@@ -351,7 +369,6 @@ app.use('/uploads', express.static(uploadsPath));
 // EXCEÇÃO: Não aplicar body parsers em rotas com upload de arquivos (multer)
 // Lista de rotas que PODEM usar multipart/form-data
 const uploadRoutes = [
-  '/api/cotacoes/importar',
   '/api/configuracoes/upload-logo',
   '/api/obras/tarefas/resumo', // Rota de upload de fotos de tarefas
   '/api/projetos', // Rotas de upload de documentos de projetos
@@ -414,6 +431,7 @@ app.get('/api', (_req, res) => {
       contasPagar: '/api/contas-pagar',
       relatorios: '/api/relatorios',
       configFiscal: '/api/configuracoes-fiscais',
+      regrasFiscaisNfe: '/api/regras-fiscais-nfe',
       obras: '/api/obras',
       equipes: '/api/equipes',
       pdfCustomization: '/api/pdf-customization',
@@ -462,6 +480,7 @@ app.use('/api/contas-pagar', contasPagarRoutes);
 app.use('/api/contas-receber', contasReceberRoutes);
 app.use('/api/relatorios', relatoriosRoutes);
 app.use('/api/configuracoes-fiscais', configFiscalRoutes);
+app.use('/api/regras-fiscais-nfe', regraFiscalNfeRoutes);
 app.use('/api/obras', alocacaoRoutes);
 app.use('/api/equipes', equipesRoutes);
 app.use('/api/alocacoes', alocacoesEquipeRoutes);
@@ -470,7 +489,10 @@ app.use('/api/clientes', clientesRoutes);
 app.use('/api/fornecedores', fornecedoresRoutes);
 app.use('/api/projetos', projetosRoutes);
 app.use('/api/eventos-calendario', eventosCalendarioRoutes);
-app.use('/api/cotacoes', cotacoesRoutes);
+// Módulo de cotações/banco frio removido do produto (tabela mantida só para itens históricos).
+app.use('/api/cotacoes', (_req, res) => {
+  res.status(410).json({ success: false, message: 'Módulo de cotações removido do sistema.' });
+});
 app.use('/api/servicos', servicosRoutes);
 app.use('/api/movimentacoes', movimentacoesRoutes);
 app.use('/api/inventario', inventarioRoutes);
@@ -540,6 +562,7 @@ app.use('/api/gastos-veiculo', gastosVeiculoRoutes);
 app.use('/api/planos', planosRoutes);
 app.use('/api/despesas-fixas', despesasFixasRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/backup', backupRoutes);
 app.use('/api/dev/mcp', configuracaoDevMcpRoutes);
 app.use('/api/mcp', mcpDebugRoutes);
 app.use('/api/diagnostico', diagnosticoRoutes);
@@ -695,6 +718,41 @@ httpServer.listen(PORT, () => {
   };
   setTimeout(runPurgeLeadsConvertidos, 20_000);
   setInterval(runPurgeLeadsConvertidos, 24 * 60 * 60 * 1000);
+
+  // Página Logs do dev: apaga só o rastro operacional de audit_logs com mais de 21 dias.
+  const runPurgaLogsDev = () => {
+    import('./services/devLogRetention.service')
+      .then((m) => m.executarPurgaLogsDev())
+      .then(({ removidos }) => {
+        if (removidos > 0) {
+          console.log(`✅ Retenção logs dev: ${removidos} registro(s) com mais de 21 dias removidos`);
+        }
+      })
+      .catch((err) => console.warn('⚠ Retenção logs dev falhou:', err instanceof Error ? err.message : err));
+  };
+  setTimeout(runPurgaLogsDev, 12_000);
+  setInterval(runPurgaLogsDev, 24 * 60 * 60 * 1000);
+
+  // Backup do Postgres para o Drive: só se BACKUP_ENABLED=true, uma vez por dia em BACKUP_HOUR.
+  const runAgendaBackup = () => {
+    import('./services/backupAgenda')
+      .then((m) => m.verificarAgendaBackup())
+      .catch((err) => console.warn('⚠ Agenda de backup falhou:', err instanceof Error ? err.message : err));
+  };
+  setTimeout(runAgendaBackup, 20_000);
+  setInterval(runAgendaBackup, 60 * 1000);
+
+  // Fila de contingência NF-e e NFS-e no mesmo processo. NFE_FILA_AUTO=false desliga.
+  // O script `npm run nfe:fila` continua disponível como processo separado.
+  import('./services/nfeFilaAgenda')
+    .then((m) => {
+      if (m.iniciarAgendaFilaNFe()) {
+        console.log('✅ Fila de contingência NF-e/NFS-e ativa neste processo');
+      }
+    })
+    .catch((err) =>
+      console.warn('⚠ Falha ao ligar a fila de contingência:', err instanceof Error ? err.message : err)
+    );
 });
 
 export default app;
