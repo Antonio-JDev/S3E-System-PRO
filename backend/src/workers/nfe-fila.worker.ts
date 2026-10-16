@@ -4,6 +4,7 @@ if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === undefined) {
 }
 
 import * as fs from 'fs';
+import dotenv from 'dotenv';
 import { prisma } from '../lib/prisma';
 import { CryptoUtil } from '../utils/crypto.util';
 import { resolveCertificadoPath } from '../utils/certificadoPath.util';
@@ -15,8 +16,8 @@ import NFeAuditService from '../services/nfe-audit.service';
 import { baixarKitNaEmissaoNfe } from '../services/baixaMaterialOrcamento.service';
 
 /**
- * Worker simples para reprocessar a fila de NF-e em contingência.
- * Idealmente chamado por um job/cron a cada X minutos.
+ * Reprocessa a fila de NF-e em contingência.
+ * A API dispara o ciclo periódico em nfeFilaAgenda; `npm run nfe:fila` sobe o mesmo ciclo à parte.
  */
 export async function processarFilaNFe(limit = 10) {
   const pendentes = await NFeFilaService.listarPendentes(limit);
@@ -255,5 +256,16 @@ export async function processarFilaNFe(limit = 10) {
 export default {
   processarFilaNFe
 };
+
+// Processo separado: `npm run nfe:fila` (node dist/workers/nfe-fila.worker.js).
+// Importado pela API ou pelo reprocessamento, este bloco não arma outro timer.
+if (require.main === module) {
+  dotenv.config();
+  void import('../services/nfeFilaAgenda').then(({ iniciarAgendaFilaNFe }) => {
+    if (iniciarAgendaFilaNFe({ forcar: true })) {
+      console.log('📬 Fila de contingência NF-e/NFS-e em processo separado (intervalo 60s).');
+    }
+  });
+}
 
 
