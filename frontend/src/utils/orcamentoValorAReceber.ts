@@ -13,13 +13,21 @@ function sumVendaDireta(items: OrcamentoItem[] | undefined | null): number {
  * Valor que efetivamente entra no PV/financeiro (contas a receber):
  * total do orçamento (precoVenda) menos a soma dos itens marcados como venda direta.
  */
-export function calcularValorAReceberDoOrcamento(orcamento: Pick<Orcamento, 'precoVenda' | 'items'> | null | undefined): number {
-  const totalCliente = Number(orcamento?.precoVenda) || 0;
-  const vendaDireta = sumVendaDireta(orcamento?.items as any);
-  return roundMoney(Math.max(0, totalCliente - vendaDireta));
+type OrcamentoValorRef = Pick<Orcamento, 'precoVenda' | 'items' | 'valorVendaDireta'> | null | undefined;
+
+function vendaDiretaDoOrcamento(orcamento: OrcamentoValorRef): number {
+  if (orcamento?.items && orcamento.items.length > 0) {
+    return sumVendaDireta(orcamento.items as OrcamentoItem[]);
+  }
+  return Number(orcamento?.valorVendaDireta) || 0;
 }
 
-export function calcularValorVendaDiretaDoOrcamento(orcamento: Pick<Orcamento, 'items'> | null | undefined): number {
-  return roundMoney(sumVendaDireta(orcamento?.items as any));
+export function calcularValorAReceberDoOrcamento(orcamento: OrcamentoValorRef): number {
+  const totalCliente = Number(orcamento?.precoVenda) || 0;
+  return roundMoney(Math.max(0, totalCliente - vendaDiretaDoOrcamento(orcamento)));
+}
+
+export function calcularValorVendaDiretaDoOrcamento(orcamento: OrcamentoValorRef): number {
+  return roundMoney(vendaDiretaDoOrcamento(orcamento));
 }
 
