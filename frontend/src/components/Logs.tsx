@@ -104,6 +104,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [entityFilter, setEntityFilter] = useState<string>('Todos');
     const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao' | 'mcp'>('logs');
     const [backfillLoading, setBackfillLoading] = useState(false);
+    const [backupLoading, setBackupLoading] = useState(false);
+    const [backupResultado, setBackupResultado] = useState<{ fileId: string; name: string } | null>(null);
     const [portfolioUrl, setPortfolioUrl] = useState('https://antonio-jdev.github.io/portfolio-01/');
     const [portfolioSaving, setPortfolioSaving] = useState(false);
     const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -203,6 +205,34 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
             });
         } finally {
             setBackfillLoading(false);
+        }
+    };
+
+    const runBackupDrive = async () => {
+        if (backupLoading) return;
+        setBackupLoading(true);
+        try {
+            const response = await axiosApiService.post<{ fileId: string; name: string }>(
+                '/api/backup/executar',
+                {},
+                { timeout: 15 * 60 * 1000 }
+            );
+            const corpo = response as { success?: boolean; fileId?: string; name?: string; error?: string };
+            if (corpo.success && corpo.fileId && corpo.name) {
+                setBackupResultado({ fileId: corpo.fileId, name: corpo.name });
+                toast.success('Backup enviado ao Google Drive', {
+                    description: `${corpo.name} · ID ${corpo.fileId}`,
+                    duration: 8000,
+                });
+            } else {
+                toast.error('Falha no backup', { description: corpo.error || 'Resposta inválida.' });
+            }
+        } catch (error: any) {
+            toast.error('Falha no backup', {
+                description: error?.response?.data?.error || error?.message || 'Tente novamente.',
+            });
+        } finally {
+            setBackupLoading(false);
         }
     };
 
@@ -868,6 +898,27 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                     {activeTab === 'manutencao' && (
                         <div className="space-y-6">
                             <h3 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-6">🔧 Manutenção (apenas desenvolvedor)</h3>
+                            <div className="card-secondary border-2 border-emerald-200 dark:border-emerald-800 rounded-2xl p-6">
+                                <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">Backup do banco no Google Drive</h4>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                    Gera um dump compactado do PostgreSQL e envia para a pasta configurada no Drive. O arquivo temporário é apagado do servidor ao terminar.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={runBackupDrive}
+                                    disabled={backupLoading}
+                                    className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
+                                >
+                                    {backupLoading ? 'Gerando backup...' : 'Executar backup'}
+                                </button>
+                                {backupResultado ? (
+                                    <p className="text-sm text-gray-700 dark:text-dark-text mt-4">
+                                        Arquivo <strong>{backupResultado.name}</strong>
+                                        <br />
+                                        ID no Drive: <span className="font-mono break-all">{backupResultado.fileId}</span>
+                                    </p>
+                                ) : null}
+                            </div>
                             <div className="card-secondary border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
                                 <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">🔗 URL do portfólio (página de login)</h4>
                                 <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">

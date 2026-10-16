@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
 import { toast } from 'sonner';
 import { type MaterialItem, MaterialCategory } from '../types';
 import { materiaisService, Material } from '../services/materiaisService';
+import { useEstoqueItens, useInvalidateEstoqueItens } from '../hooks/useEstoqueQuery';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { configuracoesService } from '../services/configuracoesService';
 import { empresasService, type Empresa } from '../services/empresasService';
@@ -135,9 +136,18 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const userRole = user?.role?.toLowerCase();
     const isAdminOrDev = userRole === 'admin' || userRole === 'desenvolvedor' || user?.isAdmin === true;
     
-    const [materials, setMaterials] = useState<MaterialItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const {
+        data: materialsQueryData,
+        isLoading: loading,
+        error: materialsQueryError,
+    } = useEstoqueItens();
+    const invalidateEstoque = useInvalidateEstoqueItens();
+    const materials = (materialsQueryData ?? []) as MaterialItem[];
+    const error = materialsQueryError
+        ? materialsQueryError instanceof Error
+            ? materialsQueryError.message
+            : 'Erro ao carregar materiais'
+        : null;
 
     // Estados de busca e filtros
     const [searchTerm, setSearchTerm] = useState('');
@@ -228,69 +238,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [loadingAliasesEdicao, setLoadingAliasesEdicao] = useState(false);
 
     const loadMaterials = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            
-            console.log('📦 Carregando materiais...');
-            // ✅ CORREÇÃO: Filtrar apenas materiais ativos para não mostrar materiais excluídos
-            const response = await materiaisService.getMateriais({ ativo: true });
-            
-            if (response.success && response.data) {
-                // Converter dados da API para o formato do componente
-                const materialsData: MaterialItem[] = response.data.map((material: Material) => {
-                    const m = material as Material & { quantidadePorEmbalagem?: number; tipoEmbalagem?: string; precoEmbalagem?: number; precoUnitario?: number };
-                    return {
-                        id: material.id,
-                        nome: material.nome || material.descricao || '',
-                        name: material.nome || material.descricao || '',
-                        sku: material.sku || material.codigo || 'N/A',
-                        skuAnterior: (material as Material & { skuAnterior?: string | null }).skuAnterior || undefined,
-                        type: material.tipo || material.categoria || 'Material',
-                        category: (material.categoria as MaterialCategory) || MaterialCategory.ELETRICO,
-                        description: material.descricao ?? '',
-                        ncm: material.ncm,
-                        imagemUrl: material.imagemUrl,
-                        stock: material.estoque ?? 0,
-                        minStock: material.estoqueMinimo ?? 0,
-                        unitOfMeasure: material.unidadeMedida || material.unidade || 'un',
-                        location: 'Estoque',
-                        price: material.preco ?? 0,
-                        valorVenda: material.valorVenda,
-                        valorVendaM: (material as any).valorVendaM,
-                        valorVendaCM: (material as any).valorVendaCM,
-                        porcentagemLucro: material.porcentagemLucro,
-                        percentualImposto: (material as any).percentualImposto != null ? String((material as any).percentualImposto) : '8',
-                        supplier: material.fornecedor
-                            ? { id: material.fornecedor.id, nome: material.fornecedor.nome, name: material.fornecedor.nome }
-                            : { id: '', nome: 'Sem fornecedor', name: 'Sem fornecedor' },
-                        supplierClassificacao: (material.fornecedor as any)?.classificacao ?? null,
-                        quantidadePorEmbalagem: m.quantidadePorEmbalagem,
-                        tipoEmbalagem: m.tipoEmbalagem,
-                        precoEmbalagem: m.precoEmbalagem,
-                        precoUnitario: m.precoUnitario
-                    };
-                });
-
-                // ✅ CORREÇÃO: Exibir TODOS os materiais ativos, independente do estoque
-                setMaterials(materialsData);
-                console.log(`✅ ${materialsData.length} materiais carregados`);
-            } else {
-                console.warn('⚠️ Nenhum material encontrado');
-                setMaterials([]);
-            }
-        } catch (err) {
-            setError('Erro ao carregar materiais');
-            console.error('❌ Erro ao carregar materiais:', err);
-            setMaterials([]);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateEstoque();
     };
-    
-    useEffect(() => {
-        loadMaterials();
-    }, []);
 
     useEffect(() => {
         configuracoesService.getConfiguracoes().then((res) => {
@@ -878,9 +827,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             // ✅ Passar ?permanent=true para excluir permanentemente (apenas admin/dev)
             const response = await materiaisService.deleteMaterial(itemToDelete.id, true);
             if (response.success) {
-                // ✅ Remover imediatamente da lista antes de recarregar
-                setMaterials(prev => prev.filter(m => m.id !== itemToDelete.id));
-                
                 const movimentacoesMsg = (response as any).movimentacoesExcluidas > 0 
                     ? ` ${(response as any).movimentacoesExcluidas} movimentação(ões) também foram excluída(s).`
                     : '';
@@ -890,7 +836,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 });
                 setItemToDelete(null);
                 
-                // Recarregar para garantir sincronização com o backend
                 await loadMaterials();
             } else {
                 toast.error('Erro ao excluir material', {
