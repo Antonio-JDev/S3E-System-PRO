@@ -1,4 +1,16 @@
 import { axiosApiService } from './axiosApi';
+import { queryClient } from '../lib/queryClient';
+import {
+    FINANCEIRO_CONTAS_PAGAR_QUERY_KEY,
+    FINANCEIRO_MOVIMENTACOES_CAIXA_QUERY_KEY,
+    FINANCEIRO_RESUMO_QUERY_KEY,
+} from '../hooks/useFinanceiroQuery';
+
+function invalidarContasDoGastoFrota() {
+    void queryClient.invalidateQueries({ queryKey: FINANCEIRO_CONTAS_PAGAR_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: FINANCEIRO_MOVIMENTACOES_CAIXA_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: FINANCEIRO_RESUMO_QUERY_KEY });
+}
 
 // ========== FUNCIONÁRIOS ==========
 export const funcionariosService = {
@@ -582,7 +594,9 @@ export const gastosVeiculoService = {
         obraId?: string;
         responsavel?: string;
     }) {
-        return await axiosApiService.post('/api/gastos-veiculo', data);
+        const resposta = await axiosApiService.post('/api/gastos-veiculo', data);
+        if (resposta.success !== false) invalidarContasDoGastoFrota();
+        return resposta;
     },
     
     async atualizar(id: string, data: Partial<{
@@ -595,11 +609,15 @@ export const gastosVeiculoService = {
         obraId?: string;
         responsavel?: string;
     }>) {
-        return await axiosApiService.put(`/api/gastos-veiculo/${id}`, data);
+        const resposta = await axiosApiService.put(`/api/gastos-veiculo/${id}`, data);
+        if (resposta.success !== false) invalidarContasDoGastoFrota();
+        return resposta;
     },
     
     async deletar(id: string) {
-        return await axiosApiService.delete(`/api/gastos-veiculo/${id}`);
+        const resposta = await axiosApiService.delete(`/api/gastos-veiculo/${id}`);
+        if (resposta.success !== false) invalidarContasDoGastoFrota();
+        return resposta;
     }
 };
 
