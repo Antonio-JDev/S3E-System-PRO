@@ -74,6 +74,7 @@ export async function ajustarCompraComXml(
   const compra = await prisma.compra.findUnique({
     where: { id: compraId },
     include: {
+      fornecedor: { select: { cnpj: true } },
       items: {
         select: {
           id: true,
@@ -100,6 +101,7 @@ export async function ajustarCompraComXml(
       numeroNF: compra.numeroNF,
       serieNF: compra.serieNF,
       fornecedorCNPJ: compra.fornecedorCNPJ,
+      fornecedorVinculadoCNPJ: compra.fornecedor?.cnpj,
     },
     dados.identidade
   );
