@@ -4,6 +4,10 @@ import { createPortal } from "react-dom"
 /** Acima do Dialog Radix (z-50) quando aninhado em modais portaled. */
 const ALERT_Z = 100
 
+const AlertDialogContext = React.createContext<{
+  onOpenChange: (open: boolean) => void
+} | null>(null)
+
 interface AlertDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -23,26 +27,28 @@ export const AlertDialog: React.FC<AlertDialogProps> = ({ open, onOpenChange, ch
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
-      style={{ zIndex: ALERT_Z }}
-      role="alertdialog"
-      aria-modal="true"
-    >
+    <AlertDialogContext.Provider value={{ onOpenChange }}>
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm pointer-events-auto"
+        className="fixed inset-0 flex items-center justify-center pointer-events-auto"
         style={{ zIndex: ALERT_Z }}
-        onClick={() => onOpenChange(false)}
-        aria-hidden="true"
-      />
-      <div
-        className="relative pointer-events-auto"
-        style={{ zIndex: ALERT_Z + 1 }}
-        onClick={(e) => e.stopPropagation()}
+        role="alertdialog"
+        aria-modal="true"
       >
-        {children}
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm pointer-events-auto"
+          style={{ zIndex: ALERT_Z }}
+          onClick={() => onOpenChange(false)}
+          aria-hidden="true"
+        />
+        <div
+          className="relative pointer-events-auto"
+          style={{ zIndex: ALERT_Z + 1 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {children}
+        </div>
       </div>
-    </div>,
+    </AlertDialogContext.Provider>,
     document.body
   );
 };
@@ -73,10 +79,16 @@ export const AlertDialogFooter: React.FC<DialogChildProps> = ({ children, classN
   return <div className={`mt-6 flex justify-end gap-3 ${className}`}>{children}</div>;
 };
 
-export const AlertDialogCancel: React.FC<AlertDialogActionProps> = ({ children, onClick }) => {
+export const AlertDialogCancel: React.FC<AlertDialogActionProps> = ({ children, onClick, type = "button", ...props }) => {
+  const ctx = React.useContext(AlertDialogContext);
   return (
     <button
-      onClick={onClick}
+      type={type}
+      {...props}
+      onClick={(e) => {
+        onClick?.(e);
+        if (!e.defaultPrevented) ctx?.onOpenChange(false);
+      }}
       className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
     >
       {children}
@@ -84,9 +96,16 @@ export const AlertDialogCancel: React.FC<AlertDialogActionProps> = ({ children, 
   );
 };
 
-export const AlertDialogAction: React.FC<AlertDialogActionProps & { className?: string }> = ({ children, onClick, className = "", ...props }) => {
+export const AlertDialogAction: React.FC<AlertDialogActionProps & { className?: string }> = ({
+  children,
+  onClick,
+  className = "",
+  type = "button",
+  ...props
+}) => {
   return (
     <button
+      type={type}
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors ${className}`}
       {...props}
