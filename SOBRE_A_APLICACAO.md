@@ -30,7 +30,7 @@ A aplicação segue uma arquitetura **full-stack** moderna:
 - **Backend**: Node.js + Express + TypeScript
 - **Banco de Dados**: PostgreSQL com Prisma ORM
 - **Autenticação**: JWT (JSON Web Tokens)
-- **Geração de PDFs**: Puppeteer
+- **Geração de PDFs**: pdfmake
 - **Containerização**: Docker e Docker Compose
 
 ## 📦 Módulos Principais
@@ -346,7 +346,7 @@ principais:
 - Prisma ORM
 - PostgreSQL
 - JWT (autenticação)
-- Puppeteer (PDFs)
+- pdfmake (PDFs de orçamento)
 - Zod (validação)
 - Multer (upload de arquivos)
 

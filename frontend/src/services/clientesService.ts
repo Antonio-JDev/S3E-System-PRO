@@ -17,7 +17,7 @@ export interface Cliente {
   estado: string;
   cep: string;
   tipo: 'PF' | 'PJ';
-  /** JSON completo da API CNPJ.ws (raw) para modal de detalhes */
+  /** JSON da última consulta de CNPJ (ReceitaWS + código IBGE) para o modal de detalhes */
   dadosCnpjWs?: unknown;
   ativo: boolean;
   createdAt: string;
@@ -39,13 +39,13 @@ export interface CreateClienteData {
   estado: string;
   cep: string;
   tipo: 'PF' | 'PJ';
-  /** JSON completo da API CNPJ.ws (raw) para persistir no cadastro */
+  /** JSON da consulta ReceitaWS + código IBGE para persistir no cadastro */
   dadosCnpjWs?: unknown;
 }
 
 export interface UpdateClienteData extends Partial<CreateClienteData> {
   ativo?: boolean;
-  /** JSON completo da API CNPJ.ws (raw) para persistir e exibir no modal sem nova consulta */
+  /** JSON da consulta ReceitaWS + código IBGE para persistir e exibir no modal sem nova consulta */
   dadosCnpjWs?: unknown;
 }
 
@@ -325,7 +325,7 @@ class ClientesService {
   }
 
   /**
-   * Consulta CNPJ na CNPJ.ws (dados + IE por UF + indIEDest)
+   * Consulta CNPJ na ReceitaWS e completa o código IBGE do município pelo CEP
    */
   async consultarCnpj(cnpj: string) {
     try {
