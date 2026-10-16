@@ -625,6 +625,7 @@ export type ChatPreviewMergeFields = {
   providerCachedName?: string | null;
   agendaS3eName?: string | null;
   cachedProfilePictureUrl?: string | null;
+  hasProfilePicture?: boolean;
   pinned?: boolean;
   favorite?: boolean;
   lastContent?: string;
@@ -661,6 +662,7 @@ export function dedupeChatPreviews<T extends ChatPreviewMergeFields>(list: T[]):
       phoneNumberFromS3e: group.find((g) => g.phoneNumberFromS3e)?.phoneNumberFromS3e ?? latest.phoneNumberFromS3e,
       cachedProfilePictureUrl:
         group.find((g) => g.cachedProfilePictureUrl)?.cachedProfilePictureUrl ?? latest.cachedProfilePictureUrl,
+      hasProfilePicture: group.some((g) => g.hasProfilePicture),
       pinned: group.some((g) => g.pinned),
       favorite: group.some((g) => g.favorite),
     });
@@ -788,6 +790,7 @@ export function upsertChatPreviewInList<T extends ChatPreviewMergeFields>(
     agendaS3eName: incoming.agendaS3eName ?? metaSource?.agendaS3eName,
     phoneNumberFromS3e: incoming.phoneNumberFromS3e ?? metaSource?.phoneNumberFromS3e,
     cachedProfilePictureUrl: incoming.cachedProfilePictureUrl ?? metaSource?.cachedProfilePictureUrl,
+    hasProfilePicture: Boolean(incoming.hasProfilePicture || metaSource?.hasProfilePicture),
     pinned: matched.some((m) => m.pinned) || incoming.pinned,
     favorite: matched.some((m) => m.favorite) || incoming.favorite,
   };
