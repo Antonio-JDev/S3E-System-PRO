@@ -20,6 +20,10 @@ export interface Orcamento {
   observacoes?: string;
   status: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Concretizado' | 'Recusado' | 'Declinado' | 'Cancelado';
   items?: OrcamentoItem[];
+  /** Quantidade de itens na lista (o detalhe vem em GET /:id). */
+  itemsCount?: number;
+  /** Soma dos itens de venda direta, para o valor a receber da lista. */
+  valorVendaDireta?: number;
   cliente?: any;
   empresaCNPJ?: string;
   empresaFiscalId?: string;

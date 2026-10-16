@@ -212,72 +212,119 @@ class PDFCustomizationService {
         }
     }
 
+    /** Monta FormData da personalização (preview e download usam o mesmo payload). */
+    private async buildPersonalizationFormData(customization: PDFCustomization): Promise<FormData> {
+        const formData = new FormData();
+        formData.append('opacidade', customization.watermark.opacity.toString());
+        formData.append('pdfCustomization', JSON.stringify(customization));
+        if (
+            customization.design.corners.enabled &&
+            customization.design.corners.design === 'custom' &&
+            customization.design.corners.image
+        ) {
+            formData.append('folhaTimbradaUrl', customization.design.corners.image);
+        }
+
+        if (customization.watermark.type === 'logo' && customization.watermark.content) {
+            try {
+                if (customization.watermark.content.startsWith('data:')) {
+                    const response = await fetch(customization.watermark.content);
+                    const blob = await response.blob();
+                    formData.append('logo', blob, 'logo.png');
+                }
+            } catch (err) {
+                console.warn('Não foi possível converter logo:', err);
+            }
+        }
+
+        if (customization.design.corners.enabled && customization.design.corners.image) {
+            try {
+                let imageUrl = customization.design.corners.image;
+                if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
+                    if (imageUrl.startsWith('/uploads/')) {
+                        const baseUrl = window.location.origin.replace(':8080', ':3001');
+                        imageUrl = `${baseUrl}${imageUrl}`;
+                    }
+                    const response = await fetch(imageUrl);
+                    const blob = await response.blob();
+                    formData.append('folhaTimbrada', blob, 'folha.png');
+                } else if (imageUrl.startsWith('data:')) {
+                    const response = await fetch(imageUrl);
+                    const blob = await response.blob();
+                    formData.append('folhaTimbrada', blob, 'folha.png');
+                }
+            } catch (err) {
+                console.warn('Não foi possível converter folha timbrada:', err);
+            }
+        }
+
+        return formData;
+    }
+
     /**
-     * Gera preview do PDF (retorna HTML)
+     * Preview = mesmo PDF pdfmake do download (blob application/pdf).
+     * Aceita AbortSignal para cancelar ao trocar personalização.
      */
-    async generatePreview(orcamentoId: string, customization: PDFCustomization) {
+    async fetchPreviewPdfBlob(
+        orcamentoId: string,
+        customization: PDFCustomization,
+        signal?: AbortSignal
+    ): Promise<{ success: boolean; blob?: Blob; error?: string }> {
         try {
-            const formData = new FormData();
-            formData.append('opacidade', customization.watermark.opacity.toString());
-            
-            // Se tiver logo/marca d'água, converter de base64 para blob
-            if (customization.watermark.type === 'logo' && customization.watermark.content) {
-                try {
-                    // Se for base64, converter para blob
-                    if (customization.watermark.content.startsWith('data:')) {
-                        const response = await fetch(customization.watermark.content);
-                        const blob = await response.blob();
-                        formData.append('logo', blob, 'logo.png');
-                    }
-                } catch (err) {
-                    console.warn('Não foi possível converter logo:', err);
-                }
-            }
+            const formData = await this.buildPersonalizationFormData(customization);
+            const token = localStorage.getItem('token');
+            const apiUrl = (window as any).__API_CONFIG__?.baseURL || '';
+            const baseUrl =
+                apiUrl || window.location.origin.replace(':5173', ':3001').replace(':8080', ':3001');
 
-            // Se tiver folha timbrada (corners), adicionar
-            if (customization.design.corners.enabled && customization.design.corners.image) {
-                try {
-                    let imageUrl = customization.design.corners.image;
-                    
-                    // Se for URL HTTP, buscar a imagem
-                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
-                        // Se for URL relativa, construir URL completa
-                        if (imageUrl.startsWith('/uploads/')) {
-                            const baseUrl = window.location.origin.replace(':8080', ':3001');
-                            imageUrl = `${baseUrl}${imageUrl}`;
-                        }
-                        const response = await fetch(imageUrl);
-                        const blob = await response.blob();
-                        formData.append('folhaTimbrada', blob, 'folha.png');
-                    } else if (imageUrl.startsWith('data:')) {
-                        // Se for base64, converter para blob
-                        const response = await fetch(imageUrl);
-                        const blob = await response.blob();
-                        formData.append('folhaTimbrada', blob, 'folha.png');
-                    }
-                } catch (err) {
-                    console.warn('Não foi possível converter folha timbrada:', err);
-                }
-            }
-
-            const response = await axiosApiService.post<{ html: string; success: boolean }>(
-                `/api/orcamentos/${orcamentoId}/pdf/preview-personalizado`,
-                formData,
+            const response = await fetch(
+                `${baseUrl}/api/orcamentos/${orcamentoId}/pdf/preview-personalizado`,
                 {
+                    method: 'POST',
                     headers: {
-                        'Content-Type': 'multipart/form-data'
-                    }
+                        Authorization: token ? `Bearer ${token}` : '',
+                    },
+                    body: formData,
+                    signal,
                 }
             );
 
-            return response;
+            if (!response.ok) {
+                let message = 'Erro ao gerar preview do PDF';
+                try {
+                    const errJson = await response.json();
+                    if (errJson?.message) message = String(errJson.message);
+                } catch {
+                    // corpo não-JSON (ex.: falha intermediária)
+                }
+                return { success: false, error: message };
+            }
+
+            const blob = await response.blob();
+            if (!blob || blob.size === 0) {
+                return { success: false, error: 'Preview PDF vazio' };
+            }
+
+            return { success: true, blob };
         } catch (error: any) {
-            console.error('Erro ao gerar preview:', error);
+            if (error?.name === 'AbortError') {
+                return { success: false, error: 'aborted' };
+            }
+            console.error('Erro ao gerar preview PDF:', error);
             return {
                 success: false,
-                error: error.response?.data?.message || 'Erro ao gerar preview'
+                error: error?.message || 'Erro ao gerar preview',
             };
         }
+    }
+
+    /** @deprecated Use fetchPreviewPdfBlob — mantido para compatibilidade de mocks/testes antigos */
+    async generatePreview(orcamentoId: string, customization: PDFCustomization) {
+        const result = await this.fetchPreviewPdfBlob(orcamentoId, customization);
+        if (!result.success || !result.blob) {
+            return { success: false, error: result.error || 'Erro ao gerar preview' };
+        }
+        return { success: true, data: result.blob };
     }
 
     /**
@@ -354,6 +401,14 @@ class PDFCustomizationService {
             
             const formData = new FormData();
             formData.append('opacidade', customization.watermark.opacity.toString());
+            formData.append('pdfCustomization', JSON.stringify(customization));
+            if (
+                customization.design.corners.enabled &&
+                customization.design.corners.design === 'custom' &&
+                customization.design.corners.image
+            ) {
+                formData.append('folhaTimbradaUrl', customization.design.corners.image);
+            }
             
             // Se tiver logo/marca d'água, converter de base64 para blob
             if (customization.watermark.type === 'logo' && customization.watermark.content) {
@@ -394,48 +449,38 @@ class PDFCustomizationService {
                 }
             }
 
-            // Buscar o HTML ao invés do PDF binário
-            const response = await axiosApiService.post(
-                `/api/orcamentos/${orcamentoId}/pdf/preview-personalizado`,
-                formData,
+            // Mesmo endpoint do download: o PDF aberto é o Buffer do gerarPDF.
+            const token = localStorage.getItem('token');
+            const apiUrl = (window as any).__API_CONFIG__?.baseURL || '';
+            const baseUrl = apiUrl || window.location.origin.replace(':5173', ':3001').replace(':8080', ':3001');
+            const response = await fetch(
+                `${baseUrl}/api/orcamentos/${orcamentoId}/pdf/download-personalizado`,
                 {
+                    method: 'POST',
                     headers: {
-                        'Content-Type': 'multipart/form-data'
-                    }
+                        'Authorization': token ? `Bearer ${token}` : '',
+                    },
+                    body: formData
                 }
             );
 
-            if (response.success && response.data?.html) {
-                // Criar blob com HTML e abrir em nova janela
-                const blob = new Blob([response.data.html], { type: 'text/html' });
-                const url = window.URL.createObjectURL(blob);
-                
-                // Abrir em nova janela
-                const win = window.open(url, '_blank');
-                
-                if (win) {
-                    // Aguardar carregar e disparar impressão automaticamente
-                    win.addEventListener('load', () => {
-                        setTimeout(() => {
-                            win.print();
-                            // Limpar blob URL após uso
-                            setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        }, 500);
-                    });
-                    
-                    return {
-                        success: true,
-                        fileName: 'Orcamento_Personalizado.pdf'
-                    };
-                } else {
-                    throw new Error('Popup bloqueado! Permita popups neste site.');
-                }
+            if (!response.ok) {
+                throw new Error('Erro ao gerar PDF');
             }
 
+            const blob = await response.blob();
+            const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' });
+            const url = window.URL.createObjectURL(pdfBlob);
+            const win = window.open(url, '_blank');
+            if (!win) {
+                window.URL.revokeObjectURL(url);
+                throw new Error('Popup bloqueado! Permita popups neste site.');
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
             return {
-                success: false,
-                error: response.error || 'Erro ao gerar PDF',
-                fileName: ''
+                success: true,
+                fileName: 'Orcamento_Personalizado.pdf'
             };
         } catch (error: any) {
             console.error('Erro ao gerar PDF:', error);
@@ -453,50 +498,8 @@ class PDFCustomizationService {
     async downloadPersonalizedPDF(orcamentoId: string, customization: PDFCustomization): Promise<GeneratePDFResponse> {
         try {
             console.log('📥 Baixando PDF personalizado...');
-            
-            const formData = new FormData();
-            formData.append('opacidade', customization.watermark.opacity.toString());
-            
-            // Se tiver logo/marca d'água, converter de base64 para blob
-            if (customization.watermark.type === 'logo' && customization.watermark.content) {
-                try {
-                    if (customization.watermark.content.startsWith('data:')) {
-                        const response = await fetch(customization.watermark.content);
-                        const blob = await response.blob();
-                        formData.append('logo', blob, 'logo.png');
-                    }
-                } catch (err) {
-                    console.warn('Não foi possível converter logo:', err);
-                }
-            }
 
-            // Se tiver folha timbrada (corners), adicionar
-            if (customization.design.corners.enabled && customization.design.corners.image) {
-                try {
-                    let imageUrl = customization.design.corners.image;
-                    
-                    // Se for URL HTTP, buscar a imagem
-                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
-                        // Se for URL relativa, construir URL completa
-                        if (imageUrl.startsWith('/uploads/')) {
-                            const baseUrl = window.location.origin.replace(':8080', ':3001');
-                            imageUrl = `${baseUrl}${imageUrl}`;
-                        }
-                        const response = await fetch(imageUrl);
-                        const blob = await response.blob();
-                        formData.append('folhaTimbrada', blob, 'folha.png');
-                    } else if (imageUrl.startsWith('data:')) {
-                        // Se for base64, converter para blob
-                        const response = await fetch(imageUrl);
-                        const blob = await response.blob();
-                        formData.append('folhaTimbrada', blob, 'folha.png');
-                    }
-                } catch (err) {
-                    console.warn('Não foi possível converter folha timbrada:', err);
-                }
-            }
-
-            // Usar fetch para poder acessar headers (Content-Disposition com nome do arquivo)
+            const formData = await this.buildPersonalizationFormData(customization);
             const token = localStorage.getItem('token');
             const apiUrl = (window as any).__API_CONFIG__?.baseURL || '';
             const baseUrl = apiUrl || window.location.origin.replace(':5173', ':3001').replace(':8080', ':3001');
