@@ -193,7 +193,7 @@ npm run dev
 - **Prisma ORM** - ORM type-safe
 - **PostgreSQL 16** - Banco de dados relacional
 - **JWT** - Autenticação stateless
-- **Puppeteer** - Geração de PDFs
+- **pdfmake** - Geração de PDFs de orçamento
 - **Multer** - Upload de arquivos
 - **Zod** - Validação de schemas
 
@@ -286,3 +286,26 @@ Propriedade da S3E Engenharia Elétrica.
 
 **Desenvolvido por**: Antonio Junior dos Santos  
 **Versão**: 1.0.0
+
+
+
+
+
+Como o banco fica dentro do Docker, o script precisa rodar no container do backend. Vou ver o nome do serviço no compose para te passar o comando certo.
+
+Rode o script dentro do container s3e-backend-dev. O banco do compose de desenvolvimento se chama postgres e só é alcançado nessa rede. Na raiz do projeto, com a stack de dev no ar:
+
+
+docker exec s3e-backend-dev npm run unificar:fornecedores-cnpj
+Isso só conta. Se o resumo estiver certo:
+
+
+docker exec s3e-backend-dev npm run unificar:fornecedores-cnpj -- --apply
+Não use o container s3e-backend-prod nem --env production nesse teste.
+
+O script procura um arquivo .env em backend/.env (montado em /app/.env). O compose injeta as variáveis a partir do .env da raiz, mas esse arquivo não entra no container. Se aparecer Arquivo .env não encontrado, crie o arquivo com a DATABASE_URL que o container já tem e rode de novo:
+
+
+docker exec s3e-backend-dev sh -c 'printf "DATABASE_URL=%s\n" "$DATABASE_URL" > /app/.env'
+backend/.env está no .gitignore. O volume ./backend:/app já mostra o script novo, sem rebuild da imagem.
+

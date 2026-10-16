@@ -8,7 +8,7 @@ import { matchCrossSearch } from '../utils/searchUtils';
 import { axiosApiService } from '../services/axiosApi';
 import { getUploadUrl } from '../config/api';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
-import { formatCNPJ, formatTelefoneBR } from '../utils/inputMasks';
+import { formatCNPJ, formatTelefoneBR, onlyDigits } from '../utils/inputMasks';
 import { empresaFiscalService } from '../services/empresaFiscalService';
 import { financeiroService } from '../services/financeiroService';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
@@ -121,6 +121,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     // Fornecedor
     const [supplierName, setSupplierName] = useState('');
     const [supplierCNPJ, setSupplierCNPJ] = useState('');
+    const [selectedFornecedorId, setSelectedFornecedorId] = useState('');
     const [supplierPhone, setSupplierPhone] = useState('');
     const [supplierEmail, setSupplierEmail] = useState('');
     const [supplierAddress, setSupplierAddress] = useState('');
@@ -344,6 +345,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
     // Preencher todos os dados do fornecedor ao selecionar na lista
     const handleSelecionarFornecedor = (f: Fornecedor) => {
+        setSelectedFornecedorId(f.id);
         setSupplierName(f.nome);
         setSupplierCNPJ(f.cnpj ? formatCNPJ(String(f.cnpj)) : '');
         setSupplierPhone(f.telefone ? formatTelefoneBR(f.telefone) : '');
@@ -668,8 +670,26 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
             // Preencher Fornecedor
             if (data.fornecedor) {
-                setSupplierName(data.fornecedor.nome || '');
-                setSupplierCNPJ(data.fornecedor.cnpj ? formatCNPJ(String(data.fornecedor.cnpj)) : '');
+                const cadastro = data.fornecedorCadastro || null;
+                const digitos = onlyDigits(String(cadastro?.cnpj || data.fornecedor.cnpj || ''));
+                const chaveXml = digitos ? digitos.padStart(14, '0').slice(-14) : '';
+                const local = fornecedores.find((f) => {
+                    const d = onlyDigits(f.cnpj || '');
+                    const chave = d.length === 11 ? d : d.padStart(14, '0');
+                    return Boolean(chaveXml) && chave === chaveXml;
+                });
+                const escolhidoId = cadastro?.id || data.fornecedor.id || local?.id || '';
+                if (escolhidoId) {
+                    setSelectedFornecedorId(escolhidoId);
+                    setSupplierName(cadastro?.nome || local?.nome || data.fornecedor.nome || '');
+                    setSupplierCNPJ(formatCNPJ(String(cadastro?.cnpj || local?.cnpj || chaveXml)));
+                    const tel = cadastro?.telefone || local?.telefone;
+                    if (tel) setSupplierPhone(formatTelefoneBR(String(tel)));
+                } else {
+                    setSelectedFornecedorId('');
+                    setSupplierName(data.fornecedor.nome || '');
+                    setSupplierCNPJ(chaveXml ? formatCNPJ(chaveXml) : '');
+                }
                 setSupplierAddress(data.fornecedor.endereco || '');
             }
 
@@ -806,8 +826,9 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
         try {
             const payload: any = {
+                fornecedorId: selectedFornecedorId || undefined,
                 fornecedorNome: supplierName,
-                fornecedorCNPJ: supplierCNPJ,
+                fornecedorCNPJ: onlyDigits(supplierCNPJ),
                 fornecedorTel: supplierPhone,
                 numeroNF: invoiceNumber,
                 dataEmissaoNF: dataEmissaoNF || purchaseDate,
@@ -1040,7 +1061,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <input
                                 type="text"
                                 value={supplierCNPJ}
-                                onChange={(e) => setSupplierCNPJ(formatCNPJ(e.target.value))}
+                                onChange={(e) => {
+                                    setSelectedFornecedorId('');
+                                    setSupplierCNPJ(formatCNPJ(e.target.value));
+                                }}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
                                 placeholder="00.000.000/0000-00"
                             />
