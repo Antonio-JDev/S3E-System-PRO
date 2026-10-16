@@ -6,6 +6,7 @@ import ContasAPagar from '../ContasAPagar';
 import { AuthContext } from '../../contexts/AuthContext';
 import { financeiroService } from '../../services/financeiroService';
 import { axiosApiService } from '../../services/axiosApi';
+import { createQueryWrapper } from '../../test/queryWrapper';
 
 vi.mock('../../services/financeiroService', () => ({
   financeiroService: {
@@ -32,10 +33,13 @@ describe('ContasAPagar - classificação (Nova Conta)', () => {
   });
 
   it('deve listar "Cartão de crédito" e "Outras Despesas" no select de Classificação', async () => {
+    const Wrapper = createQueryWrapper();
     render(
-      <AuthContext.Provider value={{ user: { role: 'admin' } } as any}>
-        <ContasAPagar />
-      </AuthContext.Provider>
+      <Wrapper>
+        <AuthContext.Provider value={{ user: { role: 'admin' } } as any}>
+          <ContasAPagar />
+        </AuthContext.Provider>
+      </Wrapper>
     );
 
     // Abrir modal "Nova Conta a Pagar"
