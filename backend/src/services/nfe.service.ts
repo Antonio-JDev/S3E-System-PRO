@@ -1,11 +1,23 @@
 import { prisma } from '../lib/prisma';
 import { NFeSignatureService } from './nfe-signature.service';
 import { NFeSoapService } from './nfe-soap.service';
+import { NFeEventoService } from './nfe-evento.service';
 import NFeAuditService from './nfe-audit.service';
 import { CryptoUtil } from '../utils/crypto.util';
 import { resolveCertificadoPath } from '../utils/certificadoPath.util';
 import { NFeChaveAcessoUtil } from '../utils/nfe-chave-acesso.util';
 import { NFeProcNFeUtil } from '../utils/nfe-procnfe.util';
+import { xmlGrupoIbscbsItem, xmlGrupoIbscbsTotal } from '../utils/nfe-ibscbs.util';
+import {
+  calcularProximoNumeroNFe,
+  cfopContradizIdDest,
+  codigoIbgeDaUf,
+  exigirNcmOitoDigitos,
+  extrairCodigoMunicipioInformado,
+  resolverCodigoMunicipioIbge,
+  resolverIdDest,
+} from '../utils/nfe-emissao.util';
+import { RegimeNfe, resolverTributosItem } from './nfe-regra-fiscal.service';
 import { NFeXMLValidatorService } from './nfe-xml-validator.service';
 import NFeFilaService, { NFeModoEnvio } from './nfe-fila.service';
 import { baixarKitNaEmissaoNfe, estornarBaixaKitDaNota } from './baixaMaterialOrcamento.service';
@@ -195,7 +207,7 @@ export class NFeService {
 
   /**
    * Kit sai como um produto na nota (não explode a composição).
-   * NCM só o que já está no item. Sem NCM gravado, fica o placeholder da própria nota — não inventar NCM.
+   * NCM só o que já está no item, na cotação ou no material. Sem 8 dígitos, a emissão para.
    */
   private static dadosProdutoDoItem(item: any): { descricao: string; ncm: string } {
     const ehKit = String(item?.tipo || '').toUpperCase() === 'KIT';
@@ -205,9 +217,62 @@ export class NFeService {
     const ncmFonte = ehKit
       ? (item.ncm || '')
       : (item.ncm || item.cotacao?.ncm || item.material?.ncm || '');
-    const digitos = String(ncmFonte).replace(/\D/g, '');
-    const ncm = digitos.length > 0 ? digitos.padStart(8, '0').slice(0, 8) : '00000000';
+    const ncm = exigirNcmOitoDigitos(descricao, ncmFonte);
     return { descricao, ncm };
+  }
+
+  private static regimeNfe(regimeTributario: string | null | undefined): RegimeNfe {
+    return regimeTributario === 'SimplesNacional' ? 'SimplesNacional' : 'RegimeNormal';
+  }
+
+  private static tributosItemNfe(regimeTributario: string, valorTotal: number, cfop: string, ncm: string) {
+    return resolverTributosItem({
+      regimeTributario: NFeService.regimeNfe(regimeTributario),
+      valorTotal,
+      cfop,
+      ncm,
+    });
+  }
+
+  private static somarTotaisItens(
+    produtos: Array<{ valorTotal: number; impostos: any }>,
+    regimeTributario: string
+  ) {
+    const simples = regimeTributario === 'SimplesNacional';
+    return produtos.reduce(
+      (acc, produto) => {
+        const impostos = produto.impostos || {};
+        acc.valorIPI += Number(impostos.ipi?.valor) || 0;
+        acc.valorPIS += Number(impostos.pis?.valor) || 0;
+        acc.valorCOFINS += Number(impostos.cofins?.valor) || 0;
+        acc.valorTotTrib += Number(impostos.vTotTrib) || 0;
+        if (!simples) {
+          acc.baseICMS += Number(produto.valorTotal) || 0;
+          acc.valorICMS += Number(impostos.icms?.valor) || 0;
+        }
+        return acc;
+      },
+      { baseICMS: 0, valorICMS: 0, valorIPI: 0, valorPIS: 0, valorCOFINS: 0, valorTotTrib: 0 }
+    );
+  }
+
+  /**
+   * Próximo número da NF-e. Um só cálculo: MAX numérico da empresa no ambiente
+   * e o último número configurado. A ordem alfabética de "numero" não entra.
+   */
+  private async proximoNumeroNFe(
+    empresaId: string,
+    ambiente: string,
+    ultimoNumeroNFe?: number | null
+  ): Promise<number> {
+    const raw = await prisma.$queryRawUnsafe<{ max: number | null }[]>(
+      'SELECT MAX(CAST(numero AS INTEGER)) as max FROM notas_fiscais WHERE "empresaFiscalId" = $1 AND ambiente = $2 AND numero ~ \'^[0-9]+$\'',
+      empresaId,
+      ambiente
+    );
+    const maxExisting = raw && raw[0] && raw[0].max != null ? Number(raw[0].max) : 0;
+    const ultimo = ultimoNumeroNFe != null ? Number(ultimoNumeroNFe) : 0;
+    return calcularProximoNumeroNFe(maxExisting, ultimo);
   }
 
   /**
@@ -224,7 +289,8 @@ export class NFeService {
     empresaId: string,
     cfop: string = '5101',
     naturezaOperacao: string = 'Venda de Mercadoria',
-    serie: string = '1'
+    serie: string = '1',
+    opcoes?: { numeroReservado?: number; ambiente?: '1' | '2' }
   ): Promise<DadosNFe> {
     console.log(`📦 Buscando dados reais da venda: ${vendaId}`);
 
@@ -239,22 +305,13 @@ export class NFeService {
       throw new Error(`Venda ${vendaId} não possui orçamento vinculado`);
     }
 
-    // 2. Buscar empresa fiscal e configurações do sistema
-    const [empresa, configSistema] = await Promise.all([
-      prisma.empresaFiscal.findUnique({
-        where: { id: empresaId }
-      }),
-      prisma.configuracaoSistema.findFirst({
-        select: { aliquotaImpostoPadrao: true }
-      })
-    ]);
+    const empresa = await prisma.empresaFiscal.findUnique({
+      where: { id: empresaId }
+    });
 
     if (!empresa) {
       throw new Error(`Empresa fiscal não encontrada: ${empresaId}`);
     }
-
-    // Obter alíquota de tributos aproximados para Simples Nacional (Lei 12.741/2012)
-    const aliquotaTributosAproximados = (configSistema?.aliquotaImpostoPadrao ?? 8) / 100;
 
     // 3. Buscar cliente
     const cliente = venda.cliente;
@@ -274,7 +331,7 @@ export class NFeService {
         numero: empresa.numero || 'S/N',
         complemento: empresa.complemento || '',
         bairro: empresa.bairro || '',
-        codigoMunicipio: this.obterCodigoMunicipio(empresa.cidade, empresa.estado),
+        codigoMunicipio: this.obterCodigoMunicipio(empresa.cidade, empresa.estado, extrairCodigoMunicipioInformado(empresa)),
         municipio: empresa.cidade || '',
         uf: empresa.estado || '',
         cep: empresa.cep.replace(/\D/g, '') || '',
@@ -355,7 +412,11 @@ export class NFeService {
         numero: (numeroEnd || 'S/N').trim(),
         complemento: '',
         bairro: bairroEnd?.trim() || '-',
-        codigoMunicipio: this.obterCodigoMunicipio(cliente.cidade || '', cliente.estado || ''),
+        codigoMunicipio: this.obterCodigoMunicipio(
+          cliente.cidade || '',
+          cliente.estado || '',
+          extrairCodigoMunicipioInformado(cliente)
+        ),
         municipio: cliente.cidade || '',
         uf: cliente.estado || '',
         cep: (cliente.cep || '').replace(/\D/g, '') || '',
@@ -378,11 +439,6 @@ export class NFeService {
     }> = [];
 
     let valorTotalProdutos = 0;
-    let baseICMS = 0;
-    let valorICMS = 0;
-    let valorIPI = 0;
-    let valorPIS = 0;
-    let valorCOFINS = 0;
 
     if (venda.orcamento.items && venda.orcamento.items.length > 0) {
       for (const item of venda.orcamento.items) {
@@ -417,115 +473,50 @@ export class NFeService {
         
         valorTotalProdutos += valorTotal;
 
-        // Calcular impostos conforme regime tributário
-        const isSimplesToNacional = empresa.regimeTributario === 'SimplesNacional';
-        
-        // Para Simples Nacional: ICMS, PIS e COFINS são recolhidos via DAS (não separadamente)
-        const aliquotaICMS = isSimplesToNacional ? 0 : 12; // Simples Nacional: ICMS zerado separadamente
-        const aliquotaIPI = 0; // 0% padrão (pode ser ajustado)
-        const aliquotaPIS = isSimplesToNacional ? 0 : 1.65; // Simples Nacional: PIS zerado separadamente  
-        const aliquotaCOFINS = isSimplesToNacional ? 0 : 7.60; // Simples Nacional: COFINS zerado separadamente
-
-        const baseICMSItem = isSimplesToNacional ? 0 : valorTotal;
-        const valorICMSItem = (baseICMSItem * aliquotaICMS) / 100;
-        const valorIPIItem = (valorTotal * aliquotaIPI) / 100;
-        const valorPISItem = (valorTotal * aliquotaPIS) / 100;
-        const valorCOFINSItem = (valorTotal * aliquotaCOFINS) / 100;
-
-        // Acumular totais conforme regime
-        if (!isSimplesToNacional) {
-          baseICMS += baseICMSItem;
-          valorICMS += valorICMSItem;
-          valorPIS += valorPISItem;
-          valorCOFINS += valorCOFINSItem;
-        }
-        valorIPI += valorIPIItem;
+        const tributos = NFeService.tributosItemNfe(empresa.regimeTributario, valorTotal, cfop, ncm);
 
         produtos.push({
           codigo: sku, // ✅ SKU do material como código do produto
           descricao: descricao.substring(0, 120), // Limitar a 120 caracteres (padrão NFe)
-          ncm: ncm, // 8 dígitos (já normalizado acima; herdado do orçamento → cotação quando item é banco frio)
+          ncm: ncm,
           cfop: cfop,
           unidade: unidade,
           quantidade: quantidade,
           valorUnitario: valorUnitario,
           valorTotal: valorTotal,
           gtin: undefined, // Sempre "SEM GTIN" - campo codigoBarras não existe no schema atual
-          impostos: {
-            icms: {
-              origem: '0', // 0 = Nacional
-              cst: empresa.regimeTributario === 'SimplesNacional' ? '102' : '00',
-              aliquota: aliquotaICMS,
-              valor: valorICMSItem
-            },
-            ipi: {
-              cst: aliquotaIPI > 0 ? '50' : '99',
-              aliquota: aliquotaIPI,
-              valor: valorIPIItem
-            },
-            pis: {
-              cst: isSimplesToNacional ? '49' : '01', // CST 49 = outras operações para Simples Nacional
-              aliquota: aliquotaPIS,
-              valor: valorPISItem
-            },
-            cofins: {
-              cst: isSimplesToNacional ? '49' : '01', // CST 49 = outras operações para Simples Nacional 
-              aliquota: aliquotaCOFINS,
-              valor: valorCOFINSItem
-            },
-            // Simples Nacional (CRT=1): vTotTrib zerado (não informar tributos aproximados no XML)
-            // Regime normal: vTotTrib = soma dos tributos calculados
-            vTotTrib: isSimplesToNacional
-              ? 0
-              : valorICMSItem + valorIPIItem + valorPISItem + valorCOFINSItem
-          }
+          impostos: tributos
         });
       }
     }
 
-    // 7. Obter próximo número da NF-e (buscar última nota da empresa)
-    const ultimaNota = await prisma.notaFiscal.findFirst({
-      where: {
-        empresaFiscalId: empresaId,
-        serie: serie
-      },
-      orderBy: {
-        numero: 'desc'
-      },
-      select: {
-        numero: true
-      }
-    });
+    const totaisItens = NFeService.somarTotaisItens(produtos, empresa.regimeTributario);
 
-    const proximoNumero = ultimaNota ? parseInt(ultimaNota.numero ?? '0', 10) + 1 : 1;
+    // Número do XML: o reservado na emissão, ou o mesmo helper numérico quando ainda não houve reserva.
+    const ambienteNumero = opcoes?.ambiente === '1' ? 'PRODUCAO' : 'HOMOLOGACAO';
+    const proximoNumero = opcoes?.numeroReservado != null
+      ? opcoes.numeroReservado
+      : await this.proximoNumeroNFe(empresaId, ambienteNumero, empresa.ultimoNumeroNFe);
 
-    // 8. Retornar dados formatados
-    // Simples Nacional (CRT 1): zerar PIS/COFINS nos totais (já incluídos na DAS)
-    const valorPISFinal = empresa.regimeTributario === 'SimplesNacional' ? 0 : valorPIS;
-    const valorCOFINSFinal = empresa.regimeTributario === 'SimplesNacional' ? 0 : valorCOFINS;
-    // Soma vTotTrib dos itens (regra 685: total deve bater com itens)
-    const valorTotTrib = produtos.reduce((s, p) => s + (p.impostos?.vTotTrib ?? 0), 0);
-    
-    // Log para debug - validar consistência de tributos
-    console.log(`[NFE] Regime: ${empresa.regimeTributario}, vTotTrib total: ${valorTotTrib.toFixed(2)}`);
+    console.log(`[NFE] Regime: ${empresa.regimeTributario}, vTotTrib total: ${totaisItens.valorTotTrib.toFixed(2)}`);
     console.log(`[NFE] Tributos por item:`, produtos.map(p => `${p.descricao}: ${(p.impostos?.vTotTrib ?? 0).toFixed(2)}`));
 
     return {
       emitente: {
         ...emitente,
-        codigoEstado: this.obterCodigoEstado(empresa.estado || 'SC') // Adicionar código do estado
+        codigoEstado: this.obterCodigoEstado(empresa.estado || '')
       },
       destinatario,
       produtos,
       totais: {
         valorProdutos: valorTotalProdutos,
-        valorNF: valorTotalProdutos, // Valor total da NF (pode incluir frete, desconto, etc)
-        baseICMS: baseICMS,
-        valorICMS: valorICMS,
-        valorIPI: valorIPI,
-        valorPIS: valorPISFinal,
-        valorCOFINS: valorCOFINSFinal,
-        valorTotTrib
+        valorNF: valorTotalProdutos,
+        baseICMS: totaisItens.baseICMS,
+        valorICMS: totaisItens.valorICMS,
+        valorIPI: totaisItens.valorIPI,
+        valorPIS: totaisItens.valorPIS,
+        valorCOFINS: totaisItens.valorCOFINS,
+        valorTotTrib: totaisItens.valorTotTrib
       },
       naturezaOperacao: naturezaOperacao,
       serie: serie,
@@ -558,12 +549,9 @@ export class NFeService {
     const venda = await VendasService.buscarVenda(vendaId);
     if (!venda || !(venda as any).orcamento) throw new Error(`Venda ${vendaId} não encontrada ou sem orçamento`);
 
-    const [empresa, cliente, configSistema] = await Promise.all([
+    const [empresa, cliente] = await Promise.all([
       prisma.empresaFiscal.findUnique({ where: { id: empresaId } }),
-      prisma.cliente.findUnique({ where: { id: opts.clienteId } }),
-      prisma.configuracaoSistema.findFirst({
-        select: { aliquotaImpostoPadrao: true }
-      })
+      prisma.cliente.findUnique({ where: { id: opts.clienteId } })
     ]);
     
     if (!empresa) throw new Error('Empresa fiscal não encontrada');
@@ -583,7 +571,7 @@ export class NFeService {
         numero: empresa.numero || 'S/N',
         complemento: empresa.complemento || '',
         bairro: empresa.bairro || '',
-        codigoMunicipio: this.obterCodigoMunicipio(empresa.cidade, empresa.estado),
+        codigoMunicipio: this.obterCodigoMunicipio(empresa.cidade, empresa.estado, extrairCodigoMunicipioInformado(empresa)),
         municipio: empresa.cidade || '',
         uf: empresa.estado || '',
         cep: (empresa.cep || '').replace(/\D/g, ''),
@@ -634,7 +622,11 @@ export class NFeService {
         numero: (numeroEnd || 'S/N').trim(),
         complemento: '',
         bairro: bairroEnd?.trim() || '-',
-        codigoMunicipio: this.obterCodigoMunicipio(cliente.cidade || '', cliente.estado || ''),
+        codigoMunicipio: this.obterCodigoMunicipio(
+          cliente.cidade || '',
+          cliente.estado || '',
+          extrairCodigoMunicipioInformado(cliente)
+        ),
         municipio: cliente.cidade || '',
         uf: cliente.estado || '',
         cep: (cliente.cep || '').replace(/\D/g, '') || '',
@@ -644,15 +636,6 @@ export class NFeService {
 
     const produtos: Array<{ codigo: string; descricao: string; ncm: string; cfop: string; unidade: string; quantidade: number; valorUnitario: number; valorTotal: number; gtin?: string; impostos: any }> = [];
     let valorTotalProdutos = 0;
-    let baseICMS = 0;
-    let valorICMS = 0;
-    let valorIPI = 0;
-    let valorPIS = 0;
-    let valorCOFINS = 0;
-    const aliquotaICMS = 12;
-    const aliquotaIPI = 0;
-    const aliquotaPIS = 1.65;
-    const aliquotaCOFINS = 7.60;
 
     const items = ((venda as any).orcamento?.items || []) as any[];
     for (const item of items) {
@@ -670,18 +653,7 @@ export class NFeService {
       const valorUnitario = quantidade > 0 ? Math.round((valorTotal / quantidade) * 10000) / 10000 : 0;
 
       valorTotalProdutos += valorTotal;
-      const baseICMSItem = valorTotal;
-      const valorICMSItem = (baseICMSItem * aliquotaICMS) / 100;
-      const valorIPIItem = (valorTotal * aliquotaIPI) / 100;
-      const valorPISItem = (valorTotal * aliquotaPIS) / 100;
-      const valorCOFINSItem = (valorTotal * aliquotaCOFINS) / 100;
-      baseICMS += baseICMSItem;
-      valorICMS += valorICMSItem;
-      valorIPI += valorIPIItem;
-      if (empresa.regimeTributario !== 'SimplesNacional') {
-        valorPIS += valorPISItem;
-        valorCOFINS += valorCOFINSItem;
-      }
+      const tributos = NFeService.tributosItemNfe(empresa.regimeTributario, valorTotal, cfop, ncm);
 
       produtos.push({
         codigo: sku,
@@ -693,15 +665,7 @@ export class NFeService {
         valorUnitario,
         valorTotal,
         gtin: undefined, // Sempre "SEM GTIN" - campo codigoBarras não existe no schema atual
-        impostos: {
-          icms: { origem: '0', cst: empresa.regimeTributario === 'SimplesNacional' ? '102' : '00', aliquota: aliquotaICMS, valor: valorICMSItem },
-          ipi: { cst: aliquotaIPI > 0 ? '50' : '99', aliquota: aliquotaIPI, valor: valorIPIItem },
-          pis: { cst: '01', aliquota: aliquotaPIS, valor: valorPISItem },
-          cofins: { cst: '01', aliquota: aliquotaCOFINS, valor: valorCOFINSItem },
-          vTotTrib: empresa.regimeTributario === 'SimplesNacional'
-            ? 0
-            : valorICMSItem + valorIPIItem + valorPISItem + valorCOFINSItem
-        }
+        impostos: tributos
       });
     }
 
@@ -713,87 +677,48 @@ export class NFeService {
       const novoValorTotal = Math.round((ultimo.valorTotal + diff) * 100) / 100;
       ultimo.valorTotal = novoValorTotal;
       ultimo.valorUnitario = ultimo.quantidade > 0 ? Math.round((novoValorTotal / ultimo.quantidade) * 10000) / 10000 : 0;
+      ultimo.impostos = NFeService.tributosItemNfe(empresa.regimeTributario, novoValorTotal, ultimo.cfop, ultimo.ncm);
       valorTotalProdutos = valorEsperadoNota;
-      const icms = ultimo.impostos?.icms;
-      const ipi = ultimo.impostos?.ipi;
-      const pis = ultimo.impostos?.pis;
-      const cofins = ultimo.impostos?.cofins;
-      const valorICMSL = icms ? (novoValorTotal * icms.aliquota) / 100 : 0;
-      const valorIPIL = ipi ? (novoValorTotal * ipi.aliquota) / 100 : 0;
-      const valorPISL = pis ? (novoValorTotal * pis.aliquota) / 100 : 0;
-      const valorCOFINSL = cofins ? (novoValorTotal * cofins.aliquota) / 100 : 0;
-      ultimo.impostos = {
-        icms: icms ? { ...icms, valor: valorICMSL } : { origem: '0', cst: '102', aliquota: 0, valor: 0 },
-        ipi: ipi ? { ...ipi, valor: valorIPIL } : { cst: '99', aliquota: 0, valor: 0 },
-        pis: pis ? { ...pis, valor: valorPISL } : { cst: '01', aliquota: 0, valor: 0 },
-        cofins: cofins ? { ...cofins, valor: valorCOFINSL } : { cst: '01', aliquota: 0, valor: 0 },
-        vTotTrib: empresa.regimeTributario === 'SimplesNacional'
-          ? 0
-          : valorICMSL + valorIPIL + valorPISL + valorCOFINSL
-      };
     } else if (produtos.length > 0) {
       valorTotalProdutos = valorEsperadoNota;
     }
 
-    const valorPISFinal = empresa.regimeTributario === 'SimplesNacional' ? 0 : valorPIS;
-    const valorCOFINSFinal = empresa.regimeTributario === 'SimplesNacional' ? 0 : valorCOFINS;
-    const valorTotTrib = produtos.reduce((s, p) => s + (p.impostos?.vTotTrib ?? 0), 0);
+    const totaisItens = NFeService.somarTotaisItens(produtos, empresa.regimeTributario);
+    const numeroNota = opts.numero != null
+      ? opts.numero
+      : await this.proximoNumeroNFe(empresaId, 'HOMOLOGACAO', empresa.ultimoNumeroNFe);
 
     return {
-      emitente: { ...emitente, codigoEstado: this.obterCodigoEstado(empresa.estado || 'SC') },
+      emitente: { ...emitente, codigoEstado: this.obterCodigoEstado(empresa.estado || '') },
       destinatario,
       produtos,
       totais: {
         valorProdutos: valorTotalProdutos,
         valorNF: valorTotalProdutos,
-        baseICMS,
-        valorICMS,
-        valorIPI,
-        valorPIS: valorPISFinal,
-        valorCOFINS: valorCOFINSFinal,
-        valorTotTrib
+        baseICMS: totaisItens.baseICMS,
+        valorICMS: totaisItens.valorICMS,
+        valorIPI: totaisItens.valorIPI,
+        valorPIS: totaisItens.valorPIS,
+        valorCOFINS: totaisItens.valorCOFINS,
+        valorTotTrib: totaisItens.valorTotTrib
       },
       naturezaOperacao,
       serie,
-      numero: opts.numero,
+      numero: numeroNota,
       dataEmissao: new Date()
     };
   }
 
   /**
-   * Obtém código do município (IBGE) - função auxiliar
-   * Em produção, buscar de uma tabela de municípios
-   * Por enquanto, retorna código padrão baseado no estado
+   * Código IBGE do município. Cidade desconhecida sem código informado interrompe a emissão.
    */
-  private obterCodigoMunicipio(cidade: string, estado: string): string {
-    // Códigos de exemplo - em produção, buscar de uma tabela de municípios
-    const codigosExemplo: { [key: string]: string } = {
-      'SC': '4208203', // Itajaí (padrão SC)
-      'SP': '3550308', // São Paulo
-      'RJ': '3304557', // Rio de Janeiro
-      'MG': '3106200', // Belo Horizonte
-      'RS': '4314902', // Porto Alegre
-      'PR': '4106902', // Curitiba
-    };
-
-    return codigosExemplo[estado] || '4208203'; // Padrão: Itajaí/SC
+  private obterCodigoMunicipio(cidade: string, estado: string, codigoInformado?: string | null): string {
+    return resolverCodigoMunicipioIbge({ cidade, estado, codigoInformado });
   }
 
-  /**
-   * Obtém código do estado (UF) - função auxiliar
-   * Retorna código IBGE do estado (2 dígitos)
-   */
+  /** Código IBGE da UF (cUF). Não assume Santa Catarina. */
   private obterCodigoEstado(uf: string): string {
-    const codigosEstados: { [key: string]: string } = {
-      'AC': '12', 'AL': '27', 'AP': '16', 'AM': '13', 'BA': '29',
-      'CE': '23', 'DF': '53', 'ES': '32', 'GO': '52', 'MA': '21',
-      'MT': '51', 'MS': '50', 'MG': '31', 'PA': '15', 'PB': '25',
-      'PR': '41', 'PE': '26', 'PI': '22', 'RJ': '33', 'RN': '24',
-      'RS': '43', 'RO': '11', 'RR': '14', 'SC': '42', 'SP': '35',
-      'SE': '28', 'TO': '17'
-    };
-
-    return codigosEstados[uf.toUpperCase()] || '42'; // Padrão: SC
+    return codigoIbgeDaUf(uf);
   }
 
   /**
@@ -815,11 +740,54 @@ export class NFeService {
         ? '7'
         : '1';
 
+    for (const produto of dados.produtos || []) {
+      exigirNcmOitoDigitos(produto.descricao, produto.ncm);
+    }
+
+    const cUFInformado = String(dados.emitente.codigoEstado ?? '').replace(/\D/g, '');
+    const cUF = cUFInformado
+      ? cUFInformado
+      : codigoIbgeDaUf(String(dados.emitente.endereco?.uf || ''));
+    if (!/^\d{2}$/.test(cUF)) {
+      throw new Error(`cUF "${dados.emitente.codigoEstado ?? ''}" inválido. Use o código IBGE da UF com 2 dígitos, o mesmo da chave de acesso.`);
+    }
+
+    const idDest = resolverIdDest({
+      ufEmitente: String(dados.emitente.endereco?.uf || ''),
+      ufDestinatario: String(dados.destinatario.endereco?.uf || ''),
+      paisDestinatario: dados.destinatario.endereco?.pais ?? dados.destinatario.endereco?.xPais ?? null,
+      codigoPaisDestinatario: dados.destinatario.endereco?.codigoPais ?? dados.destinatario.endereco?.cPais ?? null,
+    });
+    for (const produto of dados.produtos || []) {
+      if (cfopContradizIdDest(produto.cfop, idDest)) {
+        console.warn(
+          `[NFE] CFOP ${produto.cfop} do item "${produto.descricao}" não combina com idDest ${idDest}. O CFOP informado foi mantido; o idDest segue a UF.`
+        );
+      }
+    }
+
+    let cPaisDest = '1058';
+    let xPaisDest = 'BRASIL';
+    if (idDest === '3') {
+      const codPais = String(dados.destinatario.endereco?.codigoPais ?? dados.destinatario.endereco?.cPais ?? '').replace(/\D/g, '');
+      const nomePais = normalizarParaNFe(String(dados.destinatario.endereco?.pais ?? dados.destinatario.endereco?.xPais ?? ''));
+      if (!codPais || codPais === '1058') {
+        throw new Error('Operação com o exterior exige o código do país do destinatário (cPais), diferente de Brasil (1058).');
+      }
+      cPaisDest = codPais.padStart(4, '0').slice(-4);
+      xPaisDest = nomePais || 'EXTERIOR';
+    }
+
+    const itensIbscbs = (dados.produtos || []).map((produto) => ({
+      valorBase: Number(produto.valorTotal) || 0,
+    }));
+
     // ========== CORREÇÃO 5: GERAÇÃO E VALIDAÇÃO RIGOROSA DA CHAVE/cDV ==========
     console.log('🔧 [Fix Rejeição 297] Gerando chave de acesso rigorosamente...');
     
-    // Gerar chave de acesso com dígito verificador correto (inclui tpEmis)
+    // A UF da chave é o mesmo cUF gravado no XML.
     const chaveAcesso = this.gerarChaveAcesso(
+      cUF,
       dados.emitente.cnpj,
       dados.serie,
       dados.numero.toString(),
@@ -840,6 +808,10 @@ export class NFeService {
     if (!validacaoChave.valida) {
       throw new Error(`Chave de acesso gerada é inválida: ${validacaoChave.erro}`);
     }
+    const ufDaChave = NFeChaveAcessoUtil.extrairInformacoes(chaveAcesso).uf;
+    if (ufDaChave !== cUF) {
+      throw new Error(`UF da chave de acesso (${ufDaChave}) difere do cUF (${cUF}).`);
+    }
     
     console.log('✅ [Fix cDV] Chave de acesso validada com sucesso - cDV correto');
 
@@ -847,7 +819,7 @@ export class NFeService {
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
   <infNFe xmlns="http://www.portalfiscal.inf.br/nfe" Id="NFe${chaveAcesso}" versao="4.00">
     <ide>
-      <cUF>${dados.emitente.codigoEstado || '42'}</cUF>
+      <cUF>${cUF}</cUF>
       <cNF>${cNF}</cNF>
       <natOp>${normalizarParaNFe(dados.naturezaOperacao)}</natOp>
       <mod>55</mod>
@@ -855,7 +827,7 @@ export class NFeService {
       <nNF>${dados.numero}</nNF>
       <dhEmi>${dhEmi}</dhEmi>
       <tpNF>1</tpNF>
-      <idDest>1</idDest>
+      <idDest>${idDest}</idDest>
       <cMunFG>${dados.emitente.endereco.codigoMunicipio}</cMunFG>
       <tpImp>1</tpImp>
       <tpEmis>${tpEmis}</tpEmis>
@@ -900,8 +872,8 @@ export class NFeService {
         <xMun>${normalizarParaNFe(dados.destinatario.endereco.municipio)}</xMun>
         <UF>${dados.destinatario.endereco.uf}</UF>
         <CEP>${dados.destinatario.endereco.cep.replace(/\D/g, '')}</CEP>
-        <cPais>1058</cPais>
-        <xPais>BRASIL</xPais>
+        <cPais>${cPaisDest}</cPais>
+        <xPais>${xPaisDest}</xPais>
       </enderDest>
       <indIEDest>${dados.destinatario.indIEDest ?? 1}</indIEDest>
       ${dados.destinatario.inscricaoEstadual && dados.destinatario.indIEDest !== 9 ? `<IE>${dados.destinatario.inscricaoEstadual}</IE>` : ''}
@@ -938,6 +910,7 @@ export class NFeService {
         <vNF>${dados.totais.valorNF.toFixed(2)}</vNF>
         <vTotTrib>${(dados.emitente.regimeTributario === 'SimplesNacional' ? 0 : (dados.totais.valorTotTrib ?? 0)).toFixed(2)}</vTotTrib>
       </ICMSTot>
+      ${xmlGrupoIbscbsTotal(itensIbscbs)}
     </total>
     <transp>
       <modFrete>${dados.modFrete ?? 9}</modFrete>
@@ -1062,21 +1035,27 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
             <vCOFINS>${produto.impostos.cofins.valor.toFixed(2)}</vCOFINS>
           </COFINSAliq>
         </COFINS>`}
+        ${xmlGrupoIbscbsItem({ valorBase: Number(produto.valorTotal) || 0 })}
       </imposto>
     </det>`).join('');
   }
 
   /**
-   * Gera chave de acesso da NF-e com dígito verificador correto (Módulo 11)
+   * Gera chave de acesso da NF-e com dígito verificador correto (Módulo 11).
+   * A UF é o cUF do XML, não um estado fixo.
    */
   private gerarChaveAcesso(
+    cUF: string,
     cnpj: string,
     serie: string,
     numero: string,
     cNF: string,
     tpEmis: string = '1'
   ): string {
-    const uf = '42'; // SC
+    const uf = String(cUF || '').replace(/\D/g, '');
+    if (!/^\d{2}$/.test(uf)) {
+      throw new Error('cUF inválido na chave de acesso da NF-e.');
+    }
     const modelo = '55';
 
     return NFeChaveAcessoUtil.gerarChaveAcesso(
@@ -1275,12 +1254,10 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
     try {
       console.log(`🚫 Cancelando NF-e: ${chaveAcesso}`);
 
-      // Validações
       if (justificativa.length < 15) {
         throw new Error('Justificativa deve ter no mínimo 15 caracteres');
       }
 
-      // Buscar empresa e certificado
       const empresa = await prisma.empresaFiscal.findUnique({
         where: { id: empresaId }
       });
@@ -1289,12 +1266,37 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         throw new Error('Empresa fiscal não encontrada ou sem certificado configurado');
       }
 
+      const nota = await prisma.notaFiscal.findUnique({
+        where: { chaveAcesso },
+        select: { id: true, xmlNFe: true },
+      });
+      let nProt = NFeEventoService.extrairProtocoloAutorizacao(nota?.xmlNFe);
+      if (!nProt && nota?.id) {
+        const eventos = await prisma.nfeEvento.findMany({
+          where: { notaFiscalId: nota.id },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: { metadata: true },
+        });
+        for (const evento of eventos) {
+          const meta = evento.metadata as { protocolo?: unknown } | null;
+          if (typeof meta?.protocolo === 'string') {
+            nProt = NFeEventoService.extrairProtocoloAutorizacao(meta.protocolo);
+            if (nProt) break;
+          }
+        }
+      }
+      if (!nProt) {
+        throw new Error(
+          'Protocolo de autorização da NF-e não encontrado. O cancelamento exige o nProt real da SEFAZ.'
+        );
+      }
+
       const pfxPathResolvido = resolveCertificadoPath(empresa.certificadoPath);
       if (!pfxPathResolvido || !fs.existsSync(pfxPathResolvido)) {
         throw new Error('Arquivo de certificado não encontrado. Reenvie o certificado pela interface.');
       }
 
-      // Descriptografar senha do certificado
       let senhaDescriptografada: string;
       try {
         senhaDescriptografada = CryptoUtil.decrypt(empresa.certificadoSenha);
@@ -1303,34 +1305,54 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         throw new Error('Senha do certificado inválida para cancelamento de NF-e');
       }
 
-      // Carregar certificado para envio SOAP
       const { key, cert } = NFeSignatureService.carregarCertificado(
         pfxPathResolvido,
         senhaDescriptografada
       );
 
-      // Enviar cancelamento para SEFAZ
-      const resultado = await NFeSoapService.cancelarNFe(chaveAcesso, justificativa, ambiente, cert, key);
+      const xmlCancelamento = this.gerarXMLCancelamento(
+        chaveAcesso,
+        justificativa,
+        ambiente,
+        empresa.cnpj,
+        nProt
+      );
+      const resultado = await NFeSoapService.cancelarNFe(xmlCancelamento, ambiente, cert, key, {
+        pfxPath: pfxPathResolvido,
+        pfxPassword: senhaDescriptografada,
+      });
 
-      if (!resultado.sucesso) {
-        throw new Error(resultado.erro || 'Erro ao cancelar NF-e');
+      if (!resultado.sucesso || !resultado.protocolo || !/^\d{15,}$/.test(resultado.protocolo)) {
+        throw new Error(resultado.erro || 'Resposta da SEFAZ sem protocolo real do cancelamento');
       }
 
-      console.log('✅ NF-e cancelada:', resultado);
+      console.log('✅ NF-e cancelada. Protocolo:', resultado.protocolo);
 
-      const notaCancelada = await prisma.notaFiscal.findUnique({
-        where: { chaveAcesso },
-        select: { id: true },
-      });
-      if (notaCancelada) {
+      if (nota) {
         await prisma.notaFiscal.update({
-          where: { id: notaCancelada.id },
+          where: { id: nota.id },
           data: { status: 'Cancelada' },
         });
         try {
-          await estornarBaixaKitDaNota(notaCancelada.id);
+          await estornarBaixaKitDaNota(nota.id);
         } catch (estornoErr) {
           console.error('Erro ao estornar a baixa do kit no cancelamento da NF-e:', estornoErr);
+        }
+        try {
+          await prisma.nfeEvento.create({
+            data: {
+              notaFiscalId: nota.id,
+              tipo: 'SUCESSO',
+              descricao: 'Cancelamento de NF-e registrado na SEFAZ',
+              metadata: {
+                protocolo: resultado.protocolo,
+                codigoStatus: resultado.codigoStatus,
+                tpEvento: '110111',
+              },
+            },
+          });
+        } catch (logErr) {
+          console.warn('Falha ao gravar protocolo do cancelamento:', logErr);
         }
       }
 
@@ -1339,7 +1361,7 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         protocolo: resultado.protocolo,
         chaveAcesso,
         mensagem: resultado.mensagem || 'Cancelamento de NF-e registrado',
-        codigoStatus: resultado.codigoStatus || '135'
+        codigoStatus: resultado.codigoStatus,
       };
     } catch (error: any) {
       console.error('❌ Erro ao cancelar NF-e:', error);
@@ -1360,12 +1382,10 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
     try {
       console.log(`📝 Enviando CC-e para NF-e: ${chaveAcesso}`);
 
-      // Validações
       if (textoCorrecao.length < 15) {
         throw new Error('Texto da correção deve ter no mínimo 15 caracteres');
       }
 
-      // Buscar empresa e certificado (ainda não enviaremos para SEFAZ, mas já garantimos que a empresa está configurada)
       const empresa = await prisma.empresaFiscal.findUnique({
         where: { id: empresaId }
       });
@@ -1379,7 +1399,6 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         throw new Error('Arquivo de certificado não encontrado. Reenvie o certificado pela interface.');
       }
 
-      // Descriptografar senha do certificado
       let senhaDescriptografada: string;
       try {
         senhaDescriptografada = CryptoUtil.decrypt(empresa.certificadoSenha);
@@ -1388,24 +1407,62 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         throw new Error('Senha do certificado inválida para emissão de CC-e');
       }
 
-      // Gerar XML de CC-e (simplificado) — ainda não enviado para SEFAZ
-      const xmlCCe = this.gerarXMLCCe(chaveAcesso, textoCorrecao, sequencia);
+      const { key, cert } = NFeSignatureService.carregarCertificado(
+        pfxPathResolvido,
+        senhaDescriptografada
+      );
 
-      // Assinar XML (futuro envio para SEFAZ via serviço de eventos)
-      const xmlAssinado = await this.signXML(xmlCCe, pfxPathResolvido, senhaDescriptografada);
+      const xmlCCe = this.gerarXMLCCe(
+        chaveAcesso,
+        textoCorrecao,
+        sequencia,
+        ambiente,
+        empresa.cnpj
+      );
+      const xmlAssinado = NFeEventoService.assinarEvento(xmlCCe, key, cert);
+      const xmlEnvio = NFeEventoService.montarEnvEvento(xmlAssinado);
+      const resultado = await NFeSoapService.recepcionarEvento(xmlEnvio, ambiente, cert, key, {
+        pfxPath: pfxPathResolvido,
+        pfxPassword: senhaDescriptografada,
+      });
 
-      // MOCK: Simular envio para SEFAZ
-      const mockResposta = {
+      if (!resultado.sucesso || !resultado.protocolo || !/^\d{15,}$/.test(resultado.protocolo)) {
+        throw new Error(resultado.erro || 'Resposta da SEFAZ sem protocolo real da Carta de Correção');
+      }
+
+      const nota = await prisma.notaFiscal.findUnique({
+        where: { chaveAcesso },
+        select: { id: true },
+      });
+      if (nota) {
+        try {
+          await prisma.nfeEvento.create({
+            data: {
+              notaFiscalId: nota.id,
+              tipo: 'SUCESSO',
+              descricao: 'Carta de Correção registrada na SEFAZ',
+              metadata: {
+                protocolo: resultado.protocolo,
+                codigoStatus: resultado.codigoStatus,
+                tpEvento: '110110',
+                sequencia,
+              },
+            },
+          });
+        } catch (logErr) {
+          console.warn('Falha ao gravar protocolo da CC-e:', logErr);
+        }
+      }
+
+      console.log('✅ CC-e registrada. Protocolo:', resultado.protocolo);
+      return {
         status: 'sucesso',
-        protocolo: `110${Date.now().toString().slice(-9)}`,
+        protocolo: resultado.protocolo,
         chaveAcesso,
         sequencia,
-        mensagem: 'Carta de Correção registrada',
-        codigoStatus: '135'
+        mensagem: resultado.mensagem || 'Carta de Correção registrada',
+        codigoStatus: resultado.codigoStatus,
       };
-
-      console.log('✅ CC-e registrada (MOCK):', mockResposta);
-      return mockResposta;
     } catch (error) {
       console.error('❌ Erro ao enviar CC-e:', error);
       throw error;
@@ -1413,51 +1470,41 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
   }
 
   /**
-   * Gera XML de cancelamento (simplificado)
+   * XML do evento de cancelamento (tpEvento 110111). cOrgao sai da chave; nProt é o da autorização.
    */
-  private gerarXMLCancelamento(chaveAcesso: string, justificativa: string): string {
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<eventoCancNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
-  <infEvento Id="ID110111${chaveAcesso}01">
-    <cOrgao>42</cOrgao>
-    <tpAmb>2</tpAmb>
-    <CNPJ>79502563000138</CNPJ>
-    <chNFe>${chaveAcesso}</chNFe>
-    <dhEvento>${new Date().toISOString().replace(/\.\d{3}Z$/, '-03:00')}</dhEvento>
-    <tpEvento>110111</tpEvento>
-    <nSeqEvento>1</nSeqEvento>
-    <verEvento>1.00</verEvento>
-    <detEvento versao="1.00">
-      <descEvento>Cancelamento</descEvento>
-      <nProt>MOCK_PROTOCOLO</nProt>
-      <xJust>${justificativa}</xJust>
-    </detEvento>
-  </infEvento>
-</eventoCancNFe>`;
+  private gerarXMLCancelamento(
+    chaveAcesso: string,
+    justificativa: string,
+    ambiente: '1' | '2',
+    cnpj: string,
+    nProt: string
+  ): string {
+    return NFeEventoService.gerarXmlCancelamento({
+      chaveAcesso,
+      justificativa,
+      ambiente,
+      cnpj,
+      nProt,
+    });
   }
 
   /**
-   * Gera XML de Carta de Correção (simplificado)
+   * XML da Carta de Correção (tpEvento 110110). cOrgao sai da chave; tpAmb vem do parâmetro.
    */
-  private gerarXMLCCe(chaveAcesso: string, textoCorrecao: string, sequencia: number): string {
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<eventoCCe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
-  <infEvento Id="ID110110${chaveAcesso}${sequencia.toString().padStart(2, '0')}">
-    <cOrgao>42</cOrgao>
-    <tpAmb>2</tpAmb>
-    <CNPJ>79502563000138</CNPJ>
-    <chNFe>${chaveAcesso}</chNFe>
-    <dhEvento>${new Date().toISOString().replace(/\.\d{3}Z$/, '-03:00')}</dhEvento>
-    <tpEvento>110110</tpEvento>
-    <nSeqEvento>${sequencia}</nSeqEvento>
-    <verEvento>1.00</verEvento>
-    <detEvento versao="1.00">
-      <descEvento>Carta de Correcao</descEvento>
-      <xCorrecao>${textoCorrecao}</xCorrecao>
-      <xCondUso>A Carta de Correcao e disciplinada pelo paragrafo 1o-A do art. 7o do Convenio S/N, de 15 de dezembro de 1970 e pode ser utilizada para regularizacao de erro ocorrido na emissao de documento fiscal, desde que o erro nao esteja relacionado com: I - as variaveis que determinam o valor do imposto tais como: base de calculo, aliquota, diferenca de preco, quantidade, valor da operacao ou da prestacao; II - a correcao de dados cadastrais que implique mudanca do remetente ou do destinatario; III - a data de emissao ou de saida.</xCondUso>
-    </detEvento>
-  </infEvento>
-</eventoCCe>`;
+  private gerarXMLCCe(
+    chaveAcesso: string,
+    textoCorrecao: string,
+    sequencia: number,
+    ambiente: '1' | '2',
+    cnpj: string
+  ): string {
+    return NFeEventoService.gerarXmlCartaCorrecao({
+      chaveAcesso,
+      textoCorrecao,
+      sequencia,
+      ambiente,
+      cnpj,
+    });
   }
 
   /**
@@ -1521,6 +1568,7 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
       const resultado = await NFeSoapService.inutilizarNumeracao(
         {
           cnpj: empresa.cnpj,
+          cUF: NFeEventoService.codigoUF(empresa.estado || ''),
           ano,
           modelo,
           serie,
@@ -1530,11 +1578,15 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
           ambiente
         },
         cert,
-        key
+        key,
+        {
+          pfxPath: pfxPathResolvido,
+          pfxPassword: senhaDescriptografada,
+        }
       );
 
-      if (!resultado.sucesso) {
-        throw new Error(resultado.erro || 'Erro ao inutilizar numeração de NF-e na SEFAZ');
+      if (!resultado.sucesso || !resultado.protocolo || !/^\d{15,}$/.test(resultado.protocolo)) {
+        throw new Error(resultado.erro || 'Resposta da SEFAZ sem protocolo real da inutilização');
       }
 
       return {
@@ -1609,11 +1661,15 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
           ambiente
         },
         cert,
-        key
+        key,
+        {
+          pfxPath: pfxPathResolvido,
+          pfxPassword: senhaDescriptografada,
+        }
       );
 
-      if (!resultado.sucesso) {
-        throw new Error(resultado.erro || 'Erro na manifestação do destinatário na SEFAZ');
+      if (!resultado.sucesso || !resultado.protocolo || !/^\d{15,}$/.test(resultado.protocolo)) {
+        throw new Error(resultado.erro || 'Resposta da SEFAZ sem protocolo real da manifestação');
       }
 
       return {
@@ -1641,6 +1697,8 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
   ): Promise<any> {
     let xmlNFe: string | null = null;
     let xmlAssinado: string | null = null;
+    let notaFiscalId: string | undefined;
+    let numeroReservado: number | undefined;
 
     try {
       console.log(`\n🚀 Iniciando processo de emissão da NF-e para pedido: ${pedidoId}`);
@@ -1667,19 +1725,10 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
 
       // Criar registro inicial de NotaFiscal para garantir histórico mesmo se falhar durante o processo
       // Esse registro será atualizado ao final do processo com dados reais (número, xml, status, etc).
-      let notaFiscalId: string | undefined;
       try {
-        // Calcular próximo número sequencial para a empresa usando MAX(numero)
         const ambienteStr = (ambienteSelecionado === '1') ? 'PRODUCAO' : 'HOMOLOGACAO';
-        const raw = await prisma.$queryRawUnsafe<{ max: number }[]>(
-          // Filtrar apenas valores numéricos em "numero" para evitar CAST em valores UUID/strings inválidas
-          'SELECT MAX(CAST(numero AS INTEGER)) as max FROM notas_fiscais WHERE "empresaFiscalId" = $1 AND ambiente = $2 AND numero ~ \'^[0-9]+$\'',
-          empresa.id,
-          ambienteStr
-        );
-        const maxExisting = (raw && raw[0] && raw[0].max) ? Number(raw[0].max) : 0;
-        const ultimoConfigurado = (empresa as any).ultimoNumeroNFe ? Number((empresa as any).ultimoNumeroNFe) : 0;
-        const proximoNumero = Math.max(maxExisting, ultimoConfigurado) + 1;
+        const proximoNumero = await this.proximoNumeroNFe(empresa.id, ambienteStr, empresa.ultimoNumeroNFe);
+        numeroReservado = proximoNumero;
 
         // Criar registro inicial reservando o número sequencial (usar upsert para evitar duplicidade)
         try {
@@ -1764,21 +1813,20 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
       const cfopFinal = cfop || '5101'; // CFOP padrão se não fornecido
       const naturezaFinal = naturezaOperacao || 'Venda de Mercadoria'; // Natureza padrão
       const serieFinal = serie || '1'; // Série padrão
+      const ambiente: '1' | '2' =
+        ambienteSelecionado === '1' || ambienteSelecionado === '2'
+          ? ambienteSelecionado
+          : '2';
       
       const dadosPedido = await this.buscarDadosVendaParaNFe(
         pedidoId,
         empresaId,
         cfopFinal,
         naturezaFinal,
-        serieFinal
+        serieFinal,
+        { numeroReservado, ambiente }
       );
       
-      // Definir ambiente: prioriza seleção do frontend; se não vier, usa sempre homologação ('2')
-      const ambiente: '1' | '2' =
-        ambienteSelecionado === '1' || ambienteSelecionado === '2'
-          ? ambienteSelecionado
-          : '2';
-
       dadosPedido.ambiente = ambiente;
       console.log('🌎 [NFE Ambiente] tpAmb definido para emissão:', ambiente, ambiente === '1' ? '(Produção)' : '(Homologação)');
 
@@ -2007,24 +2055,22 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
         console.warn('⚠️ Falha de comunicação com SEFAZ detectada. Entrando em contingência (fila de envio).');
 
         try {
-          // Criar NotaFiscal em modo contingência offline (sem autorização)
-          let notaFiscalId: string | undefined;
-
           try {
+            if (notaFiscalId) {
+            await prisma.notaFiscal.update({
+              where: { id: notaFiscalId },
+              data: {
+                status: 'ContingenciaOffline',
+                chaveAcesso: this.extrairChaveAcesso(xmlAssinado) || null,
+                xmlNFe: xmlAssinado,
+                observacoes: `NF-e emitida em contingência offline. Erro na SEFAZ: ${msg}`,
+                updatedAt: new Date()
+              }
+            });
+          } else {
             const ambienteStr = (ambienteSelecionado === '1') ? 'PRODUCAO' : 'HOMOLOGACAO';
-            // obter MAX(numero)
-            const raw = await prisma.$queryRawUnsafe<{ max: number }[]>(
-              // Filtrar apenas valores numéricos em "numero" para evitar CAST em valores UUID/strings inválidas
-              'SELECT MAX(CAST(numero AS INTEGER)) as max FROM notas_fiscais WHERE "empresaFiscalId" = $1 AND ambiente = $2 AND numero ~ \'^[0-9]+$\'',
-              empresaId,
-              ambienteStr
-            );
-            const maxExisting = (raw && raw[0] && raw[0].max) ? Number(raw[0].max) : 0;
-            const empresaRow = await prisma.empresaFiscal.findUnique({ where: { id: empresaId } });
-            const ultimoConfigurado = empresaRow?.ultimoNumeroNFe ? Number(empresaRow.ultimoNumeroNFe) : 0;
-            const proximoNumero = Math.max(maxExisting, ultimoConfigurado) + 1;
-
-            // upsert para criar ou atualizar se já existir
+            const proximoNumero = await this.proximoNumeroNFe(empresaId, ambienteStr);
+            numeroReservado = proximoNumero;
             const nota = await prisma.notaFiscal.upsert({
               where: {
                 empresaFiscalId_numero: {
@@ -2058,9 +2104,10 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
               }
             });
             notaFiscalId = nota.id;
-          } catch (dbError: any) {
-            console.warn('⚠️ Não foi possível salvar NotaFiscal em contingência:', dbError.message);
           }
+        } catch (dbError: any) {
+          console.warn('⚠️ Não foi possível salvar NotaFiscal em contingência:', dbError.message);
+        }
 
           // Enfileirar para reenvio posterior
           await NFeFilaService.enfileirar({
@@ -2190,15 +2237,7 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
     }
 
     for (const frac of fracoesValidas) {
-
-      const raw = await prisma.$queryRawUnsafe<{ max: number }[]>(
-        'SELECT MAX(CAST(numero AS INTEGER)) as max FROM notas_fiscais WHERE "empresaFiscalId" = $1 AND ambiente = $2 AND numero ~ \'^[0-9]+$\'',
-        empresaId,
-        ambienteStr
-      );
-      const maxExisting = (raw?.[0]?.max) ? Number(raw[0].max) : 0;
-      const ultimoConfig = (empresa as any).ultimoNumeroNFe ? Number((empresa as any).ultimoNumeroNFe) : 0;
-      const proximoNumero = Math.max(maxExisting, ultimoConfig) + 1;
+      const proximoNumero = await this.proximoNumeroNFe(empresaId, ambienteStr, empresa.ultimoNumeroNFe);
 
       const dadosPedido = await this.buscarDadosVendaParaNFeComFracao(vendaId, empresaId, {
         clienteId: frac.clienteId,
@@ -2327,20 +2366,19 @@ ${dados.informacoesAdicionais ? `      <infCpl>${normalizarParaNFe(dados.informa
     const cfopFinal = cfop || '5101'; // CFOP padrão se não fornecido
     const naturezaFinal = naturezaOperacao || 'Venda de Mercadoria'; // Natureza padrão
     const serieFinal = serie || '1'; // Série padrão
+    const ambiente: '1' | '2' =
+      ambienteSelecionado === '1' || ambienteSelecionado === '2'
+        ? ambienteSelecionado
+        : '2';
     
     const dadosPedido = await this.buscarDadosVendaParaNFe(
       pedidoId,
       empresaId,
       cfopFinal,
       naturezaFinal,
-      serieFinal
+      serieFinal,
+      { ambiente }
     );
-
-    // 3. Definir ambiente (mesma regra da emissão)
-    const ambiente: '1' | '2' =
-      ambienteSelecionado === '1' || ambienteSelecionado === '2'
-        ? ambienteSelecionado
-        : '2';
 
     dadosPedido.ambiente = ambiente;
 
