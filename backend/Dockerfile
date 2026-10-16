@@ -16,6 +16,7 @@ RUN apk add --no-cache \
     openssl \
     ca-certificates \
     wget \
+    postgresql16-client \
     && update-ca-certificates \
     && rm -rf /var/cache/apk/*
 
