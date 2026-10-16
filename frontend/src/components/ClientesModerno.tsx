@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useContext, useRef } from 'react';
 import { toast } from 'sonner';
 import { clientesService, type Cliente } from '../services/clientesService';
+import { useClientesLista, useInvalidateClientesLista } from '../hooks/useClientesQuery';
 import { AuthContext } from '../contexts/AuthContext';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
@@ -24,6 +25,7 @@ import {
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import ClienteCreateEditModal from './ui/ClienteCreateEditModal';
+import { ClientesListaTable } from './ClientesListaTable';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -141,9 +143,14 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
         return String(val);
     };
     
-    const [clientes, setClientes] = useState<Cliente[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const {
+        data: clientesQueryData,
+        isLoading: loading,
+        error: clientesQueryError,
+    } = useClientesLista();
+    const invalidateClientesLista = useInvalidateClientesLista();
+    const clientes = Array.isArray(clientesQueryData) ? clientesQueryData : [];
+    const error = clientesQueryError instanceof Error ? clientesQueryError.message : null;
     const [searchTerm, setSearchTerm] = useState('');
     const [tipoFilter, setTipoFilter] = useState<'Todos' | 'PF' | 'PJ'>('Todos');
     const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'Ativo' | 'Inativo'>('Todos');
@@ -154,7 +161,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
     const [clienteToView, setClienteToView] = useState<Cliente | null>(null);
     const [viewCnpjData, setViewCnpjData] = useState<any | null>(null);
     const [viewCnpjLoading, setViewCnpjLoading] = useState(false);
-    /** Timestamps das buscas CNPJ.ws no modal de visualização (último minuto, máx. 3) */
+    /** Timestamps das buscas ReceitaWS no modal de visualização (último minuto, máx. 3) */
     const [cnpjViewRequestsAt, setCnpjViewRequestsAt] = useState<number[]>([]);
     const [clienteToDelete, setClienteToDelete] = useState<Cliente | null>(null);
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -167,10 +174,6 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // O formulário de criação/edição foi extraído para um componente reutilizável
-
-    useEffect(() => {
-        loadClientes();
-    }, []);
 
     // Abrir modal "Ver dados do cliente" quando vier pelo link rápido (ordem de serviço)
     useEffect(() => {
@@ -195,28 +198,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
     }, [initialClientId, onClearInitialClientId]);
 
     const loadClientes = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            console.log('👥 Iniciando carregamento de clientes...');
-            
-            const response = await clientesService.listar();
-            
-            if (response.success && response.data) {
-                setClientes(response.data);
-                console.log(`✅ ${response.data.length} clientes carregados com sucesso`);
-            } else {
-                const errorMsg = response.error || 'Erro ao carregar clientes';
-                setError(errorMsg);
-                console.warn('⚠️ Erro ao carregar clientes:', errorMsg);
-            }
-        } catch (err) {
-            const errorMsg = 'Erro de conexão ao carregar clientes';
-            setError(errorMsg);
-            console.error('❌ Erro crítico:', err);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateClientesLista();
     };
 
     const handleViewModeChange = (newView: 'grid' | 'list') => {
@@ -247,7 +229,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
         setIsModalOpen(true);
     };
 
-    // Abrir modal de visualização — exibe dados do banco (incl. JSON CNPJ.ws salvo); API só ao clicar em "Atualizar Dados/IE"
+    // Abrir modal de visualização — exibe dados do banco (incl. JSON da ReceitaWS salvo); API só ao clicar em "Atualizar Dados/IE"
     const openViewModal = (cliente: Cliente | null) => {
         if (!cliente) {
             setClienteToView(null);
@@ -306,6 +288,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                     indIEDest?: number;
                 };
                 const rawFromApi = (result.data as { raw?: unknown }).raw ?? result.data;
+                const ieApi = String(d.inscricaoEstadual || '').trim();
                 const updatePayload = {
                     ...clienteToView,
                     nome: (d.razaoSocial ?? d.nomeFantasia ?? clienteToView.nome).trim() || clienteToView.nome,
@@ -317,8 +300,8 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                     cidade: d.cidade ?? clienteToView.cidade,
                     estado: d.estado ?? clienteToView.estado,
                     cep: d.cep ?? clienteToView.cep,
-                    inscricaoEstadual: d.inscricaoEstadual ?? clienteToView.inscricaoEstadual,
-                    indIEDest: d.indIEDest ?? clienteToView.indIEDest,
+                    inscricaoEstadual: ieApi || clienteToView.inscricaoEstadual,
+                    indIEDest: ieApi ? (d.indIEDest ?? clienteToView.indIEDest) : clienteToView.indIEDest,
                     dadosCnpjWs: rawFromApi,
                 };
                 const upd = await clientesService.atualizar(clienteToView.id, updatePayload);
@@ -863,92 +846,17 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                     ))}
                 </div>
             ) : (
-                /* Visualização em Lista (Tabela) */
-                <div className="card-primary overflow-hidden">
-                    <table className="w-full">
-                        <thead className="bg-gray-50 dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">
-                            <tr>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Cliente</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">CPF/CNPJ</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Tipo</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Contato</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Cidade</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Status</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-dark-text-secondary uppercase">Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
-                            {filteredClientes.map((cliente) => (
-                                <tr key={cliente.id} className={`hover:bg-gray-50 dark:hover:bg-dark-card transition-colors ${!cliente.ativo ? 'opacity-60' : ''}`}>
-                                    <td className="px-6 py-4">
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{cliente.nome}</p>
-                                        {cliente.email && <p className="text-xs text-gray-500 dark:text-dark-text-secondary">{cliente.email}</p>}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-dark-text-secondary rounded font-mono">
-                                            {cliente.cpfCnpj}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className={cliente.tipo === 'PF' ? 'badge-type bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'badge-type'}>
-                                            {cliente.tipo === 'PF' ? '👤 PF' : '🏢 PJ'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="text-sm text-gray-700 dark:text-dark-text-secondary">{cliente.telefone || '-'}</p>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="text-sm text-gray-700 dark:text-dark-text-secondary">{cliente.cidade || '-'}</p>
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <span className={cliente.ativo ? 'badge-status-active' : 'badge-status-inactive'}>
-                                            {cliente.ativo ? '✅ Ativo' : '❌ Inativo'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <ScrollableRow className="gap-2 justify-center">
-                                            <button
-                                                onClick={() => openViewModal(cliente)}
-                                                className={`${scrollableNavItemClasses} btn-action-edit p-2 rounded-lg`}
-                                                title="Visualizar"
-                                            >
-                                                <EyeIcon className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleOpenModal(cliente)}
-                                                className={`${scrollableNavItemClasses} p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors`}
-                                                title="Editar"
-                                            >
-                                                <PencilIcon className="w-4 h-4" />
-                                            </button>
-                                            {cliente.ativo ? (
-                                            <button
-                                                onClick={() => {
-                                                    setClienteToDelete(cliente);
-                                                    setDeletePermanent(false);
-                                                    setShowDeleteDialog(true);
-                                                }}
-                                                className={`${scrollableNavItemClasses} btn-action-delete p-2 rounded-lg`}
-                                                title="Desativar"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => handleReativar(cliente)}
-                                                    className={`${scrollableNavItemClasses} p-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors`}
-                                                    title="Reativar"
-                                                >
-                                                    <ArrowPathIcon className="w-4 h-4" />
-                                                </button>
-                                            )}
-                                        </ScrollableRow>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                <ClientesListaTable
+                    data={filteredClientes}
+                    onView={openViewModal}
+                    onEdit={handleOpenModal}
+                    onDesativar={(cliente) => {
+                        setClienteToDelete(cliente);
+                        setDeletePermanent(false);
+                        setShowDeleteDialog(true);
+                    }}
+                    onReativar={handleReativar}
+                />
             )}
 
             <ClienteCreateEditModal
@@ -967,6 +875,19 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                 const inLastMinute = cnpjViewRequestsAt.filter((t) => Date.now() - t < CNPJ_VIEW_WINDOW_MS);
                 const limitReached = inLastMinute.length >= CNPJ_VIEW_LIMIT;
                 const canFetchCnpj = isPjWithCnpj && !viewCnpjLoading && !limitReached;
+                const codigoMunicipioIbge = String(
+                    viewCnpjData?.codigoMunicipioIbge
+                    || viewCnpjData?.estabelecimento?.cidade?.ibge_id
+                    || ''
+                ).replace(/\D/g, '');
+                const codigoUfIbge = String(
+                    viewCnpjData?.codigoUfIbge
+                    || (codigoMunicipioIbge.length === 7 ? codigoMunicipioIbge.slice(0, 2) : '')
+                ).replace(/\D/g, '');
+                const inscricoesEstaduais = Array.isArray(viewCnpjData?.estabelecimento?.inscricoes_estaduais)
+                    ? viewCnpjData.estabelecimento.inscricoes_estaduais
+                    : [];
+                const ieCadastro = String(viewCnpjData?.inscricaoEstadual || clienteToView.inscricaoEstadual || '').trim();
                 return (
                 <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses} animate-fade-in`}>
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-slide-in-up">
@@ -990,7 +911,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         {viewCnpjData?.estabelecimento?.tipo ? ` · ${viewCnpjData.estabelecimento.tipo}` : ''}
                                         {viewCnpjData?.estabelecimento?.situacao_cadastral ? (
                                             <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/20">
-                                                {viewCnpjData.estabelecimento.situacao_cadastral === 'Ativa' ? (
+                                                {String(viewCnpjData.estabelecimento.situacao_cadastral).toUpperCase() === 'ATIVA' ? (
                                                     <><span className="w-1 h-1 rounded-full bg-green-300" /> Ativa</>
                                                 ) : viewCnpjData.estabelecimento.situacao_cadastral}
                                             </span>
@@ -1005,7 +926,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         onClick={handleAtualizarDadosView}
                                         disabled={!canFetchCnpj}
                                         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-white/20 text-white hover:bg-white/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                        title={limitReached ? 'Limite de 3 buscas por minuto. Aguarde 1 minuto.' : 'Buscar dados e IE na CNPJ.ws'}
+                                        title={limitReached ? 'Limite de 3 buscas por minuto. Aguarde 1 minuto.' : 'Buscar dados na ReceitaWS e código IBGE pelo CEP'}
                                     >
                                         <ArrowPathIcon className={`w-4 h-4 ${viewCnpjLoading ? 'animate-spin' : ''}`} />
                                         <span className="hidden sm:inline">Atualizar Dados/IE</span>
@@ -1054,6 +975,8 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                     { label: 'País', value: viewCnpjData?.estabelecimento?.pais ?? 'Brasil' },
                                                     { label: 'Estado', value: viewCnpjData?.estabelecimento?.estado ?? clienteToView.estado },
                                                     { label: 'Cidade', value: viewCnpjData?.estabelecimento?.cidade ?? clienteToView.cidade },
+                                                    { label: 'Código do município (IBGE)', value: codigoMunicipioIbge || null },
+                                                    { label: 'Código da UF (IBGE)', value: codigoUfIbge || null },
                                                     { label: 'CEP', value: viewCnpjData?.estabelecimento?.cep ?? clienteToView.cep },
                                                     { label: 'Bairro', value: viewCnpjData?.estabelecimento?.bairro ?? clienteToView.bairro },
                                                     { label: 'Logradouro', value: viewCnpjData?.estabelecimento ? [viewCnpjData.estabelecimento.tipo_logradouro, viewCnpjData.estabelecimento.logradouro, viewCnpjData.estabelecimento.numero].filter(Boolean).join(', ') : [clienteToView.endereco, clienteToView.numero].filter(Boolean).join(', ') },
@@ -1184,8 +1107,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                             </div>
                                         </section>
                                     )}
-                                    {/* Inscrição Estadual - só quando veio da API */}
-                                    {viewCnpjData?.estabelecimento && Array.isArray(viewCnpjData.estabelecimento.inscricoes_estaduais) && viewCnpjData.estabelecimento.inscricoes_estaduais.length > 0 && (
+                                    {isPjWithCnpj && (
                                         <section>
                                             <div className="flex items-center gap-2 mb-3">
                                                 <ClipboardDocumentListIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -1201,13 +1123,19 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-200 dark:divide-dark-border">
-                                                        {viewCnpjData.estabelecimento.inscricoes_estaduais.map((ie: any, i: number) => (
+                                                        {inscricoesEstaduais.length > 0 ? inscricoesEstaduais.map((ie: any, i: number) => (
                                                             <tr key={i}>
-                                                                <td className="py-2 px-3 text-gray-900 dark:text-white">{ie.estado?.sigla || '—'}</td>
+                                                                <td className="py-2 px-3 text-gray-900 dark:text-white">{ie.estado?.sigla || clienteToView.estado || '—'}</td>
                                                                 <td className="py-2 px-3 text-gray-900 dark:text-white">{ie.inscricao_estadual || '—'}</td>
                                                                 <td className="py-2 px-3">{ie.ativo ? <span className="text-green-600 dark:text-green-400 font-medium">Ativo</span> : <span className="text-gray-500">Inativo</span>}</td>
                                                             </tr>
-                                                        ))}
+                                                        )) : (
+                                                            <tr>
+                                                                <td className="py-2 px-3 text-gray-900 dark:text-white">{clienteToView.estado || '—'}</td>
+                                                                <td className="py-2 px-3 text-gray-900 dark:text-white">{ieCadastro || '—'}</td>
+                                                                <td className="py-2 px-3 text-gray-500">{ieCadastro ? 'Cadastro' : 'Não informada'}</td>
+                                                            </tr>
+                                                        )}
                                                     </tbody>
                                                 </table>
                                             </div>
