@@ -79,6 +79,13 @@ export interface EntregaQuadroMetadados {
   recebedorNome?: string;
   recebidoNoLocal?: boolean;
   localRecebimento?: string;
+  produto?: string;
+  volume?: string;
+  dataRomaneio?: string;
+  responsavelEntregaId?: string;
+  responsavelEntregaNome?: string;
+  recebidoEm?: string;
+  entregue?: boolean;
 }
 
 export interface ChecklistEntregaQuadroResultado {
@@ -88,10 +95,6 @@ export interface ChecklistEntregaQuadroResultado {
 
 function temTexto(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
-}
-
-function temMedia(v: unknown): boolean {
-  return temTexto(v) && String(v).trim().length > 20;
 }
 
 export function labelTipoOs(tipo?: string | null): string {
@@ -123,13 +126,26 @@ export function extrairEntregaQuadro(metadados: unknown): EntregaQuadroMetadados
     'materiaisConferidos' in obj ||
     'romaneio' in obj ||
     'clienteNome' in obj ||
+    'recebedorNome' in obj ||
     'dataEntrega' in obj ||
     'assinaturaCliente' in obj ||
-    'entregadorNome' in obj
+    'entregadorNome' in obj ||
+    'produto' in obj ||
+    'volume' in obj ||
+    'dataRomaneio' in obj ||
+    'responsavelEntregaId' in obj ||
+    'recebidoEm' in obj ||
+    'entregue' in obj
   ) {
     return obj as EntregaQuadroMetadados;
   }
   return null;
+}
+
+export function entregaEstaEntregue(
+  entrega: EntregaQuadroMetadados | null | undefined,
+): boolean {
+  return temTexto(entrega?.recebedorNome) && temTexto(entrega?.recebidoEm);
 }
 
 export function entregaQuadroVazia(): EntregaQuadroMetadados {
@@ -157,55 +173,18 @@ export function entregaQuadroVazia(): EntregaQuadroMetadados {
   };
 }
 
+/** Foto, assinatura e materiais não bloqueiam mais a conclusão da OS. */
 export function avaliarChecklistEntregaQuadro(
-  entrega: EntregaQuadroMetadados | null | undefined,
+  _entrega: EntregaQuadroMetadados | null | undefined,
 ): ChecklistEntregaQuadroResultado {
-  const pendencias: string[] = [];
-  if (!entrega) {
-    return {
-      ok: false,
-      pendencias: [
-        'Preencha o checklist de entrega do quadro (foto, materiais, romaneio e recebimento do cliente).',
-      ],
-    };
-  }
-
-  if (!temMedia(entrega.fotoProduto)) {
-    pendencias.push('Foto do produto (montado / a entregar)');
-  }
-  if (entrega.materiaisConferidos !== true) {
-    pendencias.push('Conferência de materiais (marcar como conferidos)');
-  }
-  if (!temTexto(entrega.romaneio?.geradoEm)) {
-    pendencias.push('Romaneio gerado/impresso');
-  }
-  if (!temTexto(entrega.clienteNome) && !temTexto(entrega.recebedorNome)) {
-    pendencias.push('Nome de quem recebeu (cliente)');
-  }
-  if (!temTexto(entrega.clienteTelefone)) {
-    pendencias.push('Telefone do cliente');
-  }
-  if (!temTexto(entrega.dataEntrega)) {
-    pendencias.push('Data da entrega');
-  }
-  if (!temTexto(entrega.assinaturaCliente)) {
-    pendencias.push('Assinatura do cliente');
-  }
-  if (!temMedia(entrega.fotoProdutoEntregue)) {
-    pendencias.push('Foto do produto entregue');
-  }
-
-  return { ok: pendencias.length === 0, pendencias };
+  return { ok: true, pendencias: [] };
 }
 
 export function podeConcluirOsQuadros(
-  tipoOs: string | null | undefined,
-  entrega: EntregaQuadroMetadados | null | undefined,
+  _tipoOs: string | null | undefined,
+  _entrega: EntregaQuadroMetadados | null | undefined,
 ): ChecklistEntregaQuadroResultado {
-  if (!isOsTipoQuadrosPainels(tipoOs)) {
-    return { ok: true, pendencias: [] };
-  }
-  return avaliarChecklistEntregaQuadro(entrega);
+  return { ok: true, pendencias: [] };
 }
 
 export function validarEntregaQuadroForm(entrega: EntregaQuadroMetadados): string | null {
@@ -214,8 +193,12 @@ export function validarEntregaQuadroForm(entrega: EntregaQuadroMetadados): strin
   return `Checklist incompleto: ${r.pendencias.join('; ')}`;
 }
 
-export function exigeFormularioEntregaQuadro(tipoOs?: string | null, tituloTask?: string): boolean {
-  return isOsTipoQuadrosPainels(tipoOs) && isTaskEntregaWorkflow(tituloTask || '');
+/** O romaneio saiu da tarefa Entrega e ficou na aba Dados gerais. */
+export function exigeFormularioEntregaQuadro(
+  _tipoOs?: string | null,
+  _tituloTask?: string,
+): boolean {
+  return false;
 }
 
 export function marcarRomaneioGerado(entrega: EntregaQuadroMetadados): EntregaQuadroMetadados {
