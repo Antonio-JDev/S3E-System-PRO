@@ -7,6 +7,13 @@ import {
   entrarNaFilaSeAplicavel,
 } from './vistoriaCelesc.service';
 import { validarConclusaoOsQuadros } from './osEntregaQuadro.service';
+import {
+  dadosTasksWorkflow,
+  prazoTaskWorkflow,
+  titulosWorkflowConhecidos,
+} from '../utils/osWorkflowTasks.util';
+
+export { prazoTaskWorkflow };
 
 export type OsWorkflowTipo =
   | 'PROJETOS_ELETRICOS'
@@ -156,54 +163,52 @@ function scaffoldWorkflowTasks(
   projetoId: string,
   tipo: string,
   criadoPorId?: string | null,
+  dataInicio?: Date | null,
 ) {
   if (!isOsWorkflowTipo(tipo)) return Promise.resolve();
   return tx.task.createMany({
-    data: OS_WORKFLOW_TEMPLATES[tipo].map((titulo, ordem) => ({
+    data: dadosTasksWorkflow({
       projetoId,
-      titulo,
-      status: 'ToDo',
-      prioridade: 'Media',
-      ordem,
-      criadoPorId: criadoPorId ?? null,
-    })),
+      titulos: OS_WORKFLOW_TEMPLATES[tipo],
+      criadoPorId,
+      dataInicio,
+    }),
   });
 }
 
-/** Cria no Kanban apenas as tasks do template que ainda não existem (preserva progresso). */
+/**
+ * Troca o checklist do Kanban ao mudar o tipo da OS.
+ * Remove as tarefas dos templates conhecidos (de qualquer tipo anterior) e cria as do tipo novo,
+ * com prazo a cada 5 dias a partir da data de início da OS.
+ * Tarefas com título fora dos checklists automáticos permanecem.
+ */
 export async function sincronizarWorkflowTasks(
   projetoId: string,
   tipo: string,
   criadoPorId?: string | null,
-): Promise<{ criadas: number }> {
-  if (!isOsWorkflowTipo(tipo)) return { criadas: 0 };
-
-  const template = OS_WORKFLOW_TEMPLATES[tipo];
-  const existentes = await prisma.task.findMany({
-    where: { projetoId },
-    select: { titulo: true },
-  });
-  const titulosExistentes = new Set(
-    existentes.map((t) => t.titulo.trim().toLowerCase()),
-  );
-
-  const faltantes = template.filter(
-    (titulo) => !titulosExistentes.has(titulo.trim().toLowerCase()),
-  );
-  if (faltantes.length === 0) return { criadas: 0 };
-
-  await prisma.task.createMany({
-    data: faltantes.map((titulo) => ({
-      projetoId,
-      titulo,
-      status: 'ToDo',
-      prioridade: 'Media',
-      ordem: template.indexOf(titulo),
-      criadoPorId: criadoPorId ?? null,
-    })),
+): Promise<{ criadas: number; removidas: number }> {
+  const removidas = await prisma.task.deleteMany({
+    where: { projetoId, titulo: { in: titulosWorkflowConhecidos(OS_WORKFLOW_TEMPLATES) } },
   });
 
-  return { criadas: faltantes.length };
+  if (!isOsWorkflowTipo(tipo)) {
+    return { criadas: 0, removidas: removidas.count };
+  }
+
+  const projeto = await prisma.projeto.findUnique({
+    where: { id: projetoId },
+    select: { dataInicio: true },
+  });
+
+  const data = dadosTasksWorkflow({
+    projetoId,
+    titulos: OS_WORKFLOW_TEMPLATES[tipo],
+    criadoPorId,
+    dataInicio: projeto?.dataInicio,
+  });
+  await prisma.task.createMany({ data });
+
+  return { criadas: data.length, removidas: removidas.count };
 }
 
 /**
@@ -316,7 +321,7 @@ export class ProjetosService {
         },
       });
 
-      await scaffoldWorkflowTasks(tx, projeto.id, tipo, data.criadoPorId);
+      await scaffoldWorkflowTasks(tx, projeto.id, tipo, data.criadoPorId, projeto.dataInicio);
       return projeto;
     }).then(async (projeto) => {
       // Se a venda já existe, reserva kit e material de obra sem dar baixa.
