@@ -220,14 +220,8 @@ export class DynamicPDFService {
                     <strong>Data:</strong> ${orcamentoData.data} | <strong>Validade:</strong> ${orcamentoData.validade}
                 </div>
                 
-                <!-- Descrição Resumida (sempre na primeira página) -->
-                ${orcamentoData.projeto.descricao ? `
-                    <div class="description-summary">
-                        <h2>Descrição do Projeto</h2>
-                        <p>${orcamentoData.projeto.descricao}</p>
-                    </div>
-                ` : ''}
-                
+                <!-- Descrição Resumida (projeto.descricao) é uso interno — não entra no PDF. -->
+
                 <!-- Dados do Cliente -->
                 <h2>Cliente</h2>
                 <p><strong>${orcamentoData.cliente.nome}</strong></p>
