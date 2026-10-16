@@ -198,23 +198,21 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
 
     const orcamentos = await prisma.orcamento.findMany({
       where,
-      include: {
-        cliente: {
-          select: { id: true, nome: true, cpfCnpj: true, telefone: true }
-        },
-        empresaFiscal: {
-          select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true }
-        },
-        aprovadoPor: {
-          select: { id: true, name: true }
-        },
-        items: {
-          include: {
-            material: { select: { id: true, nome: true, sku: true, valorVenda: true, preco: true, ncm: true } },
-            kit: { select: { id: true, nome: true } },
-            cotacao: { select: { id: true, nome: true, ncm: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ NOVO: Incluir NCM
-          }
-        },
+      select: {
+        id: true,
+        clienteId: true,
+        numeroSequencial: true,
+        titulo: true,
+        status: true,
+        precoVenda: true,
+        createdAt: true,
+        updatedAt: true,
+        validade: true,
+        aprovedAt: true,
+        previsaoInicio: true,
+        previsaoTermino: true,
+        cliente: { select: { id: true, nome: true, telefone: true } },
+        aprovadoPor: { select: { id: true, name: true } },
         venda: {
           select: {
             id: true,
@@ -223,14 +221,42 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
             createdAt: true,
             dataVenda: true
           }
-        }
+        },
+        _count: { select: { items: true } }
       },
-      orderBy: { createdAt: 'desc' } // Ordenar por data de criação (mais recente primeiro)
+      orderBy: { createdAt: 'desc' }
     });
+
+    const ids = orcamentos.map((o) => o.id);
+    const vendaDiretaPorOrcamento = ids.length
+      ? await prisma.orcamentoItem.groupBy({
+          by: ['orcamentoId'],
+          where: { orcamentoId: { in: ids }, vendaDiretaFornecedor: true },
+          _sum: { subtotal: true }
+        })
+      : [];
+    const vendaDiretaMap = new Map(
+      vendaDiretaPorOrcamento.map((row) => [row.orcamentoId, row._sum.subtotal || 0])
+    );
 
     res.json(
       orcamentos.map((o) => ({
-        ...o,
+        id: o.id,
+        clienteId: o.clienteId,
+        numeroSequencial: o.numeroSequencial,
+        titulo: o.titulo,
+        status: o.status,
+        precoVenda: o.precoVenda,
+        createdAt: o.createdAt,
+        updatedAt: o.updatedAt,
+        validade: o.validade,
+        aprovedAt: o.aprovedAt,
+        previsaoInicio: o.previsaoInicio,
+        previsaoTermino: o.previsaoTermino,
+        cliente: o.cliente,
+        venda: o.venda,
+        itemsCount: o._count.items,
+        valorVendaDireta: vendaDiretaMap.get(o.id) || 0,
         aprovadoPor: o.aprovadoPor
           ? { id: o.aprovadoPor.id, nome: o.aprovadoPor.name }
           : null,
