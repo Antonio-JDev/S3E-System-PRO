@@ -1,9 +1,7 @@
 /**
- * Serviço de geração de XML NFS-e Pública Informática v7.4 (Nota Nacional)
- * Prefeitura de Itajaí/SC - Padrão Pública
- *
- * Regras: valores com ponto decimal; ItemListaServico no formato 000000 (ex: 14.01.01 -> 140101);
- * omitir tags nulas; sem espaços/zeros não significativos.
+ * XML NFS-e Pública Informática v7.4 — não é o canal ativo.
+ * Emissão nova de Itajaí usa nfse-nacional-xml.service.ts (DPS, leiaute v1.01).
+ * Este arquivo permanece para leitura de notas antigas e dos tipos da tela (RPS/tomador).
  */
 
 const NS = 'http://www.publica.inf.br';
