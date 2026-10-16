@@ -98,7 +98,7 @@ export interface NfseListItem {
 
 class NfseService {
   async enviarLote(data: EnviarLoteNfseRequest) {
-    return axiosApiService.post<{ protocolo: string; nfseId: string }>('/api/nfse/enviar-lote', data);
+    return axiosApiService.post<{ protocolo: string; chaveAcesso?: string; numeroNfse?: string; nfseId: string }>('/api/nfse/enviar-lote', data);
   }
 
   async consultarProtocolo(data: ConsultarProtocoloNfseRequest) {
@@ -116,7 +116,7 @@ class NfseService {
     return axiosApiService.get<NfseListItem[]>('/api/nfse', params);
   }
 
-  /** Atualiza último RPS enviado e/ou série RPS da empresa (sincronização com site da prefeitura). */
+  /** Atualiza o último número de DPS e a série numérica da empresa. */
   async configurarNumeracaoRps(empresaId: string, dados: { ultimoRpsEnviado?: number; serieRps?: string }) {
     return axiosApiService.patch<{ message?: string }>('/api/nfse/configurar-numeracao', { empresaId, ...dados });
   }
