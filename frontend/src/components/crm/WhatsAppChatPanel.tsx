@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { toast } from 'sonner';
 import {
   Archive,
@@ -78,7 +79,7 @@ import {
   postWhatsappUnlinkCliente,
   postWhatsappSendOrcamentoPdf,
   whatsappCdnImageProxyUrl,
-  whatsappProfilePictureImageUrl,
+  loadWhatsappProfilePictureObjectUrl,
   putWhatsappOrcamentoStatusMode,
   checkWhatsappProviderPhoneExists,
   whatsappProviderMediaProxyUrl,
@@ -944,6 +945,12 @@ function parseLocationFromMessageContent(content: string): ParsedLocationPayload
   return null;
 }
 
+function snippetListPreview(text: string | null | undefined): string {
+  const t = (text || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= 120) return t;
+  return `${t.slice(0, 119)}…`;
+}
+
 function avatarLetter(label: string): string {
   const t = label.replace(/\D/g, '');
   if (t.length >= 2) return t.slice(-2);
@@ -954,6 +961,7 @@ function avatarLetter(label: string): string {
 const ContactAvatar = memo(function ContactAvatar({
   chatId,
   imageUrl,
+  hasProfilePicture = false,
   label,
   size,
   eagerLoadProfilePicture = false,
@@ -963,54 +971,77 @@ const ContactAvatar = memo(function ContactAvatar({
 }: {
   chatId?: string;
   imageUrl?: string | null;
+  hasProfilePicture?: boolean;
   label: string;
   size: 'list' | 'header';
   /** Tenta o proxy `/profile-picture/image` mesmo sem URL cacheada (ex.: agenda aberta). */
   eagerLoadProfilePicture?: boolean;
-  /** Cache-bust (ex.: contactMetaUpdatedAt ou hash da URL). */
+  /** Cache-bust (ex.: contactMetaUpdatedAt). */
   pictureVersion?: string | number | null;
   /** Pede revalidação no backend (`refresh=1`). */
   refreshPicture?: boolean;
   children?: React.ReactNode;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [imgErr, setImgErr] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const observe = size === 'list';
+  const [visible, setVisible] = useState(!observe);
   const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-[49px] w-[49px] text-[15px]';
-  const hasPictureHint = Boolean((imageUrl || '').trim()) || eagerLoadProfilePicture;
-  const versionKey =
-    pictureVersion ??
-    ((imageUrl || '').trim()
-      ? String((imageUrl || '').trim().length) + ':' + (imageUrl || '').trim().slice(-24)
-      : null);
-  const avatarSrc =
-    chatId && !isWhatsappProfilePictureMissing(chatId)
-      ? whatsappProfilePictureImageUrl(chatId, hasPictureHint, versionKey, {
-          refresh: refreshPicture,
-        })
-      : chatId
-        ? undefined
-        : whatsappCdnImageProxyUrl(imageUrl);
+  const hasPictureHint = Boolean(hasProfilePicture) || Boolean((imageUrl || '').trim()) || eagerLoadProfilePicture;
+  const versionKey = pictureVersion ?? (hasPictureHint ? '1' : null);
+
+  useEffect(() => {
+    if (!observe) {
+      setVisible(true);
+      return;
+    }
+    const el = rootRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setVisible(true);
+      },
+      { rootMargin: '160px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [observe, chatId]);
 
   useEffect(() => {
     setImgErr(false);
-  }, [chatId, imageUrl, eagerLoadProfilePicture, versionKey, refreshPicture]);
+    setBlobUrl(null);
+  }, [chatId, versionKey, refreshPicture]);
 
-  const showImg = Boolean(avatarSrc && !imgErr);
+  useEffect(() => {
+    if (!visible || !chatId || !hasPictureHint || isWhatsappProfilePictureMissing(chatId)) return;
+    let cancel = false;
+    loadWhatsappProfilePictureObjectUrl(chatId, versionKey, refreshPicture)
+      .then((url) => {
+        if (cancel) return;
+        if (!url) {
+          markWhatsappProfilePictureMissing(chatId);
+          setImgErr(true);
+          return;
+        }
+        clearWhatsappProfilePictureMissing(chatId);
+        setBlobUrl(url);
+      })
+      .catch(() => {
+        if (cancel) return;
+        markWhatsappProfilePictureMissing(chatId);
+        setImgErr(true);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [visible, chatId, hasPictureHint, versionKey, refreshPicture]);
+
+  const showImg = Boolean(blobUrl && !imgErr);
   return (
-    <div className={`relative flex ${dim} shrink-0 items-center justify-center`}>
+    <div ref={rootRef} className={`relative flex ${dim} shrink-0 items-center justify-center`}>
       {showImg ? (
-        <img
-          src={avatarSrc!}
-          alt=""
-          className="h-full w-full rounded-full object-cover"
-          loading="lazy"
-          onLoad={() => {
-            if (chatId) clearWhatsappProfilePictureMissing(chatId);
-          }}
-          onError={() => {
-            if (chatId) markWhatsappProfilePictureMissing(chatId);
-            setImgErr(true);
-          }}
-        />
+        <img src={blobUrl!} alt="" className="h-full w-full rounded-full object-cover" />
       ) : (
         <div
           className={`flex h-full w-full items-center justify-center rounded-full bg-[#dfe5e7] font-medium text-[#54656f] dark:bg-[#54656f] dark:text-[var(--wa-text)] ${size === 'list' ? 'text-[15px]' : 'text-sm'}`}
@@ -2280,7 +2311,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     return WA_ASIDE_MIN_WIDTH;
   });
   const [isResizingAside, setIsResizingAside] = useState(false);
-  const asideRef = useRef<HTMLElement | null>(null);
+  const chatListScrollRef = useRef<HTMLDivElement | null>(null);
+const asideRef = useRef<HTMLElement | null>(null);
   const filterTabsRef = useRef<HTMLDivElement | null>(null);
   const filterTabsDragRef = useRef<{ startX: number; startScroll: number; pointerId: number; moved: boolean } | null>(null);
   const filterTabsJustDraggedRef = useRef(false);
@@ -3076,7 +3108,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
     onSuccess: () => {
       toast.success('Todas as conversas marcadas como lidas');
-      queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+        (old ?? []).map((c) => ({ ...c, unreadCount: 0 }))
+      );
     },
     onError: (e: Error) => toast.error(e.message || 'Erro ao marcar como lidas'),
   });
@@ -3109,7 +3143,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     onSuccess: () => {
       toast.success('Conversa marcada como não lida');
       setChatMenuOpen(false);
-      queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+      const cid = canonicalWhatsappChatId(chatId);
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+        (old ?? []).map((c) =>
+          canonicalWhatsappChatId(c.chatId) === cid ? { ...c, unreadCount: Math.max(1, c.unreadCount || 0) } : c
+        )
+      );
     },
     onError: (e: Error) => {
       toast.error(e.message || 'Erro ao marcar conversa como não lida');
@@ -3144,8 +3183,16 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   useEffect(() => {
     if (!chatId || !contactMetaUpdatedAt) return;
     clearWhatsappProfilePictureMissing(chatId);
-    void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
-  }, [chatId, contactMetaUpdatedAt, queryClient]);
+    const cid = canonicalWhatsappChatId(chatId);
+    const pic = (activeContactMeta?.profilePictureUrl || '').trim();
+    queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+      (old ?? []).map((c) =>
+        canonicalWhatsappChatId(c.chatId) === cid
+          ? { ...c, hasProfilePicture: Boolean(pic) || Boolean(c.hasProfilePicture) }
+          : c
+      )
+    );
+  }, [chatId, contactMetaUpdatedAt, queryClient, activeContactMeta?.profilePictureUrl]);
 
   const filteredChats = useMemo(() => {
     let list = chatList;
@@ -3208,7 +3255,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         chatId: canonicalWhatsappChatId(c.chatId),
         title,
         subtitle: c.providerCachedName && c.providerCachedName !== title ? c.providerCachedName : null,
-        profilePictureUrl: c.cachedProfilePictureUrl ?? null
+        profilePictureUrl: c.hasProfilePicture ? '1' : c.cachedProfilePictureUrl ?? null
       };
     });
   }, [chatList, providerContactRows, providerGroupRows]);
@@ -3232,6 +3279,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     });
     return list;
   }, [filteredChats]);
+
+  const chatListVirtualizer = useVirtualizer({
+    count: sortedFilteredChats.length,
+    getScrollElement: () => chatListScrollRef.current,
+    estimateSize: () => 72,
+    overscan: 10,
+  });
 
   const logoutMut = useMutation({
     mutationFn: async () => {
@@ -3295,6 +3349,35 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     return chatList.find((c) => canonicalWhatsappChatId(c.chatId) === activeCid);
   }, [chatList, chatId]);
   const activeIsGroup = useMemo(() => isWhatsappGroupChatId(chatId), [chatId]);
+  const [openChatPictureUrl, setOpenChatPictureUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const has = Boolean(
+      activePreview?.hasProfilePicture ||
+        activePreview?.cachedProfilePictureUrl ||
+        activeContactMeta?.profilePictureUrl
+    );
+    if (!chatId || !has || isWhatsappProfilePictureMissing(chatId)) {
+      setOpenChatPictureUrl(null);
+      return;
+    }
+    let cancel = false;
+    loadWhatsappProfilePictureObjectUrl(chatId, contactMetaUpdatedAt || null)
+      .then((url) => {
+        if (!cancel) setOpenChatPictureUrl(url);
+      })
+      .catch(() => {
+        if (!cancel) setOpenChatPictureUrl(null);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [
+    chatId,
+    contactMetaUpdatedAt,
+    activePreview?.hasProfilePicture,
+    activePreview?.cachedProfilePictureUrl,
+    activeContactMeta?.profilePictureUrl,
+  ]);
 
   const GROUP_META_COOLDOWN_MS = Number(import.meta.env.VITE_WA_GROUP_META_COOLDOWN_MS) || 60_000;
   const GROUP_MEMBERS_COOLDOWN_MS = Number(import.meta.env.VITE_WA_GROUP_MEMBERS_COOLDOWN_MS) || 60_000;
@@ -3802,16 +3885,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     []
   );
 
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [queryClient]);
-
   // Esc: fecha primeiro overlays/modais; se nada estiver aberto, fecha o chat ativo.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -3975,7 +4048,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
         const preview: WhatsappChatPreview = {
           chatId: ctx.preferredChatId,
-          lastContent: normalizedMsg.content,
+          lastContent: snippetListPreview(normalizedMsg.content),
           lastAt: normalizedMsg.timestamp,
           lastFromMe: normalizedMsg.fromMe,
           lastAck: normalizedMsg.fromMe ? (normalizedMsg.ack ?? null) : null,
@@ -3984,6 +4057,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           providerCachedName: prevRow?.providerCachedName,
           phoneNumberFromS3e: prevRow?.phoneNumberFromS3e ?? ctx.phoneHint,
           cachedProfilePictureUrl: prevRow?.cachedProfilePictureUrl,
+          hasProfilePicture: prevRow?.hasProfilePicture,
         };
         return sortChatsByRecent(
           upsertChatPreviewInList(previews, preview, { activeChatId: chatId, mergeKey: ctx.mergeKey })
@@ -4295,7 +4369,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         const baseUnread = prevRows.reduce((s, r) => s + (r.unreadCount ?? 0), 0);
         const preview: WhatsappChatPreview = {
           chatId: ctx.preferredChatId,
-          lastContent: payload.content,
+          lastContent: snippetListPreview(payload.content),
           lastAt: payload.timestamp,
           lastFromMe: payload.fromMe,
           lastAck: payload.fromMe ? (payload.ack ?? null) : null,
@@ -4304,6 +4378,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           providerCachedName: prevRow?.providerCachedName,
           phoneNumberFromS3e: prevRow?.phoneNumberFromS3e ?? ctx.phoneHint,
           cachedProfilePictureUrl: prevRow?.cachedProfilePictureUrl,
+          hasProfilePicture: prevRow?.hasProfilePicture,
         };
         return sortChatsByRecent(
           upsertChatPreviewInList(previews, preview, { activeChatId: chatId, mergeKey: ctx.mergeKey })
@@ -4452,7 +4527,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       setReplyToMessage(null);
       setBatchUploadProgress(null);
       toast.success(count === 1 ? 'Mídia enviada' : `${count} arquivos enviados.`);
-      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
     },
     onError: (e: Error) => {
       setBatchUploadProgress(null);
@@ -4481,7 +4555,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       setReplyToMessage(null);
       if (data) mergeMessage(data);
       toast.success('Áudio enviado');
-      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
     },
     onError: (e: Error) => {
       toast.error(e.message || 'Erro ao enviar áudio');
@@ -4534,7 +4607,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       toast.success(rows.length === 1 ? 'Contato enviado' : `${rows.length} contatos enviados`);
       closeSendContactFlow();
       void queryClient.invalidateQueries({ queryKey: messagesQueryKey(chatId) });
-      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
     },
     onError: (e: Error) => {
       toast.error(e.message || 'Erro ao enviar contato');
@@ -5662,11 +5734,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         ...c,
                         providerCachedName: displayName || c.providerCachedName || null,
                         cachedProfilePictureUrl: profilePictureUrl || c.cachedProfilePictureUrl || null,
+                        hasProfilePicture: Boolean(profilePictureUrl) || Boolean(c.hasProfilePicture),
                       }
                     : c
                 )
               );
-              void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
               void queryClient.invalidateQueries({ queryKey: ['whatsapp-contact-meta', cid] });
             }
           });
@@ -6241,7 +6313,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </button>
           </div>
         </div>
-        <div className="wa-scroll flex-1 overflow-y-auto bg-[var(--wa-panel)] px-0">
+        <div ref={chatListScrollRef} className="wa-scroll flex-1 overflow-y-auto bg-[var(--wa-panel)] px-0">
           {chatList.length === 0 && (
             <p className="p-4 text-center text-[13px] text-[var(--wa-text-muted)]">Nenhuma conversa sincronizada ainda.</p>
           )}
@@ -6278,7 +6350,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               ) : null}
             </div>
           ) : null}
-          {sortedFilteredChats.map((c) => {
+          {sortedFilteredChats.length > 0 ? (
+            <div className="relative w-full" style={{ height: `${chatListVirtualizer.getTotalSize()}px` }}>
+              {chatListVirtualizer.getVirtualItems().map((virtualRow) => {
+            const c = sortedFilteredChats[virtualRow.index];
+            if (!c) return null;
             const isG = isWhatsappGroupChatId(c.chatId);
             const w = !isG ? findWhatsappContactInRows(providerContactRows, c.chatId) : undefined;
             const wg = isG ? findWhatsappGroupInRows(providerGroupRows, c.chatId) : undefined;
@@ -6299,7 +6375,16 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             return (
               <div
                 key={c.chatId}
+                data-index={virtualRow.index}
+                ref={chatListVirtualizer.measureElement}
                 role="button"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
                 tabIndex={0}
                 onClick={() => {
                   onNavigateChat?.(canonicalWhatsappChatId(c.chatId), headerForChat);
@@ -6316,16 +6401,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               >
                 <ContactAvatar
                   chatId={c.chatId}
-                  imageUrl={rowPic}
+                  hasProfilePicture={Boolean(c.hasProfilePicture || rowPic || (active && activeContactMeta?.profilePictureUrl))}
                   label={avatarLabel}
                   size="list"
-                  pictureVersion={
-                    active && contactMetaUpdatedAt
-                      ? contactMetaUpdatedAt
-                      : rowPic
-                        ? `${rowPic.length}:${rowPic.slice(-32)}`
-                        : null
-                  }
+                  pictureVersion={active && contactMetaUpdatedAt ? contactMetaUpdatedAt : null}
                 />
                 <div className="flex min-h-[52px] min-w-0 flex-1 flex-col justify-center gap-0.5 border-b border-[var(--wa-border)] py-3 group-hover:border-transparent group-[.is-active]:border-transparent">
                   <div className="flex items-center justify-between gap-2">
@@ -6442,6 +6521,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             );
           })}
+            </div>
+          ) : null}
         </div>
 
         {qrModalOpen ? (
@@ -6872,30 +6953,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </div>
 
             <div className="flex flex-col items-center px-4 py-6">
-              {whatsappProfilePictureImageUrl(
-                chatId,
-                Boolean(
-                  activePreview?.cachedProfilePictureUrl ||
-                    activeContactMeta?.profilePictureUrl ||
-                    contactPanelOpen
-                ) && !isWhatsappProfilePictureMissing(chatId)
-              ) ? (
+              {openChatPictureUrl ? (
                 <img
-                  src={
-                    whatsappProfilePictureImageUrl(
-                      chatId,
-                      Boolean(
-                        activePreview?.cachedProfilePictureUrl ||
-                          activeContactMeta?.profilePictureUrl ||
-                          contactPanelOpen
-                      )
-                    )!
-                  }
+                  src={openChatPictureUrl}
                   alt=""
                   className="h-28 w-28 rounded-full object-cover shadow-md"
-                  onError={() => {
-                    if (chatId) markWhatsappProfilePictureMissing(chatId);
-                  }}
                 />
               ) : (
                 <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#dfe5e7] text-3xl font-medium text-[#54656f] dark:bg-[var(--wa-input)] dark:text-[var(--wa-text-sec)]">
@@ -7766,11 +7828,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               >
                 <ContactAvatar
                   chatId={chatId}
-                  imageUrl={
-                    activePreview?.cachedProfilePictureUrl ||
-                    activeContactMeta?.profilePictureUrl ||
-                    null
-                  }
+                  hasProfilePicture={Boolean(
+                    activePreview?.hasProfilePicture ||
+                      activePreview?.cachedProfilePictureUrl ||
+                      activeContactMeta?.profilePictureUrl
+                  )}
                   label={
                     activePreview?.contactName ||
                     whatsappGroupDisplayName(activeContactMeta?.group ?? undefined) ||
@@ -8897,14 +8959,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         <WhatsAppContactInfoDrawer
           name={headerPrimary || formatPhoneForDisplay(chatId) || 'Contato'}
           phone={formatPhoneForDisplay(chatId)}
-          avatarUrl={whatsappProfilePictureImageUrl(
-            chatId,
-            Boolean(
-              activePreview?.cachedProfilePictureUrl ||
-                activeContactMeta?.profilePictureUrl ||
-                contactPanelOpen
-            ) && !isWhatsappProfilePictureMissing(chatId)
-          )}
+          avatarUrl={openChatPictureUrl}
           avatarLetter={avatarLetter(headerPrimary || formatPhoneForDisplay(chatId))}
           mediaCount={(() => {
             const msgs = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(chatId)) ?? [];
@@ -8943,15 +8998,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           onAvatarClick={() =>
             setProfilePhotoOverlay({
               name: headerPrimary || formatPhoneForDisplay(chatId) || 'Contato',
-              url:
-                whatsappProfilePictureImageUrl(
-                  chatId,
-                  Boolean(
-                    activePreview?.cachedProfilePictureUrl ||
-                      activeContactMeta?.profilePictureUrl ||
-                      true
-                  )
-                ) || null,
+              url: openChatPictureUrl,
             })
           }
           onSearch={() => {
