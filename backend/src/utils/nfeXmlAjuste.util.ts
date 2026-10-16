@@ -3,6 +3,7 @@ import {
   normalizarEan,
 } from '../services/materialFornecedorAlias.service';
 import { normalizarNomeProduto } from './stringUtils';
+import { cnpjDeXml, mesmoCnpjFornecedor } from './cnpjFornecedor.util';
 
 export type NfeIdentidade = {
   numeroNF: string;
@@ -39,10 +40,6 @@ export type NfeParseAjuste = {
   items: NfeItemAjuste[];
   totais: NfeTotaisAjuste;
 };
-
-function digits(value: unknown): string {
-  return String(value ?? '').replace(/\D/g, '');
-}
 
 function asArray<T>(value: T | T[] | null | undefined): T[] {
   if (!value) return [];
@@ -88,7 +85,7 @@ export function extrairDadosAjusteDeNfe(nfeRoot: any): NfeParseAjuste {
   const serieRaw = nfe.ide?.serie ?? nfe.ide?.serieNF;
   const serieNF =
     serieRaw != null && String(serieRaw).trim() !== '' ? String(serieRaw).trim() : null;
-  const fornecedorCNPJ = digits(nfe.emit?.CNPJ);
+  const fornecedorCNPJ = cnpjDeXml(nfe.emit?.CNPJ);
 
   const detList = asArray(nfe.det);
   const items: NfeItemAjuste[] = [];
@@ -137,7 +134,9 @@ export function extrairDadosAjusteDeNfe(nfeRoot: any): NfeParseAjuste {
 export type CompraIdentidadeRef = {
   numeroNF: string;
   serieNF?: string | null;
-  fornecedorCNPJ: string;
+  fornecedorCNPJ?: string | null;
+  /** CNPJ do Fornecedor vinculado, usado se o snapshot da compra estiver vazio ou divergente. */
+  fornecedorVinculadoCNPJ?: string | null;
 };
 
 /**
@@ -160,12 +159,13 @@ export function validarIdentidadeNfeCompra(
     };
   }
 
-  const cnpjCompra = digits(compra.fornecedorCNPJ);
-  const cnpjXml = digits(xml.fornecedorCNPJ);
-  if (!cnpjXml || cnpjXml.length < 11) {
+  const cnpjXml = cnpjDeXml(xml.fornecedorCNPJ);
+  if (!cnpjXml || cnpjXml.length !== 14) {
     return { ok: false, message: 'XML sem CNPJ do fornecedor válido.' };
   }
-  if (cnpjCompra !== cnpjXml) {
+  const bateSnapshot = mesmoCnpjFornecedor(compra.fornecedorCNPJ, cnpjXml);
+  const bateVinculo = mesmoCnpjFornecedor(compra.fornecedorVinculadoCNPJ, cnpjXml);
+  if (!bateSnapshot && !bateVinculo) {
     return {
       ok: false,
       message:
