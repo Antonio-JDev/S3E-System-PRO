@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useMemo, useContext, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { financeiroService } from '../services/financeiroService';
+import {
+    FINANCEIRO_CONTAS_PAGAR_QUERY_KEY,
+    useContasPagarLista,
+    useInvalidateContasPagarLista,
+    type ContaPagarListaItem,
+} from '../hooks/useFinanceiroQuery';
 import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -227,8 +234,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     };
     
     // Estados
-    const [contasPagar, setContasPagar] = useState<ContaPagar[]>([]);
-    const [loading, setLoading] = useState(true);
+    const queryClient = useQueryClient();
+    const {
+        data: contasPagarQueryData,
+        isLoading: loading,
+    } = useContasPagarLista();
+    const invalidateContasPagarLista = useInvalidateContasPagarLista();
+    /** Mantém compatibilidade com helpers tipados em ContaPagar da tela */
+    const contasPagar = (Array.isArray(contasPagarQueryData) ? contasPagarQueryData : []) as unknown as ContaPagar[];
     const [searchTerm, setSearchTerm] = useState('');
     const [searchValorExato, setSearchValorExato] = useState('');
     const [searchValorMin, setSearchValorMin] = useState('');
@@ -536,10 +549,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const adicionarSugestaoSelecao = (sugestao: SugestaoUnificacaoUI) => {
         const nextIds = Array.from(new Set([...Array.from(idsSelecionados), sugestao.contaId]));
         setIdsSelecionados(new Set(nextIds));
-        setContasPagar((prev) => {
-            if (prev.some((c) => c.id === sugestao.contaId)) return prev;
+        queryClient.setQueryData(FINANCEIRO_CONTAS_PAGAR_QUERY_KEY, (prev: ContaPagarListaItem[] | undefined) => {
+            const list = Array.isArray(prev) ? prev : [];
+            if (list.some((c) => c.id === sugestao.contaId)) return list;
             return [
-                ...prev,
+                ...list,
                 {
                     id: sugestao.contaId,
                     fornecedorNome: sugestao.conta.fornecedorNome || 'Fornecedor',
@@ -547,10 +561,12 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                     descricao: sugestao.conta.descricao || 'Conta sugerida',
                     dataVencimento: sugestao.conta.dataVencimento,
                     valor: sugestao.conta.valorParcela,
+                    valorJuros: 0,
+                    valorDesconto: 0,
                     status: (sugestao.conta.status as ContaPagar['status']) || 'Pendente',
                     compraId: sugestao.conta.compraId || undefined,
                     tipo: 'FORNECEDOR',
-                },
+                } as ContaPagarListaItem,
             ];
         });
         setSugestoesUnificacao((prev) => prev.filter((s) => s.contaId !== sugestao.contaId));
@@ -731,11 +747,16 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         }
     };
 
-    // Carregar dados
+    // Opções do formulário; lista principal via TanStack Query
     useEffect(() => {
-        loadContasPagar();
-        carregarOpcoesNovaConta();
+        void carregarOpcoesNovaConta();
     }, []);
+
+    useEffect(() => {
+        if (!initialContaId || !contasPagar.length) return;
+        const found = contasPagar.find((c) => c.id === initialContaId);
+        if (found) setHighlightedContaId(found.id);
+    }, [initialContaId, contasPagar]);
 
     useEffect(() => {
         const carregarCartoes = async () => {
@@ -793,90 +814,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     };
 
     const loadContasPagar = async () => {
-        setLoading(true);
-        try {
-            console.log('📤 Carregando contas a pagar do backend...');
-            const response = await financeiroService.listarContasPagar();
-            
-            if (response.success && response.data) {
-                // Debug: verificar estrutura dos dados recebidos
-                console.log('📦 Dados recebidos do backend:', {
-                    tipo: Array.isArray(response.data) ? 'array' : typeof response.data,
-                    primeiraConta: Array.isArray(response.data) ? response.data[0] : null,
-                    temCompra: Array.isArray(response.data) && (response.data[0] as any)?.compra ? 'sim' : 'não'
-                });
-                
-                // Processar e enriquecer dados
-                const contasProcessadas = response.data.map((conta: any) => {
-                    // Detectar atraso
-                    const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
-                    const tipoConta = (conta.tipo || 'FORNECEDOR') as string;
-                    const rawCredor = (conta.fornecedorNome || conta.fornecedor?.nome || conta.credorNome || '').trim();
-                    const nomeColabRh = tipoConta === 'RH' ? nomeColaboradorContaRh(conta) : null;
-                    /** RH: "Pagamento Colaborador [nome]" (ex.: Pagamento Colaborador Marcello) */
-                    const fornecedorNome =
-                        tipoConta === 'RH'
-                            ? nomeColabRh
-                                ? `Pagamento Colaborador ${nomeColabRh}`
-                                : 'Pagamento Colaborador'
-                            : rawCredor || 'Fornecedor não informado';
-                    
-                    // Debug: verificar se compra está vindo do backend
-                    if (conta.compraId && !conta.compra) {
-                        console.warn(`⚠️ Conta ${conta.id} tem compraId (${conta.compraId}) mas não tem objeto compra`);
-                    }
-                    
-                    return {
-                        id: conta.id,
-                        compraId: conta.compraId,
-                        despesaFixaId: conta.despesaFixaId, // ✅ NOVO: ID da despesa fixa
-                        fornecedorId: conta.fornecedorId,
-                        fornecedorNome,
-                        numeroParcela: conta.numeroParcela || 1,
-                        descricao: conta.descricao || `Parcela ${conta.numeroParcela || 1}`,
-                        dataVencimento: conta.dataVencimento,
-                        dataAgendamento: conta.dataAgendamento,
-                        valor: conta.valorParcela || conta.valor || 0,
-                        valorJuros: conta.valorJuros ?? 0,
-                        valorDesconto: conta.valorDesconto ?? 0,
-                        valorPago: conta.valorPago,
-                        dataPagamento: conta.dataPagamento,
-                        status: isAtrasada ? 'Atrasado' : conta.status,
-                        observacoes: conta.observacoes,
-                        tipo: tipoConta,
-                        funcionario: conta.funcionario ?? null,
-                        compra: conta.compra, // Incluir dados da compra (numeroSequencial, numeroNF, etc)
-                        despesaFixa: (conta as any).despesaFixa, // ✅ NOVO: Dados da despesa fixa (se existir)
-                        meioPagamento: conta.meioPagamento || null,
-                        cartaoCreditoId: conta.cartaoCreditoId || null,
-                    };
-                });
-                
-                setContasPagar(contasProcessadas);
-                console.log(`✅ ${contasProcessadas.length} contas a pagar carregadas`);
-                console.log('📦 Exemplo de conta com compra:', contasProcessadas.find(c => c.compra));
-
-                // Se foi solicitado foco em uma conta específica (vinda de outra página), destacar
-                try {
-                    if (initialContaId) {
-                        const found = contasProcessadas.find(c => c.id === initialContaId);
-                        if (found) {
-                            setHighlightedContaId(found.id);
-                        }
-                    }
-                } catch (err) {
-                    // ignore
-                }
-            } else {
-                console.warn('⚠️ Erro ao carregar contas:', response.error);
-                setContasPagar([]);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao carregar contas a pagar:', error);
-            setContasPagar([]);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateContasPagarLista();
     };
 
     const competenciaLocal = () => {
