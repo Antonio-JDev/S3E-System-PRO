@@ -34,11 +34,8 @@ import {
   exigeFormularioEntregaQuadro,
   extrairEntregaQuadro,
   isOsTipoQuadrosPainels,
-  podeConcluirOsQuadros,
-  validarEntregaQuadroForm,
   type EntregaQuadroMetadados,
 } from '../utils/osWorkflow.util';
-import OsEntregaQuadroForm from './os/OsEntregaQuadroForm';
 import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util';
 import OsCronogramaAlocacaoTab from './os/OsCronogramaAlocacaoTab';
 import OsResultadoTab from './os/OsResultadoTab';
@@ -232,6 +229,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   }
   const [tasks, setTasks] = useState<Task[]>([]);
   const [alterandoTipoOs, setAlterandoTipoOs] = useState(false);
+  const [romaneioEntregue, setRomaneioEntregue] = useState(Boolean(projeto.entregaQuadro?.entregue));
+  useEffect(() => {
+    if (projeto.entregaQuadro) {
+      setRomaneioEntregue(Boolean(projeto.entregaQuadro.entregue));
+    }
+  }, [projeto.id, projeto.entregaQuadro]);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskEditando, setTaskEditando] = useState<Task | null>(null);
   const [previewTask, setPreviewTask] = useState<Task | null>(null);
@@ -1427,10 +1430,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       const response = await projetosService.atualizar(projeto.id, { tipo: novoTipo });
       if (response.success) {
         const criadas = (response as { tasksWorkflowCriadas?: number }).tasksWorkflowCriadas ?? 0;
+        const removidas = (response as { tasksWorkflowRemovidas?: number }).tasksWorkflowRemovidas ?? 0;
         toast.success(
           criadas > 0
-            ? `Tipo atualizado. ${criadas} tarefa(s) adicionadas ao Kanban.`
-            : 'Tipo da ordem de serviço atualizado.',
+            ? `Tipo atualizado. O checklist do Kanban foi substituído (${criadas} tarefa(s), prazos a cada 5 dias).`
+            : removidas > 0
+              ? 'Tipo atualizado. As tarefas do checklist anterior foram removidas do Kanban.'
+              : 'Tipo da ordem de serviço atualizado.',
         );
         if (onRefresh) await onRefresh();
         await carregarTasks();
@@ -1531,17 +1537,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       return;
     }
 
-    const tituloEfetivo = taskForm.titulo;
-    const exigeEntrega = exigeFormularioEntregaQuadro(projeto.tipo, tituloEfetivo);
     const statusBackend = taskForm.status === 'A Fazer' ? 'ToDo' : taskForm.status === 'Em Andamento' ? 'Doing' : 'Done';
-
-    if (exigeEntrega && statusBackend === 'Done') {
-      const erroEntrega = validarEntregaQuadroForm(taskForm.entregaQuadro);
-      if (erroEntrega) {
-        toast.error(erroEntrega);
-        return;
-      }
-    }
 
     const responsaveis = (taskForm.responsavelIds && taskForm.responsavelIds.length) ? taskForm.responsavelIds : (taskForm.responsavelId ? [taskForm.responsavelId] : []);
     const prazoEfetivo = taskForm.prazo || addDaysToYmd(localYmdFromDate(new Date()), 1);
@@ -1553,17 +1549,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       status: statusBackend,
       responsaveis: responsaveis.length ? responsaveis : undefined,
     };
-    if (exigeEntrega) {
-      payloadBase.metadados = { entregaQuadro: taskForm.entregaQuadro };
-      try {
-        await axiosApiService.put(`/api/projetos/${projeto.id}/entrega-quadro`, {
-          entrega: taskForm.entregaQuadro,
-        });
-      } catch (err: any) {
-        toast.error(err?.message || 'Erro ao salvar dados de entrega do quadro');
-        return;
-      }
-    }
 
     try {
       if (taskEditando) {
@@ -1610,39 +1595,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   async function handleMoverTask(taskId: string, novoStatus: 'A Fazer' | 'Em Andamento' | 'Concluído') {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
-
-    if (
-      novoStatus === 'Concluído' &&
-      exigeFormularioEntregaQuadro(projeto.tipo, task.titulo)
-    ) {
-      const salva = await carregarEntregaQuadroSalva();
-      const daTask = extrairEntregaQuadro(task.metadados);
-      const entrega = {
-        ...entregaQuadroVazia(),
-        ...(daTask || {}),
-        ...(salva || {}),
-      };
-      const erro = validarEntregaQuadroForm(entrega);
-      if (erro) {
-        toast.info('Complete o checklist de entrega do quadro antes de concluir a tarefa.');
-        setTaskEditando(task);
-        const ids = (task.responsaveisIds && task.responsaveisIds.length) ? task.responsaveisIds : (task.responsavelId ? [task.responsavelId] : []);
-        setTaskForm({
-          titulo: task.titulo,
-          descricao: task.descricao,
-          prazo:
-            task.prazo ||
-            addDaysToYmd(localYmdFromDate(new Date(task.createdAt || new Date().toISOString())), 1),
-          dataInicio: task.dataInicio || localYmdFromDate(new Date()),
-          responsavelId: ids[0] || '',
-          responsavelIds: ids,
-          status: 'Concluído',
-          entregaQuadro: entrega,
-        });
-        setTaskModalOpen(true);
-        return;
-      }
-    }
 
     // Mapear status do frontend para o backend
     const statusBackend = novoStatus === 'A Fazer' ? 'ToDo' : novoStatus === 'Em Andamento' ? 'Doing' : 'Done';
@@ -1818,24 +1770,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
   }
 
-  async function tentarAbrirConcluirOs() {
-    if (isOsTipoQuadrosPainels(projeto.tipo)) {
-      try {
-        const res = await axiosApiService.get(`/api/projetos/${projeto.id}/entrega-quadro`);
-        const entrega = res.data?.entrega ?? projeto.entregaQuadro;
-        const check = podeConcluirOsQuadros(projeto.tipo, entrega);
-        if (!check.ok) {
-          toast.error(
-            `Não é possível concluir: ${check.pendencias.join('; ')}. Abra a tarefa "Entrega" no Kanban e complete o checklist.`,
-            { duration: 12000 },
-          );
-          return;
-        }
-      } catch {
-        toast.error('Não foi possível validar o checklist de entrega do quadro.');
-        return;
-      }
-    }
+  function tentarAbrirConcluirOs() {
     setConcluirModalOpen(true);
   }
 
@@ -2039,6 +1974,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           subtitle={
             <>
               Cliente: {projeto.cliente?.nome}
+              {isOsTipoQuadrosPainels(projeto.tipo) && romaneioEntregue && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200 align-middle">
+                  Entregue
+                </span>
+              )}
               {projeto.status === 'CONCLUIDO' && (
                 <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
                   Concluída em{' '}
@@ -2192,6 +2132,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 nome: u.name || u.nome || '',
                 role: u.role || u.funcao,
               }))}
+              onRomaneioEntregaChange={(entrega) => setRomaneioEntregue(Boolean(entrega.entregue))}
             />
           )}
 
@@ -2208,8 +2149,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     : 'Todas as tarefas do Kanban foram concluídas. Você pode concluir a ordem de serviço.'}
                 </p>
                 {isOsTipoQuadrosPainels(projeto.tipo) && (
-                  <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
-                    Para Quadros/Painéis, o checklist de entrega (foto, materiais, romaneio e recebimento) deve estar completo.
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                    O romaneio e o registro de quem recebeu ficam na aba Dados gerais.
                   </p>
                 )}
                 <p className="text-sm text-gray-500 mb-4">
@@ -3274,40 +3215,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
                 </div>
 
-                {/* Entrega do quadro (OS Quadros e Painéis) */}
-                {mostraEntregaQuadro && (
-                  <OsEntregaQuadroForm
-                    value={taskForm.entregaQuadro}
-                    onChange={(entregaQuadro) => setTaskForm({ ...taskForm, entregaQuadro })}
-                    printContext={{
-                      numeroOs: projeto.orcamento?.numeroSequencial,
-                      tituloOs: projeto.titulo,
-                      clienteNome: projeto.cliente?.nome || '',
-                      clienteTelefone: taskForm.entregaQuadro.clienteTelefone,
-                      clienteEndereco:
-                        (projeto as any).enderecoObra ||
-                        taskForm.entregaQuadro.localRecebimento ||
-                        '',
-                    }}
-                    produtosSugestao={(orcamentoCompleto?.items || projeto.orcamento?.items || [])
-                      .filter((it: any) => {
-                        const t = String(it.tipo || '').toUpperCase();
-                        return t === 'MATERIAL' || t === 'KIT' || t === 'COTACAO' || !t;
-                      })
-                      .slice(0, 20)
-                      .map((it: any) => ({
-                        nome:
-                          it.material?.nome ||
-                          it.kit?.nome ||
-                          it.cotacao?.nome ||
-                          it.descricao ||
-                          'Item',
-                        codigo: it.material?.sku || undefined,
-                        quantidade: it.quantidade,
-                      }))}
-                  />
-                )}
-
                 {/* Status — só quando NÃO é entrega (já está no topo) */}
                 {!mostraEntregaQuadro && (
                   <div>
@@ -3351,9 +3258,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         {previewTask && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 animate-fade-in">
             <div
-              className={`w-full bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden flex flex-col max-h-[min(90vh,880px)] ${
-                exigeFormularioEntregaQuadro(projeto.tipo, previewTask.titulo) ? 'max-w-4xl' : 'max-w-2xl'
-              }`}
+              className="w-full max-w-2xl bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden flex flex-col max-h-[min(90vh,880px)]"
             >
               <div className="relative shrink-0 px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-gray-800 to-gray-900">
                 <h3 className="text-lg font-bold text-white">Visualizar Tarefa</h3>
@@ -3377,17 +3282,18 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     <span className="font-semibold text-gray-800 dark:text-gray-200">Responsável(is): </span>
                     {getNomesResponsaveisTask(previewTask, usuariosDisponiveis)}
                   </span>
-                  {exigeFormularioEntregaQuadro(projeto.tipo, previewTask.titulo) && (() => {
+                  {(() => {
                     const entrega = extrairEntregaQuadro(previewTask.metadados);
-                    if (!entrega) return null;
+                    if (!entrega?.recebedorNome && !entrega?.responsavelEntregaNome && !entrega?.produto) {
+                      return null;
+                    }
                     return (
                       <div className="sm:col-span-2 mt-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 text-xs space-y-1">
-                        <p className="font-semibold text-amber-900 dark:text-amber-200">Entrega do quadro</p>
-                        {entrega.dataEntrega && <p>Data: {formatDateDisplay(entrega.dataEntrega)}</p>}
-                        {entrega.entregadorNome && <p>Entregue por: {entrega.entregadorNome}</p>}
-                        {entrega.recebedorNome && <p>Recebido por: {entrega.recebedorNome}</p>}
-                        {entrega.localRecebimento && <p>Local: {entrega.localRecebimento}</p>}
-                        <p>{entrega.recebidoNoLocal ? 'Recebido no local' : 'Recebido fora do local'}</p>
+                        <p className="font-semibold text-amber-900 dark:text-amber-200">Romaneio</p>
+                        {entrega?.produto && <p>Produto: {entrega.produto}</p>}
+                        {entrega?.responsavelEntregaNome && <p>Responsável: {entrega.responsavelEntregaNome}</p>}
+                        {entrega?.recebedorNome && <p>Recebido por: {entrega.recebedorNome}</p>}
+                        {entrega?.entregue && <p>Entregue</p>}
                       </div>
                     );
                   })()}
