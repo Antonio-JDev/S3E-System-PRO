@@ -49,6 +49,7 @@ import {
   type DashboardCompleto,
   type PeriodoDashboard,
 } from '../services/dashboardService';
+import { useDashboardCompleto } from '../hooks/useDashboardQuery';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { CHART_ACCENT, CHART_SERIES_COLORS, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
@@ -79,8 +80,12 @@ const PERIODO_OPCOES: Array<{ value: PeriodoDashboard; label: string }> = [
 ];
 
 const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNavigate }) => {
-  const [dashboardData, setDashboardData] = useState<DashboardCompleto | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: dashboardData = null,
+    isLoading: loading,
+    refetch: refetchDashboardCompleto,
+    dataUpdatedAt,
+  } = useDashboardCompleto({ refetchIntervalMs: 5 * 60 * 1000 });
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodoDashboard>('monthly');
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [quadrosData, setQuadrosData] = useState<any[]>([]);
@@ -153,28 +158,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   };
 
   const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      
-      // Carregar dados principais
-      const result = await dashboardService.getDashboardCompleto();
-      
-      if (result.success && result.data) {
-        setDashboardData(result.data);
-      }
-      
-      setLastUpdate(new Date().toLocaleString('pt-BR', { 
-        day: '2-digit',
-        month: '2-digit', 
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }));
-    } catch (err) {
-      console.error('Erro ao carregar dashboard:', err);
-    } finally {
-      setLoading(false);
-    }
+    await refetchDashboardCompleto();
   };
 
   const loadGraficosExec = async (periodo: PeriodoDashboard) => {
@@ -833,13 +817,22 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   };
 
   useEffect(() => {
-    loadDashboardData();
+    if (!dataUpdatedAt) return;
+    setLastUpdate(new Date(dataUpdatedAt).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }));
+  }, [dataUpdatedAt]);
+
+  useEffect(() => {
     loadQuadrosData('monthly');
     loadMateriaisCriticos();
     loadFornecedores();
 
     const interval = setInterval(() => {
-      loadDashboardData();
       loadMateriaisCriticos();
     }, 5 * 60 * 1000);
 
