@@ -1,7 +1,7 @@
 /**
- * Serviço SOAP NFS-e Pública Informática (Itajaí/SC)
- * Regras: SOAPAction com nome exato do método; XML de negócio em <XML><![CDATA[ ... ]]></XML>
- * Certificado ICP-Brasil para autenticação da conexão (mTLS).
+ * Serviço SOAP NFS-e Pública Informática (Itajaí/SC) — canal inativo para emissão nova.
+ * Desde 01/07/2026 a prefeitura emite somente pelo Sistema Nacional (Sefin Nacional).
+ * Estas URLs ficam aqui para consulta histórica; nfse.service.ts não as chama mais.
  */
 
 import * as https from 'https';
