@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import ContasAPagar from '../ContasAPagar';
 import { AuthContext } from '../../contexts/AuthContext';
 import { financeiroService } from '../../services/financeiroService';
+import { createQueryWrapper } from '../../test/queryWrapper';
 
 vi.mock('../../services/financeiroService', () => ({
   financeiroService: {
@@ -56,10 +57,13 @@ describe('ContasAPagar - filtro de período', () => {
       ],
     });
 
+    const Wrapper = createQueryWrapper();
     render(
-      <AuthContext.Provider value={{ user: { role: 'admin' } } as any}>
-        <ContasAPagar />
-      </AuthContext.Provider>
+      <Wrapper>
+        <AuthContext.Provider value={{ user: { role: 'admin' } } as any}>
+          <ContasAPagar />
+        </AuthContext.Provider>
+      </Wrapper>
     );
 
     // localizar o select de período (há mais de um combobox na tela)
