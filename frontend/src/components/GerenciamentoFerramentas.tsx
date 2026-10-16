@@ -3,6 +3,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { getUploadUrl } from '../config/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useFerramentasHub, useInvalidateFerramentas } from '../hooks/useFerramentasQuery';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { matchCrossSearch } from '../utils/searchUtils';
@@ -117,6 +118,8 @@ type TabType = 'ferramentas' | 'kits';
 
 const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [activeTab, setActiveTab] = useState<TabType>('ferramentas');
+    const { data: hubData, isLoading: hubLoading, refetch: refetchHub } = useFerramentasHub();
+    const invalidateFerramentas = useInvalidateFerramentas();
     const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
     const [kits, setKits] = useState<KitFerramenta[]>([]);
     const [loading, setLoading] = useState(true);
@@ -216,8 +219,17 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     });
 
     useEffect(() => {
-        loadData();
-    }, []);
+        if (!hubData) return;
+        setFerramentas(hubData.ferramentas as Ferramenta[]);
+        setKits(hubData.kits as KitFerramenta[]);
+        setEletricistas(hubData.eletricistas as any[]);
+        setEstatisticas(hubData.estatisticas);
+        setLoading(hubLoading);
+    }, [hubData, hubLoading]);
+
+    useEffect(() => {
+        if (!hubData) setLoading(true);
+    }, [hubData]);
 
     // Filtrar ferramentas por pesquisa
     const categoriasFerramenta = useMemo(() => {
@@ -268,7 +280,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const loadData = async () => {
         setLoading(true);
         try {
-            await Promise.all([loadFerramentas(), loadKits(), loadEletricistas(), loadEstatisticas()]);
+            await invalidateFerramentas();
+            await refetchHub();
         } catch (error) {
             console.error('Erro ao carregar dados:', error);
         } finally {
