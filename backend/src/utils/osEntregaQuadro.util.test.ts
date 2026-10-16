@@ -1,7 +1,9 @@
 import {
   avaliarChecklistEntregaQuadro,
+  entregaEstaEntregue,
   extrairEntregaQuadro,
   mensagemBloqueioConclusaoQuadros,
+  normalizarEntregaQuadroInput,
   podeConcluirOsQuadros,
   validarEntregaQuadro,
   type EntregaQuadroMetadados,
@@ -9,65 +11,50 @@ import {
 
 function entregaCompleta(overrides: Partial<EntregaQuadroMetadados> = {}): EntregaQuadroMetadados {
   return {
-    fotoProduto: 'data:image/png;base64,aaaaaaaaaaaaaaaaaaaa',
-    materiaisConferidos: true,
-    romaneio: {
-      geradoEm: '2026-09-16T12:00:00.000Z',
-      produtos: [{ nome: 'Quadro QGBT', codigo: 'Q-01' }],
-      qtdVolumes: 1,
-      volumes: [{ identificacao: 'Caixa 01', marcacao: 'S3E' }],
-      pesoLiquidoKg: 10,
-      pesoBrutoKg: 12,
-      dimensoes: '80x60x30 cm',
-    },
-    clienteNome: 'Maria Cliente',
-    clienteTelefone: '47999990000',
-    dataEntrega: '2026-09-16',
-    assinaturaCliente: 'data:image/png;base64,bbbbbbbbbbbbbbbbbbbb',
-    fotoProdutoEntregue: 'data:image/png;base64,cccccccccccccccccccc',
-    entregadorNome: 'João',
-    localRecebimento: 'Obra',
-    recebidoNoLocal: true,
+    produto: 'QM 3 medidores',
+    volume: '1',
+    dataRomaneio: '2026-10-16',
+    responsavelEntregaId: 'user-1',
+    responsavelEntregaNome: 'Gabriel Palhano',
+    recebedorNome: 'Eletricista do cliente',
+    recebidoEm: '2026-10-16T18:30:00.000Z',
+    entregue: true,
     ...overrides,
   };
 }
 
 describe('osEntregaQuadro.util', () => {
   it('extrai metadados aninhados ou diretos', () => {
-    expect(extrairEntregaQuadro({ entregaQuadro: { clienteNome: 'Ana' } })?.clienteNome).toBe('Ana');
-    expect(extrairEntregaQuadro({ clienteNome: 'Bia' })?.clienteNome).toBe('Bia');
+    expect(extrairEntregaQuadro({ entregaQuadro: { produto: 'Quadro' } })?.produto).toBe('Quadro');
+    expect(extrairEntregaQuadro({ recebedorNome: 'Ana' })?.recebedorNome).toBe('Ana');
   });
 
-  it('checklist completo → ok', () => {
-    const r = avaliarChecklistEntregaQuadro(entregaCompleta());
-    expect(r.ok).toBe(true);
-    expect(r.pendencias).toEqual([]);
-  });
-
-  it('lista pendências quando incompleto', () => {
-    const r = avaliarChecklistEntregaQuadro({
-      dataEntrega: '2026-09-01',
-      clienteNome: 'X',
-    });
-    expect(r.ok).toBe(false);
-    expect(r.pendencias.join(' ')).toMatch(/Foto do produto/);
-    expect(r.pendencias.join(' ')).toMatch(/materiais/i);
-    expect(r.pendencias.join(' ')).toMatch(/Romaneio/);
-    expect(r.pendencias.join(' ')).toMatch(/Telefone/);
-    expect(r.pendencias.join(' ')).toMatch(/Assinatura/);
-    expect(r.pendencias.join(' ')).toMatch(/Foto do produto entregue/);
-  });
-
-  it('podeConcluirOsQuadros libera outros tipos sem checklist', () => {
+  it('não bloqueia conclusão da OS pelo checklist antigo', () => {
+    expect(avaliarChecklistEntregaQuadro(null).ok).toBe(true);
     expect(podeConcluirOsQuadros('LAUDO_TECNICO', null).ok).toBe(true);
-    expect(podeConcluirOsQuadros('QUADROS_PAINEIS', null).ok).toBe(false);
-    expect(podeConcluirOsQuadros('QUADROS_PAINEIS', entregaCompleta()).ok).toBe(true);
+    expect(podeConcluirOsQuadros('QUADROS_PAINEIS', null).ok).toBe(true);
+    expect(mensagemBloqueioConclusaoQuadros(podeConcluirOsQuadros('QUADROS_PAINEIS', {}))).toBeNull();
+    expect(() => validarEntregaQuadro(null)).not.toThrow();
   });
 
-  it('mensagem de bloqueio e validarEntregaQuadro', () => {
-    const falha = podeConcluirOsQuadros('QUADROS_PAINEIS', {});
-    expect(mensagemBloqueioConclusaoQuadros(falha)).toMatch(/Não é possível concluir/);
-    expect(() => validarEntregaQuadro({ entregaQuadro: entregaCompleta() })).not.toThrow();
-    expect(() => validarEntregaQuadro(null)).toThrow(/Checklist de entrega incompleto/);
+  it('liga a flag entregue só com nome e data/hora do recebedor', () => {
+    expect(entregaEstaEntregue({ recebedorNome: 'Ana' })).toBe(false);
+    expect(entregaEstaEntregue({ recebidoEm: '2026-10-16T18:30:00.000Z' })).toBe(false);
+    expect(entregaEstaEntregue(entregaCompleta())).toBe(true);
+
+    const semHora = normalizarEntregaQuadroInput({ recebedorNome: 'Ana', recebidoEm: '' });
+    expect(semHora.entregue).toBe(false);
+    expect(semHora.recebedorNome).toBe('Ana');
+
+    const completo = normalizarEntregaQuadroInput({
+      recebedorNome: 'Ana',
+      recebidoEm: '2026-10-16T18:30:00.000Z',
+      produto: 'QM',
+      volume: '2',
+      entregue: false,
+    });
+    expect(completo.entregue).toBe(true);
+    expect(completo.produto).toBe('QM');
+    expect(completo.volume).toBe('2');
   });
 });
