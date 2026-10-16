@@ -6,6 +6,7 @@ import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { AuthContext } from '../contexts/AuthContext';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
+import { useFornecedoresLista, useInvalidateFornecedoresLista } from '../hooks/useFornecedoresQuery';
 
 // Icons (mesmos do ClientesModerno)
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -50,6 +51,12 @@ interface FornecedoresProps {
 
 const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => {
     const { user } = useContext(AuthContext)!;
+    const {
+        data: fornecedoresQueryData,
+        isLoading: fornecedoresQueryLoading,
+        refetch: refetchFornecedores,
+    } = useFornecedoresLista();
+    const invalidateFornecedores = useInvalidateFornecedoresLista();
     
     const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
     const [loading, setLoading] = useState(true);
@@ -95,17 +102,21 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
     };
 
     useEffect(() => {
-        loadFornecedores();
-    }, []);
+        if (!fornecedoresQueryData) return;
+        setFornecedores(fornecedoresQueryData);
+        setLoading(false);
+    }, [fornecedoresQueryData]);
+
+    useEffect(() => {
+        if (fornecedoresQueryLoading) setLoading(true);
+    }, [fornecedoresQueryLoading]);
 
     const loadFornecedores = async () => {
         try {
             setLoading(true);
-            const response = await fornecedoresService.listar();
-            
-            if (response.success && response.data) {
-                setFornecedores(response.data);
-            }
+            await invalidateFornecedores();
+            const result = await refetchFornecedores();
+            setFornecedores(result.data ?? []);
         } catch (err) {
             console.error(err);
         } finally {
