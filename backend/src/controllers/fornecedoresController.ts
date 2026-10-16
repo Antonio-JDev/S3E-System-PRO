@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { chaveDocumentoFornecedor } from '../utils/cnpjFornecedor.util';
+import { listarFornecedoresPorDocumento } from '../services/fornecedorCnpj.service';
 
 // Listar todos os fornecedores
 export const getFornecedores = async (req: Request, res: Response): Promise<void> => {
@@ -112,12 +114,14 @@ export const createFornecedor = async (req: Request, res: Response): Promise<voi
   try {
     const { nome, cnpj, email, telefone, endereco, bairro, cidade, estado, cep, cnae_fiscal, codigo_municipio_ibge, situacao_cadastral, classificacao } = req.body;
 
-    // Verificar se CNPJ já existe
-    const fornecedorExistente = await prisma.fornecedor.findUnique({
-      where: { cnpj }
-    });
+    const cnpjNorm = chaveDocumentoFornecedor(cnpj);
+    if (!cnpjNorm || (cnpjNorm.length !== 11 && cnpjNorm.length !== 14)) {
+      res.status(400).json({ success: false, error: 'CNPJ do fornecedor é obrigatório' });
+      return;
+    }
 
-    if (fornecedorExistente) {
+    const fornecedorExistente = await listarFornecedoresPorDocumento(prisma, cnpjNorm);
+    if (fornecedorExistente.length > 0) {
       res.status(400).json({
         success: false,
         error: 'Fornecedor com este CNPJ já existe'
@@ -128,7 +132,7 @@ export const createFornecedor = async (req: Request, res: Response): Promise<voi
     const fornecedor = await prisma.fornecedor.create({
       data: {
         nome,
-        cnpj,
+        cnpj: cnpjNorm,
         email,
         telefone,
         endereco,
@@ -176,13 +180,15 @@ export const updateFornecedor = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    // Se CNPJ está sendo alterado, verificar se não existe outro fornecedor com o mesmo
-    if (cnpj && cnpj !== fornecedorExistente.cnpj) {
-      const cnpjExistente = await prisma.fornecedor.findUnique({
-        where: { cnpj }
-      });
+    const cnpjNorm = cnpj !== undefined ? chaveDocumentoFornecedor(cnpj) : undefined;
+    if (cnpj !== undefined && (!cnpjNorm || (cnpjNorm.length !== 11 && cnpjNorm.length !== 14))) {
+      res.status(400).json({ success: false, error: 'CNPJ do fornecedor é obrigatório' });
+      return;
+    }
 
-      if (cnpjExistente) {
+    if (cnpjNorm && cnpjNorm !== fornecedorExistente.cnpj) {
+      const outros = (await listarFornecedoresPorDocumento(prisma, cnpjNorm)).filter((item) => item.id !== id);
+      if (outros.length > 0) {
         res.status(400).json({
           success: false,
           error: 'Já existe outro fornecedor com este CNPJ'
@@ -195,7 +201,7 @@ export const updateFornecedor = async (req: Request, res: Response): Promise<voi
       where: { id },
       data: {
         nome,
-        cnpj,
+        cnpj: cnpjNorm,
         email,
         telefone,
         endereco,
