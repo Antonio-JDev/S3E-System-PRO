@@ -19,6 +19,7 @@ export const API_MOUNTS: ApiMount[] = [
   { prefix: '/api/contas-receber', tag: 'Contas a Receber', description: 'Financeiro — receitas', routeFile: 'contasReceber.routes.ts' },
   { prefix: '/api/relatorios', tag: 'Relatórios', description: 'Exportações e relatórios', routeFile: 'relatorios.routes.ts' },
   { prefix: '/api/configuracoes-fiscais', tag: 'Config. Fiscal', description: 'Parâmetros fiscais', routeFile: 'configFiscal.ts' },
+  { prefix: '/api/regras-fiscais-nfe', tag: 'Config. Fiscal', description: 'Regras de CFOP, CST e alíquotas da NF-e', routeFile: 'regraFiscalNfe.routes.ts' },
   { prefix: '/api/obras', tag: 'Obras', description: 'Execução, tarefas e alocações', routeFile: 'obra.routes.ts' },
   { prefix: '/api/equipes', tag: 'Equipes', description: 'Equipes de campo', routeFile: 'equipes.routes.ts' },
   { prefix: '/api/alocacoes', tag: 'Alocações', description: 'Alocação de equipes', routeFile: 'alocacoes.ts' },
