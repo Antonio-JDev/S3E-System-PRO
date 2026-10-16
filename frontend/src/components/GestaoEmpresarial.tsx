@@ -11,7 +11,6 @@ import {
     planosService,
     despesasFixasService 
 } from '../services/gerenciamentoService';
-import { financeiroService } from '../services/financeiroService';
 import { axiosApiService } from '../services/axiosApi';
 import { getUploadUrl } from '../config/api';
 import { maskCpf, maskTelefoneBr, onlyDigits } from '../utils/masks';
@@ -28,6 +27,18 @@ import BIDashboard from './BIDashboard';
 import ResumoAdministrativo from './ResumoAdministrativo';
 import { DollarSign, Minus, Plus } from 'lucide-react';
 import RhFolhaToolbar from './rh/RhFolhaToolbar';
+import {
+    useGestaoDespesasFixasHub,
+    useGestaoEstoqueRhHub,
+    useGestaoFrotaHub,
+    useGestaoPlanosLista,
+    useGestaoRhHub,
+    useInvalidateGestaoDespesasFixasHub,
+    useInvalidateGestaoEstoqueRhHub,
+    useInvalidateGestaoFrotaHub,
+    useInvalidateGestaoPlanosLista,
+    useInvalidateGestaoRhHub,
+} from '../hooks/useGestaoEmpresarialQuery';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -575,6 +586,13 @@ const RHView: React.FC = () => {
         const hoje = new Date();
         return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
     });
+    const {
+        data: rhHubData,
+        isLoading: rhHubLoading,
+        isError: rhHubError,
+        refetch: refetchRhHub,
+    } = useGestaoRhHub(rhCompetencia);
+    const invalidateRhHub = useInvalidateGestaoRhHub();
     const [lancamentoNovo, setLancamentoNovo] = useState({
         categoria: 'ADIANTAMENTO' as 'ADIANTAMENTO' | 'FALTA' | 'FALTA_JUSTIFICADA' | 'DESCONTO_OUTRO' | 'ACRESCIMO',
         valor: '',
@@ -777,29 +795,33 @@ const RHView: React.FC = () => {
     };
 
     useEffect(() => {
-        carregarDados();
-    }, [rhCompetencia]);
+        if (!rhHubData) return;
+        setFuncionarios(rhHubData.funcionarios);
+        setMetricas(rhHubData.metricas as any);
+        setBeneficios(rhHubData.beneficios);
+        setWorkShifts(rhHubData.workShifts);
+        setLoading(false);
+    }, [rhHubData]);
+
+    useEffect(() => {
+        if (rhHubLoading) setLoading(true);
+    }, [rhHubLoading]);
+
+    useEffect(() => {
+        if (rhHubError) toast.error('Erro ao carregar funcionários');
+    }, [rhHubError]);
 
     const carregarDados = async () => {
         try {
             setLoading(true);
-            const [funcResp, metricasResp, beneficiosResp, shiftsResp] = await Promise.all([
-                funcionariosService.listar(rhCompetencia),
-                funcionariosService.obterMetricas(rhCompetencia),
-                beneficiosService.listar(),
-                rhService.listarWorkShifts(),
-            ]);
-            setFuncionarios(Array.isArray(funcResp?.data) ? (funcResp.data as any[]) : []);
-            setMetricas(
-                (metricasResp?.data as any) ?? {
-                    folhaPagamento: 0,
-                    valesMes: 0,
-                    custoTotal: 0,
-                    porFuncionario: [],
-                }
-            );
-            setBeneficios(Array.isArray(beneficiosResp?.data) ? beneficiosResp.data : []);
-            setWorkShifts(Array.isArray(shiftsResp?.data) ? shiftsResp.data : []);
+            await invalidateRhHub();
+            const result = await refetchRhHub();
+            if (result.data) {
+                setFuncionarios(result.data.funcionarios);
+                setMetricas(result.data.metricas as any);
+                setBeneficios(result.data.beneficios);
+                setWorkShifts(result.data.workShifts);
+            }
         } catch (error) {
             console.error('Erro ao carregar dados de RH:', error);
             toast.error('Erro ao carregar funcionários');
@@ -7275,38 +7297,45 @@ const EstoqueRecursosHumanosView: React.FC = () => {
         observacoes: ''
     });
     const [filtroFuncionario, setFiltroFuncionario] = useState<string>('');
+    const {
+        data: estoqueRhData,
+        isLoading: estoqueRhLoading,
+        isError: estoqueRhError,
+        refetch: refetchEstoqueRh,
+    } = useGestaoEstoqueRhHub();
+    const invalidateEstoqueRh = useInvalidateGestaoEstoqueRhHub();
 
     useEffect(() => {
-        carregarDados();
-    }, []);
+        if (!estoqueRhData) return;
+        if (!estoqueRhData.recursosOk) {
+            toast.error('Erro ao carregar estoque', {
+                description: estoqueRhData.recursosError || 'Falha ao listar recursos de RH',
+            });
+        }
+        if (!estoqueRhData.kitsOk) {
+            toast.error('Erro ao carregar kits', {
+                description: estoqueRhData.kitsError || 'Falha ao listar kits de ferramenta',
+            });
+        }
+        setRecursos(estoqueRhData.recursos);
+        setFuncionarios(estoqueRhData.funcionarios);
+        setKitsFerramentas(estoqueRhData.kitsFerramentas);
+        setLoading(false);
+    }, [estoqueRhData]);
+
+    useEffect(() => {
+        if (estoqueRhLoading) setLoading(true);
+    }, [estoqueRhLoading]);
+
+    useEffect(() => {
+        if (estoqueRhError) toast.error('Erro ao carregar estoque');
+    }, [estoqueRhError]);
 
     const carregarDados = async () => {
         try {
             setLoading(true);
-            const [recursosResp, funcionariosResp, kitsResp] = await Promise.all([
-                axiosApiService.get('/api/recursos-humanos'),
-                funcionariosService.listar(),
-                axiosApiService.get('/api/kits-ferramenta')
-            ]);
-            if (!recursosResp?.success) {
-                toast.error('Erro ao carregar estoque', { description: recursosResp?.error || 'Falha ao listar recursos de RH' });
-            }
-            const recursosData = recursosResp?.success ? (recursosResp.data as any) : [];
-            setRecursos(Array.isArray(recursosData) ? (recursosData as any[]) : []);
-
-            const funcData = (funcionariosResp as any)?.data ?? funcionariosResp;
-            setFuncionarios(Array.isArray(funcData) ? (funcData as any[]) : []);
-
-            if (!kitsResp?.success) {
-                toast.error('Erro ao carregar kits', { description: kitsResp?.error || 'Falha ao listar kits de ferramenta' });
-            }
-            const rawKits = kitsResp?.success ? (kitsResp.data as any) : [];
-            const kitsData =
-                Array.isArray(rawKits) ? rawKits :
-                Array.isArray(rawKits?.data) ? rawKits.data :
-                Array.isArray(rawKits?.data?.data) ? rawKits.data.data :
-                [];
-            setKitsFerramentas(Array.isArray(kitsData) ? kitsData.filter((kit: any) => kit.ativo) : []);
+            await invalidateEstoqueRh();
+            await refetchEstoqueRh();
         } catch (error) {
             console.error('Erro ao carregar estoque de recursos humanos:', error);
             toast.error('Erro ao carregar estoque');
@@ -8374,20 +8403,38 @@ const CarrosView: React.FC = () => {
     // Estados para dialog de confirmação de exclusão
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [veiculoParaDeletar, setVeiculoParaDeletar] = useState<{ id: string; modelo: string; placa: string } | null>(null);
+    const {
+        data: frotaHubData,
+        isLoading: frotaHubLoading,
+        isError: frotaHubError,
+        refetch: refetchFrotaHub,
+    } = useGestaoFrotaHub();
+    const invalidateFrotaHub = useInvalidateGestaoFrotaHub();
 
     useEffect(() => {
-        carregarDados();
-    }, []);
+        if (!frotaHubData) return;
+        setVeiculos(frotaHubData.veiculos);
+        setMetricas(frotaHubData.metricas as any);
+        setLoading(false);
+    }, [frotaHubData]);
+
+    useEffect(() => {
+        if (frotaHubLoading) setLoading(true);
+    }, [frotaHubLoading]);
+
+    useEffect(() => {
+        if (frotaHubError) toast.error('Erro ao carregar veículos');
+    }, [frotaHubError]);
 
     const carregarDados = async () => {
         try {
             setLoading(true);
-            const [veicResp, metricasResp] = await Promise.all([
-                veiculosService.listar(),
-                veiculosService.obterMetricas()
-            ]);
-            setVeiculos(Array.isArray(veicResp?.data) ? (veicResp.data as any[]) : (veicResp?.data ?? []) as any[]);
-            setMetricas((metricasResp?.data as any) ?? { gastosMes: 0, combustivel: 0, manutencao: 0, totalVeiculos: 0 });
+            await invalidateFrotaHub();
+            const result = await refetchFrotaHub();
+            if (result.data) {
+                setVeiculos(result.data.veiculos);
+                setMetricas(result.data.metricas as any);
+            }
         } catch (error) {
             console.error('Erro ao carregar dados da frota:', error);
             toast.error('Erro ao carregar veículos');
@@ -8477,51 +8524,6 @@ const CarrosView: React.FC = () => {
     useEscapeKey(() => setIsVisualizarModalOpen(false), isVisualizarModalOpen);
     useEscapeKey(() => setGastoVisualizando(null), !!gastoVisualizando);
     useEscapeKey(cancelarDelecaoVeiculo, showDeleteDialog);
-
-    const handleRegistrarPagamentoGastoFrota = async () => {
-        if (!gastoVisualizando || !veiculoSelecionado) return;
-
-        const valor = parseFloat(gastoVisualizando.valor);
-        const descricao = `Frota - ${gastoVisualizando.tipo} | ${veiculoSelecionado.modelo} (${veiculoSelecionado.placa})`;
-        const dataVencimento = new Date(gastoVisualizando.data).toISOString().split('T')[0];
-
-        try {
-            // Criar conta a pagar tipo FROTA (não despesa fixa) e dar baixa = registra só nas movimentações
-            const criarRes = await financeiroService.criarContaPagar({
-                tipo: 'FROTA',
-                descricao,
-                valor,
-                dataVencimento,
-                observacoes: gastoVisualizando.descricao || `${gastoVisualizando.tipo} - ${veiculoSelecionado.modelo}`
-            });
-
-            if (!criarRes.success || !criarRes.data?.id) {
-                toast.error(criarRes.error || 'Erro ao registrar pagamento');
-                return;
-            }
-
-            const hoje = new Date().toISOString().split('T')[0];
-            const pagarRes = await financeiroService.pagarContaPagar(criarRes.data.id, {
-                dataPagamento: hoje,
-                valorPago: valor,
-                meioPagamento: 'PIX',
-                observacoes: `Pagamento gasto frota - ${veiculoSelecionado.placa}`
-            });
-
-            if (!pagarRes.success) {
-                toast.error(pagarRes.error || 'Conta criada, mas falha ao registrar pagamento');
-                return;
-            }
-
-            toast.success('Pagamento registrado nas movimentações.', {
-                description: 'O gasto permanece no histórico do veículo e aparece no extrato (Financeiro > Movimentações).',
-            });
-            setGastoVisualizando(null);
-        } catch (error) {
-            console.error('Erro ao registrar pagamento do gasto da frota:', error);
-            toast.error('Erro ao registrar pagamento.');
-        }
-    };
 
     const handleSubmitVeiculo = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -9179,18 +9181,12 @@ const CarrosView: React.FC = () => {
                         </div>
 
                         {/* Footer */}
-                        <div className="p-6 border-t border-gray-200 bg-gray-50 flex gap-3">
+                        <div className="p-6 border-t border-gray-200 bg-gray-50">
                             <button
                                 onClick={() => setGastoVisualizando(null)}
-                                className="flex-1 btn-secondary"
+                                className="w-full btn-secondary"
                             >
                                 Fechar
-                            </button>
-                            <button
-                                onClick={handleRegistrarPagamentoGastoFrota}
-                                className="flex-1 btn-success"
-                            >
-                                💳 Registrar pagamento (movimentações)
                             </button>
                         </div>
                     </div>
@@ -9264,16 +9260,34 @@ const PlanosView: React.FC = () => {
     // Estados para confirmação de exclusão de plano
     const [showDeletePlanoDialog, setShowDeletePlanoDialog] = useState(false);
     const [planoParaDeletar, setPlanoParaDeletar] = useState<{ id: string; titulo?: string } | null>(null);
+    const {
+        data: planosQueryData,
+        isLoading: planosQueryLoading,
+        isError: planosQueryError,
+        refetch: refetchPlanos,
+    } = useGestaoPlanosLista();
+    const invalidatePlanos = useInvalidateGestaoPlanosLista();
 
     useEffect(() => {
-        carregarDados();
-    }, []);
+        if (!planosQueryData) return;
+        setPlanos(planosQueryData);
+        setLoading(false);
+    }, [planosQueryData]);
+
+    useEffect(() => {
+        if (planosQueryLoading) setLoading(true);
+    }, [planosQueryLoading]);
+
+    useEffect(() => {
+        if (planosQueryError) toast.error('Erro ao carregar planos estratégicos');
+    }, [planosQueryError]);
 
     const carregarDados = async () => {
         try {
             setLoading(true);
-            const resp = await planosService.listar();
-            setPlanos(Array.isArray(resp?.data) ? (resp.data as any[]) : (resp?.data ?? []) as any[]);
+            await invalidatePlanos();
+            const result = await refetchPlanos();
+            if (result.data) setPlanos(result.data);
         } catch (error) {
             console.error('Erro ao carregar planos:', error);
             toast.error('Erro ao carregar planos estratégicos');
@@ -9785,20 +9799,38 @@ const DespesasFixasView: React.FC = () => {
     // Estados para dialog de confirmação de exclusão
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [despesaParaDeletar, setDespesaParaDeletar] = useState<{ id: string; descricao: string } | null>(null);
+    const {
+        data: despesasHubData,
+        isLoading: despesasHubLoading,
+        isError: despesasHubError,
+        refetch: refetchDespesasHub,
+    } = useGestaoDespesasFixasHub();
+    const invalidateDespesasHub = useInvalidateGestaoDespesasFixasHub();
 
     useEffect(() => {
-        carregarDados();
-    }, []);
+        if (!despesasHubData) return;
+        setDespesas(despesasHubData.despesas);
+        setMetricas(despesasHubData.metricas as any);
+        setLoading(false);
+    }, [despesasHubData]);
+
+    useEffect(() => {
+        if (despesasHubLoading) setLoading(true);
+    }, [despesasHubLoading]);
+
+    useEffect(() => {
+        if (despesasHubError) toast.error('Erro ao carregar despesas fixas');
+    }, [despesasHubError]);
 
     const carregarDados = async () => {
         try {
             setLoading(true);
-            const [despResp, metricasResp] = await Promise.all([
-                despesasFixasService.listar(),
-                despesasFixasService.obterMetricas()
-            ]);
-            setDespesas(Array.isArray(despResp?.data) ? (despResp.data as any[]) : (despResp?.data ?? []) as any[]);
-            setMetricas((metricasResp?.data as any) ?? { totalMensal: 0, totalAnual: 0, totalDespesas: 0, porCategoria: {} });
+            await invalidateDespesasHub();
+            const result = await refetchDespesasHub();
+            if (result.data) {
+                setDespesas(result.data.despesas);
+                setMetricas(result.data.metricas as any);
+            }
         } catch (error) {
             console.error('Erro ao carregar despesas fixas:', error);
             toast.error('Erro ao carregar despesas fixas');
