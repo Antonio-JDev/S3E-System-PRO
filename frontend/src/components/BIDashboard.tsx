@@ -27,7 +27,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import {
-  biService,
   type VendasComprasClassificacao,
   type MateriaisMaisCompradosPeriodo,
 } from '../services/biService';
@@ -36,6 +35,7 @@ import { CHART_ACCENT, CHART_SERIES_COLORS, getChartTheme, chartTooltipStyle } f
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { useGestaoBiDashboard } from '../hooks/useGestaoEmpresarialQuery';
 
 interface BIDashboardProps {
   toggleSidebar?: () => void;
@@ -65,6 +65,12 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
   const themeContext = useContext(ThemeContext);
   const isDark = themeContext?.effectiveTheme === 'dark';
   const ct = getChartTheme(!!isDark);
+  const {
+    data: biQueryData,
+    isLoading: biQueryLoading,
+    isError: biQueryError,
+    refetch: refetchBi,
+  } = useGestaoBiDashboard(dataInicio, dataFim);
 
   // Cores para status de orçamentos
   const STATUS_COLORS = {
@@ -76,97 +82,40 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
 
   const CHART_COLORS = CHART_SERIES_COLORS;
 
-  // Carregar dados
+  useEffect(() => {
+    setLoading(biQueryLoading);
+  }, [biQueryLoading]);
+
+  useEffect(() => {
+    if (!biQueryData) return;
+    setOrcamentosPorStatus(biQueryData.orcamentosPorStatus);
+    setOrcamentosPorTipoServico(biQueryData.orcamentosPorTipoServico);
+    setGastosFornecedor(biQueryData.gastosFornecedor);
+    setVendasCompras(biQueryData.vendasCompras as VendasComprasClassificacao | null);
+    setMateriaisPeriodo(biQueryData.materiaisPeriodo as MateriaisMaisCompradosPeriodo | null);
+    setGastosCartao(biQueryData.gastosCartao);
+    setMetodosPagamento(biQueryData.metodosPagamento);
+    setEvolucaoFaturas(biQueryData.evolucaoFaturas);
+    if (biQueryData.errors.orcamentosStatus) {
+      toast.error('Erro ao carregar estatísticas de orçamentos por status');
+    }
+    if (biQueryData.errors.orcamentosTipoServico) {
+      toast.error('Erro ao carregar estatísticas de orçamentos por tipo de serviço');
+    }
+  }, [biQueryData]);
+
+  useEffect(() => {
+    if (biQueryError) toast.error('Erro ao carregar dados do Business Intelligence');
+  }, [biQueryError]);
+
   const carregarDados = async () => {
+    if (!dataInicio || !dataFim) {
+      toast.error('Por favor, selecione um período válido');
+      return;
+    }
+    setLoading(true);
     try {
-      setLoading(true);
-      
-      if (!dataInicio || !dataFim) {
-        toast.error('Por favor, selecione um período válido');
-        setLoading(false);
-        return;
-      }
-
-      console.log('📊 Carregando dados de BI:', { dataInicio, dataFim });
-      
-      const [
-        orcamentosStatusResultado,
-        orcamentosTipoServicoResultado,
-        gastosFornecedorResultado,
-        vendasComprasResultado,
-        materiaisResultado,
-        gastosCartaoResultado,
-        metodosResultado,
-        evolucaoFaturasResultado,
-      ] = await Promise.all([
-        biService.getOrcamentosPorStatus(dataInicio, dataFim),
-        biService.getOrcamentosPorTipoServicoClassificado(dataInicio, dataFim),
-        biService.getGastosFornecedor(dataInicio, dataFim),
-        biService.getVendasComprasClassificacao(dataInicio, dataFim),
-        biService.getMateriaisMaisCompradosPeriodo(dataInicio, dataFim),
-        biService.getGastosCartaoCredito(dataInicio, dataFim),
-        biService.getMetodosPagamentoComparativo(dataInicio, dataFim),
-        biService.getEvolucaoFaturasCartao(dataInicio, dataFim),
-      ]);
-
-      console.log('📊 Resultados recebidos:', {
-        orcamentosStatus: orcamentosStatusResultado,
-        orcamentosTipoServico: orcamentosTipoServicoResultado,
-        gastosFornecedor: gastosFornecedorResultado,
-        vendasCompras: vendasComprasResultado,
-      });
-
-      // Processar orçamentos por status
-      if (orcamentosStatusResultado && orcamentosStatusResultado.data) {
-        console.log('✅ Orçamentos por status carregados:', orcamentosStatusResultado.data);
-        setOrcamentosPorStatus(orcamentosStatusResultado.data);
-      } else if (orcamentosStatusResultado && !orcamentosStatusResultado.success) {
-        console.error('❌ Erro ao carregar orçamentos por status:', orcamentosStatusResultado.error);
-        toast.error('Erro ao carregar estatísticas de orçamentos por status');
-      }
-
-      // Processar orçamentos por tipo de serviço
-      if (orcamentosTipoServicoResultado && orcamentosTipoServicoResultado.data) {
-        console.log('✅ Orçamentos por tipo de serviço carregados:', orcamentosTipoServicoResultado.data);
-        setOrcamentosPorTipoServico(orcamentosTipoServicoResultado.data);
-      } else if (orcamentosTipoServicoResultado && !orcamentosTipoServicoResultado.success) {
-        console.error('❌ Erro ao carregar orçamentos por tipo de serviço:', orcamentosTipoServicoResultado.error);
-        toast.error('Erro ao carregar estatísticas de orçamentos por tipo de serviço');
-      }
-
-      // Processar gastos por fornecedor
-      if (gastosFornecedorResultado && gastosFornecedorResultado.data) {
-        console.log('✅ Gastos por fornecedor carregados:', gastosFornecedorResultado.data);
-        // Verificar se é um array e tem dados
-        if (Array.isArray(gastosFornecedorResultado.data) && gastosFornecedorResultado.data.length > 0) {
-          setGastosFornecedor(gastosFornecedorResultado.data);
-        } else {
-          console.warn('⚠️ Array de fornecedores vazio');
-          setGastosFornecedor([]);
-        }
-      } else if (gastosFornecedorResultado && !gastosFornecedorResultado.success) {
-        console.error('❌ Erro ao carregar gastos por fornecedor:', gastosFornecedorResultado.error);
-        setGastosFornecedor([]);
-      } else {
-        console.warn('⚠️ Resposta de fornecedores inválida:', gastosFornecedorResultado);
-        setGastosFornecedor([]);
-      }
-
-      if (vendasComprasResultado?.success && vendasComprasResultado.data) {
-        setVendasCompras(vendasComprasResultado.data);
-      } else {
-        setVendasCompras(null);
-      }
-
-      if (materiaisResultado?.success && materiaisResultado.data) {
-        setMateriaisPeriodo(materiaisResultado.data);
-      } else {
-        setMateriaisPeriodo(null);
-      }
-
-      setGastosCartao(gastosCartaoResultado?.success ? gastosCartaoResultado.data : null);
-      setMetodosPagamento(metodosResultado?.success ? metodosResultado.data : null);
-      setEvolucaoFaturas(evolucaoFaturasResultado?.success ? evolucaoFaturasResultado.data : null);
+      await refetchBi();
     } catch (error: any) {
       console.error('Erro ao carregar dados de BI:', error);
       toast.error('Erro ao carregar dados do Business Intelligence');
@@ -174,11 +123,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    carregarDados();
-  }, [dataInicio, dataFim]);
-
   const vendasComprasChartData = useMemo(() => {
     if (!vendasCompras) return [];
     const rows: Array<{
