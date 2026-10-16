@@ -2,7 +2,7 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     $transaction: jest.fn(),
     projeto: { findUnique: jest.fn(), update: jest.fn() },
-    task: { findFirst: jest.fn(), createMany: jest.fn() },
+    task: { findFirst: jest.fn(), createMany: jest.fn(), deleteMany: jest.fn() },
     orcamento: { findUnique: jest.fn(), update: jest.fn() },
     contaReceber: { findFirst: jest.fn() },
   },
@@ -40,6 +40,8 @@ import {
   ProjetosService,
   dispararGatilhosTaskConcluida,
   gerarContaReceberCobrancaOs,
+  prazoTaskWorkflow,
+  sincronizarWorkflowTasks,
 } from './projetos.service';
 
 describe('ProjetosService — workflow OS', () => {
@@ -72,16 +74,20 @@ describe('ProjetosService — workflow OS', () => {
       });
 
       expect(result.id).toBe('p1');
-      expect(createMany).toHaveBeenCalledWith({
-        data: OS_WORKFLOW_TEMPLATES.PROJETOS_ELETRICOS.map((titulo, ordem) => ({
-          projetoId: 'p1',
-          titulo,
-          status: 'ToDo',
-          prioridade: 'Media',
-          ordem,
-          criadoPorId: null,
-        })),
-      });
+      expect(createMany).toHaveBeenCalled();
+      const data = createMany.mock.calls[0][0].data as Array<{
+        titulo: string;
+        prazo: Date;
+        dataInicio: Date;
+        ordem: number;
+      }>;
+      expect(data.map((t) => t.titulo)).toEqual([...OS_WORKFLOW_TEMPLATES.PROJETOS_ELETRICOS]);
+      expect(data[0].dataInicio).toEqual(data[0].prazo);
+      const cincoDias = 5 * 24 * 60 * 60 * 1000;
+      for (let i = 1; i < data.length; i += 1) {
+        expect(data[i].prazo.getTime() - data[i - 1].prazo.getTime()).toBe(cincoDias);
+        expect(data[i].ordem).toBe(i);
+      }
     });
 
     it('cria projeto sem createMany para tipo legado Instalacao', async () => {
@@ -103,6 +109,34 @@ describe('ProjetosService — workflow OS', () => {
       });
 
       expect(createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sincronizarWorkflowTasks', () => {
+    it('remove o checklist anterior e recria o novo com prazos de 5 em 5 dias', async () => {
+      (prisma.task.deleteMany as jest.Mock).mockResolvedValue({ count: 8 });
+      (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
+        dataInicio: new Date('2026-10-05T12:00:00.000Z'),
+      });
+      (prisma.task.createMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      const r = await sincronizarWorkflowTasks('p1', 'MANUTENCAO_EMERGENCIA', 'user-1');
+
+      expect(prisma.task.deleteMany).toHaveBeenCalledWith({
+        where: {
+          projetoId: 'p1',
+          titulo: { in: expect.arrayContaining(['Vistoria', 'Levantamento', 'Cobrança']) },
+        },
+      });
+      const criadas = (prisma.task.createMany as jest.Mock).mock.calls[0][0].data;
+      expect(criadas.map((t: { titulo: string }) => t.titulo)).toEqual([
+        'Levantamento',
+        'Cobrança',
+      ]);
+      expect(criadas[0].prazo).toEqual(prazoTaskWorkflow(new Date('2026-10-05T12:00:00.000Z'), 0));
+      expect(criadas[1].prazo).toEqual(prazoTaskWorkflow(new Date('2026-10-05T12:00:00.000Z'), 1));
+      expect(criadas[1].prazo.getUTCDate()).toBe(10);
+      expect(r).toEqual({ criadas: 2, removidas: 8 });
     });
   });
 
