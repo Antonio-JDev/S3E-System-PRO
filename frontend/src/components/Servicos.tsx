@@ -2,9 +2,11 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import { type Service, ServiceType } from '../types';
 import { servicosService, type Servico } from '../services/servicosService';
+import { useServicosLista, useInvalidateServicosLista } from '../hooks/useServicosQuery';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ActionsDropdown from './ui/ActionsDropdown';
+import { ServicosListaTable } from './ServicosListaTable';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { 
     generateEmptyTemplate, 
@@ -84,8 +86,12 @@ type ServiceFormState = {
 };
 
 const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
-    const [services, setServices] = useState<Service[]>([]);
-    const [loading, setLoading] = useState(true);
+    const {
+        data: servicesQueryData,
+        isLoading: loading,
+    } = useServicosLista();
+    const invalidateServicosLista = useInvalidateServicosLista();
+    const services = Array.isArray(servicesQueryData) ? servicesQueryData : [];
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<ServiceType | 'Todos'>('Todos');
     const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'Ativos' | 'Inativos'>('Todos');
@@ -125,15 +131,14 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         type: ServiceType.Instalacao
     });
 
-    // Carregar serviços do backend
-    useEffect(() => {
-        loadServices();
-    }, []);
-
     // Handler para mudança de modo de visualização
     const handleViewModeChange = (mode: 'grid' | 'list') => {
         setViewMode(mode);
         saveViewMode('Serviços', mode);
+    };
+
+    const loadServices = async () => {
+        await invalidateServicosLista();
     };
 
     // Gerar código automaticamente quando tipoServico mudar (apenas para novos serviços)
@@ -152,37 +157,6 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             }));
         }
     }, [formState.tipoServico, serviceToEdit, services]);
-
-    const loadServices = async () => {
-        try {
-            setLoading(true);
-            const response = await servicosService.listar();
-            
-            if (response.success && response.data) {
-                // Mapear serviços da API adicionando aliases para compatibilidade
-                const servicosArray = Array.isArray(response.data) ? response.data : [];
-                const servicesFormatados = servicosArray.map((serv: any) => ({
-                    ...serv,
-                    // Aliases para compatibilidade com o código existente
-                    name: serv.nome,
-                    internalCode: serv.codigo,
-                    description: serv.descricao || '',
-                    type: serv.tipo,
-                    price: serv.preco,
-                    ativo: serv.ativo !== undefined ? serv.ativo : true // Garantir que ativo seja preservado
-                }));
-                setServices(servicesFormatados);
-            } else {
-                console.warn('Nenhum serviço encontrado ou erro na resposta:', response);
-                setServices([]);
-            }
-        } catch (error) {
-            console.error('Erro ao carregar serviços:', error);
-            setServices([]);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -921,113 +895,13 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     )}
                 </div>
             ) : viewMode === 'list' ? (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600">
-                                <tr>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SERVIÇO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">CÓDIGO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">TIPO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">DESCRIÇÃO</th>
-                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">PREÇO</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">UNIDADE</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">STATUS</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">AÇÕES</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                {filteredServices.map((service) => (
-                                    <tr key={service.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-100 to-cyan-200 dark:from-cyan-900/50 dark:to-cyan-800/50 flex items-center justify-center flex-shrink-0">
-                                                    <WrenchScrewdriverIcon className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold text-gray-900 dark:text-white">{service.name}</p>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className="text-sm text-gray-600 dark:text-gray-400 font-mono">{service.internalCode}</span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
-                                                {getTypeIcon(service.type || service.tipo || ServiceType.Instalacao)} {service.type || service.tipo}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 max-w-xs">{service.description || service.descricao || 'Sem descrição'}</p>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                                                R$ {(service.price || service.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <span className="text-sm text-gray-600 dark:text-gray-400">{service.unidade || 'un'}</span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex justify-center">
-                                                {(() => {
-                                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
-                                                    return isAtivo ? (
-                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800">
-                                                            ✅ Ativo
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 ring-1 ring-red-200 dark:ring-red-800">
-                                                            ❌ Inativo
-                                                        </span>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <button
-                                                    onClick={() => setServiceToView(service)}
-                                                    className="p-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors"
-                                                    title="Visualizar"
-                                                >
-                                                    <EyeIcon className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleOpenModal(service)}
-                                                    className="p-2 bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 rounded-lg hover:bg-cyan-200 dark:hover:bg-cyan-900/70 transition-colors"
-                                                    title="Editar"
-                                                >
-                                                    <PencilIcon className="w-4 h-4" />
-                                                </button>
-                                                {(() => {
-                                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
-                                                    return isAtivo ? (
-                                                        <button
-                                                            onClick={() => handleOpenDeleteModal(service)}
-                                                            className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors"
-                                                            title="Desativar"
-                                                        >
-                                                            <TrashIcon className="w-4 h-4" />
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleReativarServico(service)}
-                                                            className="p-2 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/70 transition-colors"
-                                                            title="Ativar"
-                                                        >
-                                                            <ArrowPathIcon className="w-4 h-4" />
-                                                        </button>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <ServicosListaTable
+                    data={filteredServices}
+                    onView={setServiceToView}
+                    onEdit={handleOpenModal}
+                    onDesativar={handleOpenDeleteModal}
+                    onReativar={handleReativarServico}
+                />
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredServices.map((service) => (
