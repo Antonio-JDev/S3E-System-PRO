@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { useContext } from 'react';
 import { hasPermission } from '../utils/permissions';
+import { useMovimentacoesCaixa } from '../hooks/useFinanceiroQuery';
 import AlertDialog from './ui/AlertDialog';
 import TesourariaBancaria from './TesourariaBancaria';
 
@@ -40,10 +41,21 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
   const [dataFim, setDataFim] = useState(() => getInicioFimMes(now.getFullYear(), now.getMonth()).dataFim);
   const [categoria, setCategoria] = useState<string>('Todas');
   const [busca, setBusca] = useState('');
-  const [movimentacoes, setMovimentacoes] = useState<MovimentacaoCaixaItem[]>([]);
-  const [resumo, setResumo] = useState<ResumoMovimentacoes | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [buscaAplicada, setBuscaAplicada] = useState('');
   const { user } = useContext(AuthContext)!;
+  const {
+    data: caixaQueryData,
+    isLoading: loading,
+    refetch: refetchCaixa,
+    isError: caixaError,
+  } = useMovimentacoesCaixa({
+    dataInicio,
+    dataFim,
+    categoria: categoria === 'Todas' ? undefined : categoria,
+    busca: buscaAplicada.trim() || undefined,
+  });
+  const movimentacoes = (caixaQueryData?.movimentacoes ?? []) as MovimentacaoCaixaItem[];
+  const resumo = (caixaQueryData?.resumo ?? null) as ResumoMovimentacoes | null;
   const [showDesfazerDialog, setShowDesfazerDialog] = useState(false);
   const [contaToDesfazer, setContaToDesfazer] = useState<MovimentacaoCaixaItem | null>(null);
   const [motivoDesfazer, setMotivoDesfazer] = useState('');
@@ -80,37 +92,16 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
   // Audit panel removed from this page (logs centralizados na página Logs)
 
   const loadMovimentacoes = async () => {
-    setLoading(true);
-    try {
-      const response = await financeiroService.listarMovimentacoesCaixa({
-        dataInicio,
-        dataFim,
-        categoria: categoria === 'Todas' ? undefined : categoria,
-        busca: busca.trim() || undefined
-      });
-      if (response.success && response.data) {
-        setMovimentacoes(response.data.movimentacoes);
-        setResumo(response.data.resumo);
-      } else {
-        setMovimentacoes([]);
-        setResumo(null);
-        toast.error(response.error || 'Erro ao carregar movimentações');
-      }
-    } catch (e) {
-      setMovimentacoes([]);
-      setResumo(null);
-      toast.error('Erro de conexão');
-    } finally {
-      setLoading(false);
-    }
+    const result = await refetchCaixa();
+    if (result.isError) toast.error('Erro ao carregar movimentações');
   };
 
   useEffect(() => {
-    loadMovimentacoes();
-  }, [dataInicio, dataFim, categoria]);
+    if (caixaError) toast.error('Erro ao carregar movimentações');
+  }, [caixaError]);
 
   const handleBuscar = () => {
-    loadMovimentacoes();
+    setBuscaAplicada(busca);
   };
 
   const abrirDesfazerDialog = (m: MovimentacaoCaixaItem) => {
