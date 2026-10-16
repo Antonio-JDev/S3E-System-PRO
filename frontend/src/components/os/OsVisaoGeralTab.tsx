@@ -8,6 +8,7 @@ import {
   labelTipoOs,
   OS_TIPOS,
   OS_WORKFLOW_TEMPLATES,
+  type EntregaQuadroMetadados,
 } from '../../utils/osWorkflow.util';
 import { montarResumoProdutividadeOs } from '../../utils/osPrazoProgresso.util';
 import type { ProjetoDetalhe } from '../ModalVizualizacaoProjeto';
@@ -17,6 +18,7 @@ import OsPrazoEstimadoCard from './OsPrazoEstimadoCard';
 import OsPrazoProgressoBar from './OsPrazoProgressoBar';
 import type { OsEditFormDraft } from '../../hooks/useOsEditForm';
 import { listarUsuariosResponsavelOs } from '../../utils/usuariosResponsavelOs.util';
+import OsRomaneioEntregaCard from './OsRomaneioEntregaCard';
 
 export interface DocumentoOs {
   id: string;
@@ -117,6 +119,7 @@ export interface OsVisaoGeralTabProps {
   onCancelEdit?: () => void;
   clientesOptions?: Array<{ id: string; nome: string; documento?: string }>;
   usuariosOptions?: Array<{ id: string; nome: string; role?: string }>;
+  onRomaneioEntregaChange?: (entrega: EntregaQuadroMetadados) => void;
 }
 
 const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
@@ -165,6 +168,7 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
   onCancelEdit,
   clientesOptions = [],
   usuariosOptions = [],
+  onRomaneioEntregaChange,
 }) => {
   const [buscaCliente, setBuscaCliente] = useState('');
   const [openDropdownCliente, setOpenDropdownCliente] = useState(false);
@@ -379,6 +383,17 @@ const OsVisaoGeralTab: React.FC<OsVisaoGeralTabProps> = ({
             </p>
           )}
         </section>
+      )}
+
+      {isOsTipoQuadrosPainels(tipoOs) && (
+        <OsRomaneioEntregaCard
+          projetoId={projeto.id}
+          tituloOs={projeto.titulo}
+          numeroOs={projeto.orcamento?.numeroSequencial}
+          usuarios={usuariosOptions}
+          entregaInicial={projeto.entregaQuadro}
+          onEntregaChange={onRomaneioEntregaChange}
+        />
       )}
 
       {/* Progresso de execução (azul) + consumo do prazo (amarelo/laranja/vermelho) */}
