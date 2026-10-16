@@ -49,8 +49,19 @@ describe('buildDescriptionCombinedHtml', () => {
         '<p>Linha A</p><p><img src="https://example.com/a.jpg" alt="foto" /></p>',
     });
     expect(html).toContain('class="section"');
-    expect(html).toContain('Descrição Técnica do Projeto');
+    expect(html).not.toContain('Descrição Técnica do Projeto');
     expect(html).toContain('Linha A');
+  });
+
+  it('não inclui Descrição Resumida (campo interno) no PDF', () => {
+    const html = buildDescriptionCombinedHtml({
+      ...base,
+      descricao: '<p>Só uso interno</p>',
+      descricaoProjeto: '<p>Técnica visível</p>',
+    });
+    expect(html).not.toContain('Só uso interno');
+    expect(html).not.toContain('Descrição Geral');
+    expect(html).toContain('Técnica visível');
   });
 });
 
