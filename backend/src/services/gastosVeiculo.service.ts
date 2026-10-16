@@ -1,5 +1,48 @@
 import { prisma } from '../lib/prisma';
 import { parseDataDiaCivilInput } from '../utils/vencimentoVeiculo.util';
+import {
+    dadosContaPagarDeGasto,
+    patchContaPagarAposEdicaoGasto,
+} from '../utils/gastoVeiculoContaPagar.util';
+
+type GastoComVeiculo = {
+    id: string;
+    tipo: string;
+    descricao: string | null;
+    valor: { toString(): string } | number | string;
+    data: Date;
+    km: number | null;
+    veiculoId: string;
+    veiculo: { id: string; modelo: string; placa: string; kmAtual: number };
+};
+
+async function sincronizarKmCombustivel(
+    tx: any,
+    gasto: { tipo: string; km: number | null; veiculoId: string; veiculo: { kmAtual: number } },
+) {
+    if (gasto.tipo !== 'Combustível' || gasto.km == null) return;
+    const km = Number(gasto.km);
+    if (km > gasto.veiculo.kmAtual) {
+        await tx.veiculo.update({
+            where: { id: gasto.veiculoId },
+            data: { kmAtual: km },
+        });
+    }
+}
+
+async function gravarContaDoGasto(tx: any, gasto: GastoComVeiculo) {
+    const existente = await tx.contaPagar.findUnique({ where: { gastoVeiculoId: gasto.id } });
+    if (!existente) {
+        await tx.contaPagar.create({
+            data: dadosContaPagarDeGasto(gasto, gasto.veiculo),
+        });
+        return;
+    }
+    await tx.contaPagar.update({
+        where: { gastoVeiculoId: gasto.id },
+        data: patchContaPagarAposEdicaoGasto(existente, gasto, gasto.veiculo),
+    });
+}
 
 export const GastosVeiculoService = {
     async listarGastos(veiculoId?: string) {
@@ -40,26 +83,22 @@ export const GastosVeiculoService = {
         obraId?: string;
         responsavel?: string;
     }) {
-        const gasto = await prisma.gastoVeiculo.create({
-            data: {
-                ...data,
-                data: parseDataDiaCivilInput(data.data) ?? new Date(),
-                litros: data.litros != null ? data.litros : undefined,
-            },
-            include: {
-                veiculo: true
-            }
-        });
+        const gasto = await prisma.$transaction(async (tx) => {
+            const criado = await tx.gastoVeiculo.create({
+                data: {
+                    ...data,
+                    data: parseDataDiaCivilInput(data.data) ?? new Date(),
+                    litros: data.litros != null ? data.litros : undefined,
+                },
+                include: {
+                    veiculo: true
+                }
+            });
 
-        if (data.tipo === 'Combustível' && data.km != null) {
-            const veiculo = await prisma.veiculo.findUnique({ where: { id: data.veiculoId } });
-            if (veiculo && data.km > veiculo.kmAtual) {
-                await prisma.veiculo.update({
-                    where: { id: data.veiculoId },
-                    data: { kmAtual: data.km },
-                });
-            }
-        }
+            await gravarContaDoGasto(tx, criado);
+            await sincronizarKmCombustivel(tx, criado);
+            return criado;
+        });
 
         return gasto;
     },
@@ -82,21 +121,16 @@ export const GastosVeiculoService = {
             updateData.litros = data.litros;
         }
 
-        const gasto = await prisma.gastoVeiculo.update({
-            where: { id },
-            data: updateData,
-            include: { veiculo: true },
+        const gasto = await prisma.$transaction(async (tx) => {
+            const atualizado = await tx.gastoVeiculo.update({
+                where: { id },
+                data: updateData,
+                include: { veiculo: true },
+            });
+            await gravarContaDoGasto(tx, atualizado);
+            await sincronizarKmCombustivel(tx, atualizado);
+            return atualizado;
         });
-
-        if (gasto.tipo === 'Combustível' && gasto.km != null) {
-            const km = Number(gasto.km);
-            if (km > gasto.veiculo.kmAtual) {
-                await prisma.veiculo.update({
-                    where: { id: gasto.veiculoId },
-                    data: { kmAtual: km },
-                });
-            }
-        }
 
         return gasto;
     },
