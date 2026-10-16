@@ -64,12 +64,9 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
     const [tipoQuadro, setTipoQuadro] = useState<'POLICARBONATO' | 'ALUMINIO' | 'COMANDO'>('POLICARBONATO');
     
     const [materiais, setMateriais] = useState<Material[]>([]);
-    const [cotacoes, setCotacoes] = useState<Material[]>([]);
     const [loading, setLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     
-    // Toggle entre Estoque Real e Banco Frio (Cotações)
-    const [fonteDados, setFonteDados] = useState<'ESTOQUE' | 'COTACOES'>('ESTOQUE');
     
     // Estados de pesquisa separados para cada campo
     const [searchCaixaTerm, setSearchCaixaTerm] = useState('');
@@ -108,25 +105,16 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
     useEffect(() => {
         if (isOpen) {
             loadMateriais();
-            loadCotacoes();
         }
     }, [isOpen]);
 
     // BLOCO 2: useEffect para monitorar mudança de tipo do quadro e fonte de dados
     useEffect(() => {
         if (isOpen && (tipoQuadro === 'ALUMINIO' || tipoQuadro === 'COMANDO')) {
-            // Limpar caixa selecionada ao mudar fonte de dados
             setCaixaSelecionada(null);
-            
-            // Só carrega caixas de estoque se a fonte for ESTOQUE
-            if (fonteDados === 'ESTOQUE') {
-                loadCaixasDisponiveis(tipoQuadro);
-            } else {
-                // Se for COTACOES, limpa as caixas de estoque
-                setCaixasDisponiveis([]);
-            }
+            loadCaixasDisponiveis(tipoQuadro);
         }
-    }, [tipoQuadro, isOpen, fonteDados]);
+    }, [tipoQuadro, isOpen]);
 
     const loadMateriais = async () => {
         try {
@@ -149,35 +137,6 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         }
     };
 
-    const loadCotacoes = async () => {
-        try {
-            const response = await axiosApiService.get('/api/cotacoes');
-            if (response.success && response.data) {
-                // Cada cotação É um item individual, não tem items dentro dela
-                const cotacoesArray = Array.isArray(response.data) ? response.data : [];
-                const cotacoesFormatadas = cotacoesArray
-                    .filter((cotacao: any) => cotacao.ativo) // Só cotações ativas
-                    .map((cotacao: any) => ({
-                        id: `cotacao_${cotacao.id}`,
-                        nome: cotacao.nome || 'Item da Cotação',
-                        preco: cotacao.valorUnitario || 0, // Preço de cotação (valorUnitario)
-                        valorVenda: cotacao.valorVenda || cotacao.valorUnitario * 1.4, // Valor de venda (padrão 40% acima)
-                        estoque: 0, // Cotações não têm estoque físico
-                        unidadeMedida: 'un',
-                        _isCotacao: true,
-                        _cotacaoId: cotacao.id,
-                        _itemCotacaoId: cotacao.id,
-                        _dataUltimaCotacao: cotacao.dataAtualizacao || cotacao.updatedAt || cotacao.createdAt,
-                        _fornecedorNome: cotacao.fornecedorNome || 'Sem fornecedor'
-                    }));
-                setCotacoes(cotacoesFormatadas);
-                console.log(`✅ ${cotacoesFormatadas.length} itens de cotações carregados`);
-            }
-        } catch (error) {
-            console.error('Erro ao carregar cotações:', error);
-            setCotacoes([]);
-        }
-    };
 
     // BLOCO 2: Função para carregar caixas de estoque (ALUMINIO/COMANDO)
     const loadCaixasDisponiveis = async (tipo: 'ALUMINIO' | 'COMANDO') => {
@@ -200,90 +159,53 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
     // Função helper para filtrar materiais por termo de busca
     // IMPORTANTE: Agora retorna AMBOS os arrays combinados para permitir seleção de qualquer fonte
     const filtrarMateriais = (searchTerm: string) => {
-        // Combinar materiais e cotações para permitir seleção de qualquer fonte
-        const todosItens = [
-            ...materiais.map(m => ({ ...m, _isCotacao: false })),
-            ...cotacoes.map(c => ({ ...c, _isCotacao: true }))
-        ];
-        
-        if (!searchTerm) {
-            // Sem busca: retornar todos os itens (materiais e cotações)
-            return todosItens;
-        }
-        
-        // Com busca: filtrar por nome ou ID (ignorar estoque)
-        return todosItens.filter(m =>
+        if (!searchTerm) return materiais;
+        return materiais.filter(m =>
             matchCrossSearch(searchTerm, m.nome) ||
             m.id.toLowerCase().includes(searchTerm.toLowerCase())
         );
     };
 
     // Filtros separados para cada campo (Policarbonato - Etapa 1)
-    const caixasMateriaisFiltrados = useMemo(() => filtrarMateriais(searchCaixaTerm), [materiais, cotacoes, fonteDados, searchCaixaTerm]);
+    const caixasMateriaisFiltrados = useMemo(() => filtrarMateriais(searchCaixaTerm), [materiais, searchCaixaTerm]);
     
     // Filtros para Etapa 2 (Disjuntor Geral e Barramento)
-    const disjuntoresFiltrados = useMemo(() => filtrarMateriais(searchDisjuntorTerm), [materiais, cotacoes, fonteDados, searchDisjuntorTerm]);
-    const barramentosFiltrados = useMemo(() => filtrarMateriais(searchBarramentoTerm), [materiais, cotacoes, fonteDados, searchBarramentoTerm]);
+    const disjuntoresFiltrados = useMemo(() => filtrarMateriais(searchDisjuntorTerm), [materiais, searchDisjuntorTerm]);
+    const barramentosFiltrados = useMemo(() => filtrarMateriais(searchBarramentoTerm), [materiais, searchBarramentoTerm]);
     
     // Filtros para Etapa 3 (Medição)
-    const medicaoDisjuntoresFiltrados = useMemo(() => filtrarMateriais(searchMedicaoDisjuntorTerm), [materiais, cotacoes, fonteDados, searchMedicaoDisjuntorTerm]);
-    const medicaoMedidoresFiltrados = useMemo(() => filtrarMateriais(searchMedicaoMedidorTerm), [materiais, cotacoes, fonteDados, searchMedicaoMedidorTerm]);
+    const medicaoDisjuntoresFiltrados = useMemo(() => filtrarMateriais(searchMedicaoDisjuntorTerm), [materiais, searchMedicaoDisjuntorTerm]);
+    const medicaoMedidoresFiltrados = useMemo(() => filtrarMateriais(searchMedicaoMedidorTerm), [materiais, searchMedicaoMedidorTerm]);
     
     // Filtros para outras etapas
-    const cabosFiltrados = useMemo(() => filtrarMateriais(searchCaboTerm), [materiais, cotacoes, fonteDados, searchCaboTerm]);
-    const dpsFiltrados = useMemo(() => filtrarMateriais(searchDPSTerm), [materiais, cotacoes, fonteDados, searchDPSTerm]);
-    const bornsFiltrados = useMemo(() => filtrarMateriais(searchBornTerm), [materiais, cotacoes, fonteDados, searchBornTerm]);
-    const parafusosFiltrados = useMemo(() => filtrarMateriais(searchParafusoTerm), [materiais, cotacoes, fonteDados, searchParafusoTerm]);
-    const trilhosFiltrados = useMemo(() => filtrarMateriais(searchTrilhoTerm), [materiais, cotacoes, fonteDados, searchTrilhoTerm]);
-    const componentesFiltrados = useMemo(() => filtrarMateriais(searchComponenteTerm), [materiais, cotacoes, fonteDados, searchComponenteTerm]);
+    const cabosFiltrados = useMemo(() => filtrarMateriais(searchCaboTerm), [materiais, searchCaboTerm]);
+    const dpsFiltrados = useMemo(() => filtrarMateriais(searchDPSTerm), [materiais, searchDPSTerm]);
+    const bornsFiltrados = useMemo(() => filtrarMateriais(searchBornTerm), [materiais, searchBornTerm]);
+    const parafusosFiltrados = useMemo(() => filtrarMateriais(searchParafusoTerm), [materiais, searchParafusoTerm]);
+    const trilhosFiltrados = useMemo(() => filtrarMateriais(searchTrilhoTerm), [materiais, searchTrilhoTerm]);
+    const componentesFiltrados = useMemo(() => filtrarMateriais(searchComponenteTerm), [materiais, searchComponenteTerm]);
 
     // Filtrar caixas de estoque (ALUMINIO/COMANDO)
     const caixasEstoqueFiltradas = useMemo(() => {
-        // Se estiver usando Banco Frio, usar materiais/cotações
-        if (fonteDados === 'COTACOES') {
-            const fonte = cotacoes;
-            if (!searchCaixaTerm) return fonte;
-            return fonte.filter(m =>
-                m.nome.toLowerCase().includes(searchCaixaTerm.toLowerCase()) ||
-                m.id.toLowerCase().includes(searchCaixaTerm.toLowerCase())
-            );
-        }
-        
-        // Se estiver usando Estoque Real, usar caixasDisponiveis
         if (!searchCaixaTerm) return caixasDisponiveis;
         return caixasDisponiveis.filter(c =>
             c.descricao.toLowerCase().includes(searchCaixaTerm.toLowerCase()) ||
             c.codigo.toLowerCase().includes(searchCaixaTerm.toLowerCase())
         );
-    }, [caixasDisponiveis, cotacoes, fonteDados, searchCaixaTerm]);
+    }, [caixasDisponiveis, searchCaixaTerm]);
 
     // Helper para buscar item em materiais ou cotações
     const getItemById = (id: string): Material | null => {
         if (!id) return null;
-        // Se o ID começa com 'cotacao_', buscar nas cotações
-        if (id.startsWith('cotacao_')) {
-            const cotacao = cotacoes.find(c => c.id === id);
-            return cotacao || null;
-        }
-        // Caso contrário, buscar em materiais
         return materiais.find(m => m.id === id) || null;
     };
 
-    // Helper para obter preço do item (considera valorVenda para cotações)
     const getItemPrice = (item: Material | null): number => {
         if (!item) return 0;
-        // Se for cotação, usar valorVenda se disponível, senão usar preco (valorUnitario)
-        if ((item as any)._isCotacao) {
-            // Para cotações, o preco já é o valorUnitario, mas podemos ter valorVenda
-            return (item as any).valorVenda || item.preco || 0;
-        }
-        // Para materiais, usar preco (ou valorVenda se disponível)
         return (item as any).valorVenda || item.preco || 0;
     };
 
-    // Helper para renderizar item na lista de busca (com indicação de estoque/banco frio)
     const renderItemInList = (material: Material, onClick: () => void, size: 'sm' | 'md' = 'md') => {
-        const isCotacao = (material as any)._isCotacao;
         const precoVenda = getItemPrice(material);
         const padding = size === 'sm' ? 'p-3' : 'p-4';
         const textSize = size === 'sm' ? 'text-sm' : 'text-base';
@@ -292,35 +214,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         return (
             <div
                 key={material.id}
-                className={`${padding} hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0 ${
-                    isCotacao ? 'bg-blue-50/50' : ''
-                }`}
+                className={`${padding} hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0`}
                 onClick={onClick}
             >
                 <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                        <p className={`font-semibold text-gray-900 ${textSize}`}>{material.nome}</p>
-                        {isCotacao && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                ❄️ Banco Frio
-                            </span>
-                        )}
-                    </div>
+                    <p className={`font-semibold text-gray-900 ${textSize}`}>{material.nome}</p>
                     <p className={`${textSizeSmall} text-gray-600`}>
-                        {isCotacao ? (
-                            <>
-                                <span className="text-gray-500 line-through mr-2">
-                                    Cotação: R$ {material.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </span>
-                                <span className="font-semibold text-blue-700">
-                                    Venda: R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </span>
-                            </>
-                        ) : (
-                            <>
-                                Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </>
-                        )}
+                        Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
                 <PlusIcon className="w-5 h-5 text-blue-600" />
@@ -447,7 +347,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         });
         
         return total;
-    }, [config, materiais, cotacoes]);
+    }, [config, materiais]);
 
     // Helper para abrir diálogo de quantidade
     const abrirDialogoQuantidade = (material: Material, onConfirm: (qty: number) => void) => {
@@ -501,7 +401,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         
         setSearchCaixaTerm('');
         const nome = (caixa as any).descricao || (caixa as any).nome || 'Item';
-        console.log(`✅ Caixa selecionada: ${nome}${fonteDados === 'COTACOES' ? ' (Banco Frio)' : ''}`);
+        console.log(`✅ Caixa selecionada: ${nome}`);
     };
 
     const handleRemoverCaixaEstoque = () => {
@@ -645,7 +545,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
             setIsSaving(true);
             
             // Verificar se há itens de cotações
-            const fonte = fonteDados === 'ESTOQUE' ? materiais : cotacoes;
+            const fonte = materiais;
             const todosIds = [
                 ...config.caixas.map(c => c.materialId),
                 ...(config.disjuntorGeral ? [config.disjuntorGeral.materialId] : []),
@@ -667,7 +567,6 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                 configuracao: {
                     ...config,
                     tipo: tipoQuadro,
-                    fonteDados,
                     temItensCotacao // Flag para controle
                 }
             };
@@ -724,15 +623,11 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                             {/* Lista de materiais filtrados */}
                             {searchCaixaTerm && caixasMateriaisFiltrados.length > 0 && (
                                 <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-xl">
-                                    {caixasMateriaisFiltrados.slice(0, 10).map(material => {
-                                        const isCotacao = (material as any)._isCotacao;
-                                        const precoVenda = getItemPrice(material);
+                                    {caixasMateriaisFiltrados.slice(0, 10).map(material => {                                        const precoVenda = getItemPrice(material);
                                         return (
                                             <div
                                                 key={material.id}
-                                                className={`p-4 hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0 ${
-                                                    isCotacao ? 'bg-blue-50/50' : ''
-                                                }`}
+                                                className={`p-4 hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0 `}
                                                 onClick={() => {
                                                     abrirDialogoQuantidade(material, (qty) => {
                                                         handleAddCaixa(material.id, qty);
@@ -742,27 +637,11 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <p className="font-semibold text-gray-900">{material.nome}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
-                                                        {isCotacao ? (
-                                                            <>
-                                                                <span className="text-gray-500 line-through mr-2">
-                                                                    Cotação: R$ {material.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                </span>
-                                                                <span className="font-semibold text-blue-700">
-                                                                    Venda: R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <>
+                                                        {<>
                                                                 Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </>
-                                                        )}
+                                                            </>}
                                                     </p>
                                                 </div>
                                                 <PlusIcon className="w-5 h-5 text-blue-600" />
@@ -781,20 +660,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     <div className="space-y-2">
                                         {config.caixas.map((item, index) => {
                                             const material = getItemById(item.materialId);
-                                            const preco = getItemPrice(material);
-                                            const isCotacao = material && (material as any)._isCotacao;
-                                            return (
+                                            const preco = getItemPrice(material);                                            return (
                                                 <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                    isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-blue-50 border-blue-200'
+                                                    'bg-blue-50 border-blue-200'
                                                 }`}>
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2">
                                                             <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                            {isCotacao && (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                    ❄️ Banco Frio
-                                                                </span>
-                                                            )}
                                                         </div>
                                                         <p className="text-sm text-gray-600">
                                                             Qtd: {item.quantidade} • Subtotal: R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -849,20 +721,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                             </div>
                                             <p className="font-semibold text-gray-900">
                                                 {(caixaSelecionada as any).descricao || (caixaSelecionada as any).nome || 'Item selecionado'}
-                                                {fonteDados === 'COTACOES' && (
-                                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                        ❄️ Banco Frio
-                                                    </span>
-                                                )}
                                             </p>
                                             <p className="text-sm text-gray-700 mt-1">
                                                 <span className="font-medium">Código:</span> {(caixaSelecionada as any).codigo || (caixaSelecionada as any).id}
                                             </p>
-                                            {fonteDados === 'ESTOQUE' && (
-                                                <p className="text-sm text-gray-700">
-                                                    <span className="font-medium">Estoque:</span> {caixaSelecionada.estoque} {caixaSelecionada.unidadeMedida}
-                                                </p>
-                                            )}
+                                            <p className="text-sm text-gray-700">
+                                                <span className="font-medium">Estoque:</span> {caixaSelecionada.estoque} {caixaSelecionada.unidadeMedida}
+                                            </p>
                                             <p className="text-lg font-bold text-green-700 mt-2">
                                                 R$ {caixaSelecionada.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
@@ -897,14 +762,9 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     {caixasEstoqueFiltradas.length === 0 ? (
                                         <div className="text-center py-8 bg-gray-50 rounded-xl border border-gray-200">
                                             <p className="text-gray-500">
-                                                {fonteDados === 'COTACOES' 
-                                                    ? (cotacoes.length === 0 
-                                                        ? 'Nenhum item disponível no banco frio (cotações)'
-                                                        : 'Nenhum item encontrado com o termo de busca')
-                                                    : (caixasDisponiveis.length === 0 
-                                                        ? 'Nenhuma caixa disponível em estoque para este tipo'
-                                                        : 'Nenhuma caixa encontrada com o termo de busca')
-                                                }
+                                                {caixasDisponiveis.length === 0
+                                                    ? 'Nenhuma caixa disponível em estoque para este tipo'
+                                                    : 'Nenhuma caixa encontrada com o termo de busca'}
                                             </p>
                                         </div>
                                     ) : (
@@ -937,26 +797,15 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                                                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{codigo}</td>
                                                                     <td className="px-4 py-3 text-sm text-gray-700">
                                                                         {descricao}
-                                                                        {fonteDados === 'COTACOES' && (
-                                                                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                                ❄️ Banco Frio
-                                                                            </span>
-                                                                        )}
                                                                     </td>
                                                                     <td className="px-4 py-3 text-sm text-center">
-                                                                        {fonteDados === 'COTACOES' ? (
-                                                                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                                                                Cotação
-                                                                            </span>
-                                                                        ) : (
-                                                                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                                                                estoque > 5 ? 'bg-green-100 text-green-800' :
-                                                                                estoque > 2 ? 'bg-yellow-100 text-yellow-800' :
-                                                                                'bg-red-100 text-red-800'
-                                                                            }`}>
-                                                                                {estoque} {unidade}
-                                                                            </span>
-                                                                        )}
+                                                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                                                            estoque > 5 ? 'bg-green-100 text-green-800' :
+                                                                            estoque > 2 ? 'bg-yellow-100 text-yellow-800' :
+                                                                            'bg-red-100 text-red-800'
+                                                                        }`}>
+                                                                            {estoque} {unidade}
+                                                                        </span>
                                                                     </td>
                                                                     <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
                                                                         R$ {preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1002,22 +851,15 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                             
                             {config.disjuntorGeral ? (() => {
                                 const material = getItemById(config.disjuntorGeral.materialId);
-                                const preco = getItemPrice(material);
-                                const isCotacao = material && (material as any)._isCotacao;
-                                return (
+                                const preco = getItemPrice(material);                                return (
                                     <div className={`flex justify-between items-center border p-3 rounded-lg ${
-                                        isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+                                        'bg-green-50 border-green-200'
                                     }`}>
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2">
                                                 <p className="font-semibold text-gray-900">
                                                     {material?.nome || 'Material não encontrado'}
                                                 </p>
-                                                {isCotacao && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                        ❄️ Banco Frio
-                                                    </span>
-                                                )}
                                             </div>
                                             <p className="text-sm text-gray-600">
                                                 Qtd: {config.disjuntorGeral.quantidade} • Subtotal: R$ {(preco * config.disjuntorGeral.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1070,22 +912,15 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                             
                             {config.barramento ? (() => {
                                 const material = getItemById(config.barramento.materialId);
-                                const preco = getItemPrice(material);
-                                const isCotacao = material && (material as any)._isCotacao;
-                                return (
+                                const preco = getItemPrice(material);                                return (
                                     <div className={`flex justify-between items-center border p-3 rounded-lg ${
-                                        isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-blue-50 border-blue-200'
+                                        'bg-blue-50 border-blue-200'
                                     }`}>
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2">
                                                 <p className="font-semibold text-gray-900">
                                                     {material?.nome || 'Material não encontrado'}
                                                 </p>
-                                                {isCotacao && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                        ❄️ Banco Frio
-                                                    </span>
-                                                )}
                                             </div>
                                             <p className="text-sm text-gray-600">
                                                 Qtd: {config.barramento.quantidade} {config.barramento.unidade === 'CM' ? 'cm' : 'm'} • Subtotal: R$ {(() => {
@@ -1122,9 +957,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                         <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-xl">
                                             {barramentosFiltrados.slice(0, 10).map(material => {
                                                 const tipoMat = identificarTipoMaterial(material.nome);
-                                                const isBarramento = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
-                                                const isCotacao = (material as any)._isCotacao;
-                                                const precoVenda = getItemPrice(material);
+                                                const isBarramento = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';                                                const precoVenda = getItemPrice(material);
                                                 
                                                 if (isBarramento) {
                                                     // Renderizar com botões CM/M para barramentos
@@ -1136,27 +969,11 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                                             <div className="flex-1">
                                                                 <div className="flex items-center gap-2 mb-1">
                                                                     <p className="font-semibold text-gray-900 text-sm">{material.nome}</p>
-                                                                    {isCotacao && (
-                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                            ❄️ Banco Frio
-                                                                        </span>
-                                                                    )}
                                                                 </div>
                                                                 <p className="text-xs text-gray-600">
-                                                                    {isCotacao ? (
-                                                                        <>
-                                                                            <span className="text-gray-500 line-through mr-2">
-                                                                                Cotação: R$ {material.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                            </span>
-                                                                            <span className="font-semibold text-blue-700">
-                                                                                Venda: R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                            </span>
-                                                                        </>
-                                                                    ) : (
-                                                                        <>
+                                                                    {<>
                                                                             Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                        </>
-                                                                    )}
+                                                                        </>}
                                                                 </p>
                                                                 <p className="text-xs text-indigo-600 mt-1">
                                                                     💡 Pode ser inserido em metros ou centímetros
@@ -1259,20 +1076,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                 <div className="space-y-2">
                                     {config.medidores.map((item, index) => {
                                         const material = getItemById(item.disjuntorId);
-                                        const preco = getItemPrice(material);
-                                        const isCotacao = material && (material as any)._isCotacao;
-                                        return (
+                                        const preco = getItemPrice(material);                                        return (
                                             <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-orange-50 border-orange-200'
+                                                'bg-orange-50 border-orange-200'
                                             }`}>
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
                                                         Qtd: {item.quantidade}{item.medidorId ? ` • Medidor: ${item.medidorId}` : ''} • Subtotal: R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1314,15 +1124,11 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                         {/* Lista de materiais filtrados */}
                         {searchCaboTerm && cabosFiltrados.length > 0 && (
                             <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-xl">
-                                {cabosFiltrados.slice(0, 10).map(material => {
-                                    const isCotacao = (material as any)._isCotacao;
-                                    const precoVenda = getItemPrice(material);
+                                {cabosFiltrados.slice(0, 10).map(material => {                                    const precoVenda = getItemPrice(material);
                                     return (
                                         <div
                                             key={material.id}
-                                            className={`p-4 hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0 ${
-                                                isCotacao ? 'bg-blue-50/50' : ''
-                                            }`}
+                                            className={`p-4 hover:bg-gray-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0 `}
                                             onClick={() => {
                                                 const unidade = 'METROS';
                                                 abrirDialogoQuantidade(material, (qty) => {
@@ -1334,27 +1140,11 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <p className="font-semibold text-gray-900">{material.nome}</p>
-                                                    {isCotacao && (
-                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                            ❄️ Banco Frio
-                                                        </span>
-                                                    )}
                                                 </div>
                                                 <p className="text-sm text-gray-600">
-                                                    {isCotacao ? (
-                                                        <>
-                                                            <span className="text-gray-500 line-through mr-2">
-                                                                Cotação: R$ {material.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m
-                                                            </span>
-                                                            <span className="font-semibold text-blue-700">
-                                                                Venda: R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m
-                                                            </span>
-                                                        </>
-                                                    ) : (
-                                                        <>
+                                                    {<>
                                                             Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m
-                                                        </>
-                                                    )}
+                                                        </>}
                                                 </p>
                                             </div>
                                             <PlusIcon className="w-5 h-5 text-blue-600" />
@@ -1374,20 +1164,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     {config.cabos.map((item, index) => {
                                         const material = getItemById(item.materialId);
                                         const preco = getItemPrice(material);
-                                        const qtdMetros = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-                                        const isCotacao = material && (material as any)._isCotacao;
-                                        return (
+                                        const qtdMetros = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;                                        return (
                                             <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-yellow-50 border-yellow-200'
+                                                'bg-yellow-50 border-yellow-200'
                                             }`}>
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
                                                         {item.quantidade} {item.unidade} ({qtdMetros}m) • Subtotal: R$ {(preco * qtdMetros).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1477,20 +1260,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                 <div className="space-y-2">
                                     {config.dps.items.map((item, index) => {
                                         const material = getItemById(item.materialId);
-                                        const preco = getItemPrice(material);
-                                        const isCotacao = material && (material as any)._isCotacao;
-                                        return (
+                                        const preco = getItemPrice(material);                                        return (
                                             <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'
+                                                'bg-red-50 border-red-200'
                                             }`}>
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
                                                         Qtd: {item.quantidade} • Subtotal: R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1564,20 +1340,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     <div className="space-y-2">
                                         {config.born.map((item, index) => {
                                             const material = getItemById(item.materialId);
-                                            const preco = getItemPrice(material);
-                                            const isCotacao = material && (material as any)._isCotacao;
-                                            return (
+                                            const preco = getItemPrice(material);                                            return (
                                                 <div key={index} className={`flex justify-between items-center border p-2 rounded-lg ${
-                                                    isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+                                                    'bg-green-50 border-green-200'
                                                 }`}>
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2">
                                                             <p className="font-semibold text-gray-900 text-sm">{material?.nome || 'Material não encontrado'}</p>
-                                                            {isCotacao && (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                    ❄️ Banco Frio
-                                                                </span>
-                                                            )}
                                                         </div>
                                                         <p className="text-xs text-gray-600">
                                                             Qtd: {item.quantidade} • R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1641,20 +1410,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     <div className="space-y-2">
                                         {config.parafusos.map((item, index) => {
                                             const material = getItemById(item.materialId);
-                                            const preco = getItemPrice(material);
-                                            const isCotacao = material && (material as any)._isCotacao;
-                                            return (
+                                            const preco = getItemPrice(material);                                            return (
                                                 <div key={index} className={`flex justify-between items-center border p-2 rounded-lg ${
-                                                    isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-blue-50 border-blue-200'
+                                                    'bg-blue-50 border-blue-200'
                                                 }`}>
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2">
                                                             <p className="font-semibold text-gray-900 text-sm">{material?.nome || 'Material não encontrado'}</p>
-                                                            {isCotacao && (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                    ❄️ Banco Frio
-                                                                </span>
-                                                            )}
                                                         </div>
                                                         <p className="text-xs text-gray-600">
                                                             Qtd: {item.quantidade} • R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1728,20 +1490,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     {config.trilhos.map((item, index) => {
                                         const material = getItemById(item.materialId);
                                         const preco = getItemPrice(material);
-                                        const qtdMetros = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-                                        const isCotacao = material && (material as any)._isCotacao;
-                                        return (
+                                        const qtdMetros = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;                                        return (
                                             <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-blue-50 border-blue-200'
+                                                'bg-blue-50 border-blue-200'
                                             }`}>
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
                                                         {item.quantidade} {item.unidade} ({qtdMetros}m) • Subtotal: R$ {(preco * qtdMetros).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1815,20 +1570,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                 <div className="space-y-2">
                                     {config.componentes.map((item, index) => {
                                         const material = getItemById(item.materialId);
-                                        const preco = getItemPrice(material);
-                                        const isCotacao = material && (material as any)._isCotacao;
-                                        return (
+                                        const preco = getItemPrice(material);                                        return (
                                             <div key={index} className={`flex justify-between items-center border p-3 rounded-lg ${
-                                                isCotacao ? 'bg-blue-50 border-blue-200' : 'bg-blue-50 border-blue-200'
+                                                'bg-blue-50 border-blue-200'
                                             }`}>
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <p className="font-semibold text-gray-900">{material?.nome || 'Material não encontrado'}</p>
-                                                        {isCotacao && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                ❄️ Banco Frio
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     <p className="text-sm text-gray-600">
                                                         Qtd: {item.quantidade} • Subtotal: R$ {(preco * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -2023,7 +1771,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                         quantityDialogData.onConfirm(qty);
                     }}
                     itemName={quantityDialogData.material.nome}
-                    maxQuantity={fonteDados === 'ESTOQUE' ? quantityDialogData.material.estoque : undefined}
+                    maxQuantity={quantityDialogData.material.estoque}
                 />
             )}
         </div>
