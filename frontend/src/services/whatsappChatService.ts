@@ -108,8 +108,10 @@ export interface WhatsappChatPreview {
    * sem este campo o frontend fica sem saber qual número exibir.
    */
   phoneNumberFromS3e?: string | null;
-  /** Foto de perfil (última URL obtida no provedor), persistida no servidor. */
+  /** Foto de perfil (última URL obtida no provedor), persistida no servidor. A lista não envia a URL. */
   cachedProfilePictureUrl?: string | null;
+  /** Há foto no cache. O download usa Authorization, sem token na URL. */
+  hasProfilePicture?: boolean;
 }
 
 export interface WhatsappConnectionStatus {
@@ -509,9 +511,8 @@ export function whatsappCdnImageProxyUrl(url: string | null | undefined): string
 }
 
 /**
- * URL da foto de perfil servida pelo backend (cache persistente, sem 403 no CDN).
- * Use quando houver indício de foto (`cachedProfilePictureUrl` ou fetch recente).
- * `cacheKey` força o browser a baixar de novo após contact-meta atualizar a URL.
+ * URL da foto sem token. A lista usa `loadWhatsappProfilePictureObjectUrl`,
+ * que manda o JWT no header Authorization.
  */
 export function whatsappProfilePictureImageUrl(
   chatId: string,
@@ -527,12 +528,39 @@ export function whatsappProfilePictureImageUrl(
   if (cacheKey != null && String(cacheKey).trim()) {
     q += `&v=${encodeURIComponent(String(cacheKey).trim())}`;
   }
-  const token =
-    typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
-  if (token && token !== 'null' && token !== 'undefined' && token.trim()) {
-    q += `&token=${encodeURIComponent(token.trim())}`;
-  }
   return `${backend}${BASE}/profile-picture/image?${q}`;
+}
+
+const profilePictureObjectUrls = new Map<string, string>();
+const profilePictureInflight = new Map<string, Promise<string | null>>();
+
+/** Baixa a foto com o header Authorization e guarda o blob em memória. */
+export async function loadWhatsappProfilePictureObjectUrl(
+  chatId: string,
+  version?: string | number | null,
+  refresh?: boolean
+): Promise<string | null> {
+  const cid = (chatId || '').trim();
+  if (!cid) return null;
+  const key = `${cid}|${version ?? ''}|${refresh ? '1' : '0'}`;
+  const hit = profilePictureObjectUrls.get(key);
+  if (hit) return hit;
+  const pending = profilePictureInflight.get(key);
+  if (pending) return pending;
+  const job = (async () => {
+    const q = new URLSearchParams({ chatId: cid });
+    if (refresh) q.set('refresh', '1');
+    const blob = await axiosApiService.getBlob(`${BASE}/profile-picture/image?${q.toString()}`);
+    if (!blob || blob.size < 32) return null;
+    if (blob.type && blob.type.includes('json')) return null;
+    const url = URL.createObjectURL(blob);
+    profilePictureObjectUrls.set(key, url);
+    return url;
+  })().finally(() => {
+    profilePictureInflight.delete(key);
+  });
+  profilePictureInflight.set(key, job);
+  return job;
 }
 
 /** URL do proxy por URL original do provedor forçando download explícito. */
