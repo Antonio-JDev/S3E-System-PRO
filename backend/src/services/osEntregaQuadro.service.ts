@@ -16,10 +16,16 @@ export async function obterEntregaQuadroProjeto(
   exigeChecklist: boolean;
   entrega: EntregaQuadroMetadados | null;
   checklist: ReturnType<typeof podeConcluirOsQuadros>;
+  empresaFiscalInformada: boolean;
 }> {
   const projeto = await prisma.projeto.findUnique({
     where: { id: projetoId },
-    select: { id: true, tipo: true, entregaQuadro: true },
+    select: {
+      id: true,
+      tipo: true,
+      entregaQuadro: true,
+      orcamento: { select: { empresaFiscalId: true } },
+    },
   });
   if (!projeto) throw new Error('Projeto não encontrado');
 
@@ -40,6 +46,7 @@ export async function obterEntregaQuadroProjeto(
     exigeChecklist: isOsTipoQuadrosPainels(projeto.tipo),
     entrega,
     checklist,
+    empresaFiscalInformada: Boolean(projeto.orcamento?.empresaFiscalId),
   };
 }
 
