@@ -1,7 +1,12 @@
 /**
- * Serviço de orquestração NFS-e Pública (Itajaí/SC) - v7.4
- * Fluxo: gerar XML -> validar XSD -> assinar -> enviar (RecepcionarLoteRps);
- * consultar protocolo (ConsultarLoteRps); cancelar (CancelarNfse com assinatura).
+ * Orquestração da NFS-e de Itajaí/SC no Sistema Nacional (DPS, leiaute v1.01).
+ *
+ * Canal ativo desde 01/07/2026: API REST da Sefin Nacional (mTLS + XML da DPS em GZip).
+ * A prefeitura deixou de receber emissão nova pelo SOAP da Pública. O código Pública
+ * permanece em nfse-publica-*.service.ts só como referência; este serviço não o chama.
+ *
+ * Fluxo: montar DPS -> assinar infDPS (XMLDSIG RSA-SHA256) -> POST /nfse.
+ * Consulta: GET /dps/{id} ou GET /nfse/{chave}. Cancelamento: evento 101101.
  */
 
 import { prisma } from '../lib/prisma';
@@ -9,22 +14,24 @@ import * as fs from 'fs';
 import { CryptoUtil } from '../utils/crypto.util';
 import { resolveCertificadoPath } from '../utils/certificadoPath.util';
 import { NFeSignatureService } from './nfe-signature.service';
-import {
-  gerarEnviarLoteRpsEnvio,
-  gerarPedidoCancelamentoNfse,
-  type EnviarLoteRpsEnvioInput
-} from './nfse-publica-xml.service';
-import { assinarLoteRps, assinarPedidoCancelamento } from './nfse-publica-signature.service';
-import { validarXmlNfseContraXsd } from './nfse-publica-validator.service';
-import {
-  recepcionarLoteRps,
-  consultarLoteRps,
-  cancelarNfse
-} from './nfse-publica-soap.service';
-import { mensagemErroNfse } from './nfse-publica-erros';
+import { type EnviarLoteRpsEnvioInput } from './nfse-publica-xml.service';
 import { VendasService } from './vendas.service';
-import { formatoItemListaServico } from './nfse-publica-xml.service';
 import { NfseFilaService } from './nfse-fila.service';
+import {
+  CODIGO_MUNICIPIO_ITAJAI,
+  codigoTributacaoNacional,
+  gerarXmlDps,
+  gerarXmlPedidoCancelamento,
+  serieDpsDaEmpresa,
+  serieDpsNumerica
+} from './nfse-nacional-xml.service';
+import { assinarXmlNfseNacional } from './nfse-nacional-signature.service';
+import {
+  consultarDpsOuChave,
+  enviarDpsAssinada,
+  registrarEventoNfse
+} from './nfse-nacional-api.service';
+import { extrairCodigoMunicipioInformado } from '../utils/nfe-emissao.util';
 
 
 /** DTO para preencher a tela de NFS-e a partir de uma venda (orçamento aprovado com itens de serviço). */
@@ -111,7 +118,9 @@ export async function buscarDadosVendaParaNfse(
     bairroCliente = (e.bairro as string) || '';
   }
 
-  const codigoMunicipioCliente = (cliente as { codigoMunicipio?: string }).codigoMunicipio;
+  const codigoMunicipioCliente =
+    (cliente as { codigoMunicipio?: string }).codigoMunicipio ||
+    extrairCodigoMunicipioInformado(cliente);
   const tomador = {
     razaoSocial: cliente.nome || '',
     ...(isPf ? { cpf: cpfCnpj } : { cnpj: cpfCnpj }),
@@ -131,7 +140,7 @@ export async function buscarDadosVendaParaNfse(
   const itensServico = (itensOrcamento as any[])
     .filter((item) => item.tipo === 'SERVICO' && !item.vendaDiretaFornecedor)
     .map((item) => ({
-      itemListaServico: formatoItemListaServico('140101'),
+      itemListaServico: codigoTributacaoNacional('140101'),
       discriminacao: ((item.descricao ?? item.servicoNome ?? 'Serviço') as string).trim() || 'Serviço',
       valorServicos: Number(item.subtotal) || 0,
       issRetido: 2 as const
@@ -145,7 +154,8 @@ export async function buscarDadosVendaParaNfse(
   });
   const proximoLote = (ultimoLote?.numeroLote ?? 0) + 1;
   const ultimoRps = ((empresa as any).ultimoRpsEnviado as number | null) ?? 0;
-  const serieRps = (((empresa as any).serieRps as string | null) || 'A1').trim() || 'A1';
+  // Série da DPS é numérica. "A1" (Pública) não entra no identificador nacional.
+  const serieRps = serieDpsDaEmpresa((empresa as any).serieRps as string | null);
 
   const prestador = {
     cnpj: empresa.cnpj.replace(/\D/g, ''),
@@ -169,9 +179,36 @@ export async function buscarDadosVendaParaNfse(
   };
 }
 
+async function carregarCertificadoEmpresa(
+  empresaId: string,
+  empresa: { certificadoPath: string | null; certificadoSenha: string | null }
+): Promise<{ keyPem: string; certPem: string } | { erro: string }> {
+  if (!empresa.certificadoPath || !empresa.certificadoSenha) {
+    return { erro: 'Certificado digital não configurado para esta empresa' };
+  }
+  const certPathResolvido = resolveCertificadoPath(empresa.certificadoPath);
+  if (!certPathResolvido || !fs.existsSync(certPathResolvido)) {
+    return {
+      erro: 'Certificado: arquivo não encontrado no servidor. Verifique o volume/caminho no Docker ou reenvie o certificado pela interface.'
+    };
+  }
+  try {
+    const senha = CryptoUtil.decrypt(empresa.certificadoSenha);
+    const cert = NFeSignatureService.carregarCertificado(certPathResolvido, senha);
+    if (!cert.key || cert.key.length < 50 || !cert.cert || cert.cert.length < 50) {
+      return { erro: 'Certificado: chave ou certificado extraídos do PFX estão vazios. Verifique o arquivo e a senha.' };
+    }
+    return { keyPem: cert.key, certPem: cert.cert };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '| Erro:', msg);
+    return { erro: `Certificado: ${msg}` };
+  }
+}
+
 /**
- * Envia lote de RPS (assíncrono): gera XML, valida XSD, assina e chama RecepcionarLoteRps.
- * Retorna número do protocolo para consulta posterior.
+ * Emite NFS-e nacional (síncrona) a partir dos dados que a tela ainda chama de lote/RPS.
+ * O número da DPS é o número do RPS informado. O retorno traz a chave de acesso.
  */
 export async function enviarLoteRps(
   empresaId: string,
@@ -180,6 +217,8 @@ export async function enviarLoteRps(
 ): Promise<{
   sucesso: boolean;
   protocolo?: string;
+  chaveAcesso?: string;
+  numeroNfse?: string;
   nfseId?: string;
   erro?: string;
 }> {
@@ -192,164 +231,149 @@ export async function enviarLoteRps(
   if (!empresa.inscricaoMunicipal) {
     return { sucesso: false, erro: 'E43: Inscrição Municipal é obrigatória para NFS-e. Cadastre na empresa fiscal.' };
   }
-  if (!empresa.certificadoPath || !empresa.certificadoSenha) {
-    return { sucesso: false, erro: 'Certificado digital não configurado para esta empresa' };
-  }
 
-  // Regra: NFS-e deve ser emitida pelo CNPJ da empresa selecionada. O certificado usado é sempre o dessa empresa.
-  // Se a empresa tem 2 CNPJs (2 cadastros EmpresaFiscal), cada um tem seu certificado; usamos o da empresaId.
   const cnpjEmpresa = empresa.cnpj.replace(/\D/g, '');
   const cnpjPrestador = input.prestador.cnpj.replace(/\D/g, '');
   if (cnpjPrestador !== cnpjEmpresa) {
     return {
       sucesso: false,
-      erro: `CNPJ do prestador no lote (${input.prestador.cnpj}) não corresponde ao CNPJ da empresa selecionada (${empresa.cnpj}). Utilize a empresa fiscal correta para este CNPJ.`
+      erro: `CNPJ do prestador (${input.prestador.cnpj}) não corresponde ao CNPJ da empresa selecionada (${empresa.cnpj}). Utilize a empresa fiscal correta para este CNPJ.`
     };
   }
   if ((input.prestador.inscricaoMunicipal || '').trim() !== (empresa.inscricaoMunicipal || '').trim()) {
     return {
       sucesso: false,
-      erro: 'Inscrição Municipal do prestador no lote deve ser a mesma da empresa selecionada.'
+      erro: 'Inscrição Municipal do prestador deve ser a mesma da empresa selecionada.'
     };
   }
 
-  let keyPem: string;
-  let certPem: string;
-  const certPathResolvido = resolveCertificadoPath(empresa.certificadoPath ?? null);
-  const certExiste = certPathResolvido ? fs.existsSync(certPathResolvido) : false;
-  console.log('🔐 [NFS-e] Carregando certificado para empresa', empresaId, '| path:', certPathResolvido ?? '(null)', '| arquivo existe:', certExiste);
-  if (!certPathResolvido || !certExiste) {
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '- arquivo não encontrado:', empresa.certificadoPath);
-    return { sucesso: false, erro: 'Certificado: arquivo não encontrado no servidor. Verifique o volume/caminho no Docker ou reenvie o certificado pela interface.' };
-  }
-  try {
-    const senha = CryptoUtil.decrypt(empresa.certificadoSenha);
-    const cert = NFeSignatureService.carregarCertificado(certPathResolvido, senha);
-    keyPem = cert.key;
-    certPem = cert.cert;
-    if (!keyPem || keyPem.length < 50 || !certPem || certPem.length < 50) {
-      console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '- chave ou certificado extraídos vazios ou inválidos.');
-      return { sucesso: false, erro: 'Certificado: chave ou certificado extraídos do PFX estão vazios. Verifique o arquivo e a senha.' };
-    }
-    console.log('🔐 [NFS-e] Certificado carregado com sucesso para empresa', empresaId);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '| Erro:', msg);
-    return { sucesso: false, erro: `Certificado: ${msg}` };
-  }
+  const cert = await carregarCertificadoEmpresa(empresaId, empresa);
+  if ('erro' in cert) return { sucesso: false, erro: cert.erro };
 
-  const xml = gerarEnviarLoteRpsEnvio(input);
-  
-  // Validação básica estrutural ANTES da assinatura (sem XSD que exige Signature)
-  console.log('🧪 [NFS-e] Validando estrutura básica do XML (sem XSD)...');
-  // TODO: Implementar validação estrutural básica para NFS-e se necessário
-  
+  const rps = input.listaRps[0];
+  if (!rps) return { sucesso: false, erro: 'Informe o serviço a emitir.' };
+  if (input.listaRps.length > 1) {
+    return {
+      sucesso: false,
+      erro: 'A NFS-e nacional emite uma DPS por vez. Envie um único conjunto de serviços da venda.'
+    };
+  }
+  const nDps = Number.isInteger(rps.numero) && rps.numero > 0 ? rps.numero : input.numeroLote;
+
   let xmlAssinado: string;
+  let idApi: string;
+  let valorTotal: number;
   try {
-    console.log('🔐 [NFS-e] Assinando lote RPS...');
-    xmlAssinado = assinarLoteRps(xml, keyPem, certPem);
-    console.log('🔐 [NFS-e] Lote assinado com sucesso.');
-    
-    // Validação XSD completa APÓS assinatura (agora com Signature)
-    console.log('🔍 [NFS-e] Validando XML completo com XSD (pós-assinatura)...');
-    const validacao = validarXmlNfseContraXsd(xmlAssinado);
-    if (!validacao.valido) {
-      console.error('❌ NFS-e validação XSD falhou após assinatura para empresa', empresaId, '| erros:', validacao.erros);
-      return {
-        sucesso: false,
-        erro: `Validação XSD pós-assinatura: ${validacao.erros.join('; ')}`
-      };
-    }
-    console.log('✅ [NFS-e] Validação XSD completa aprovada!');
+    const regAp = (process.env.NFSE_NACIONAL_REG_AP_TRIB_SN || '1').trim();
+    const gerada = gerarXmlDps({
+      ambiente,
+      dataEmissao: rps.dataEmissao instanceof Date ? rps.dataEmissao : new Date(rps.dataEmissao),
+      serie: rps.serie,
+      nDps,
+      cLocEmi: CODIGO_MUNICIPIO_ITAJAI,
+      naturezaOperacao: rps.naturezaOperacao,
+      prestador: {
+        cnpj: cnpjEmpresa,
+        inscricaoMunicipal: empresa.inscricaoMunicipal,
+        razaoSocial: empresa.razaoSocial,
+        telefone: empresa.telefone || undefined,
+        email: empresa.email || undefined,
+        logradouro: empresa.endereco,
+        numero: empresa.numero,
+        complemento: empresa.complemento || undefined,
+        bairro: empresa.bairro,
+        codigoMunicipio: CODIGO_MUNICIPIO_ITAJAI,
+        cep: empresa.cep,
+        optanteSimplesNacional: rps.optanteSimplesNacional,
+        regimeTributario: empresa.regimeTributario,
+        regApTribSN: regAp === '2' || regAp === '3' ? regAp : '1'
+      },
+      tomador: rps.tomador,
+      servicos: rps.servicos
+    });
+    idApi = gerada.idApi;
+    valorTotal = gerada.valorTotal;
+    xmlAssinado = assinarXmlNfseNacional(gerada.xml, cert.keyPem, cert.certPem, 'infDPS');
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('LOG: Falha ao assinar lote NFS-e para a empresa', empresaId, '| Erro:', msg);
-    return { sucesso: false, erro: `Assinatura: ${msg}` };
+    return { sucesso: false, erro: msg };
   }
 
-  const homolog = ambiente === '2';
-  const envio = await recepcionarLoteRps(xmlAssinado, homolog, certPem, keyPem);
-
-  const primeiroRps = input.listaRps[0];
-  const tomadorRazaoSocial = primeiroRps?.tomador?.razaoSocial ?? undefined;
-  const tomadorEmail = primeiroRps?.tomador?.email ?? undefined;
-  const valorTotal = input.listaRps.reduce(
-    (acc, rps) =>
-      acc + (rps.servicos?.reduce((s, it) => s + (Number(it.valorServicos) || 0), 0) ?? 0),
-    0
-  );
+  const envio = await enviarDpsAssinada(xmlAssinado, ambiente, cert.certPem, cert.keyPem);
+  const tomadorRazaoSocial = rps.tomador?.razaoSocial || undefined;
+  const tomadorEmail = rps.tomador?.email || undefined;
 
   if (!envio.sucesso) {
-    const erroAmigavel = envio.erro ? mensagemErroNfse(envio.erro) : 'Erro ao enviar lote';
-    console.error('[NFS-e] Envio rejeitado. Erro:', erroAmigavel);
-    if (envio.xmlResposta) {
-      console.error('[NFS-e] Resposta completa do servidor (XML):', envio.xmlResposta.substring(0, 3000));
+    const erroAmigavel = envio.erro || 'A Sefin Nacional recusou a DPS.';
+    if (envio.reenviar) {
+      await NfseFilaService.enfileirar({
+        empresaFiscalId: empresaId,
+        ambiente,
+        numeroLote: nDps,
+        xmlEnvio: xmlAssinado,
+        motivo: erroAmigavel
+      });
     }
-
-    // Enfileirar para nova tentativa (contingência)
-    console.log('📥 Colocando NFS-e na fila de retentativa devido a erro no envio.');
-    await NfseFilaService.enfileirar({
-      empresaFiscalId: empresaId,
-      ambiente,
-      numeroLote: input.numeroLote,
-      xmlEnvio: xmlAssinado,
-      motivo: erroAmigavel
-    });
-
     const nfseReg = await prisma.nfse.create({
       data: {
         empresaFiscalId: empresaId,
-        numeroLote: input.numeroLote,
+        numeroLote: nDps,
+        protocolo: idApi,
         situacao: 'Erro',
         ambiente,
         xmlEnvio: xmlAssinado,
-        xmlResposta: envio.xmlResposta ?? undefined,
-        erro: erroAmigavel + ' (Enfileirado para reenvio)',
+        xmlResposta: envio.xmlRetorno,
+        erro: envio.reenviar ? `${erroAmigavel} (Enfileirado para reenvio)` : erroAmigavel,
         tomadorRazaoSocial,
         tomadorEmail,
         valorTotal: valorTotal > 0 ? valorTotal : undefined
       }
     });
-
-    return { sucesso: false, erro: erroAmigavel, nfseId: nfseReg.id };
+    return { sucesso: false, erro: erroAmigavel, nfseId: nfseReg.id, protocolo: idApi };
   }
 
   const nfseReg = await prisma.nfse.create({
     data: {
       empresaFiscalId: empresaId,
-      numeroLote: input.numeroLote,
-      protocolo: envio.protocolo ?? undefined,
-      situacao: 'Pendente',
+      numeroLote: nDps,
+      protocolo: envio.idDps || idApi,
+      chaveAcesso: envio.chaveAcesso,
+      numeroNfse: envio.numeroNfse,
+      situacao: 'Processado',
       ambiente,
       xmlEnvio: xmlAssinado,
-      xmlResposta: envio.xmlResposta ?? undefined,
+      xmlResposta: envio.xmlRetorno,
       tomadorRazaoSocial,
       tomadorEmail,
       valorTotal: valorTotal > 0 ? valorTotal : undefined
     }
   });
 
-  const maxNumeroRpsEnviado = Math.max(
-    ...input.listaRps.map((r) => r.numero),
-    ((empresa as any).ultimoRpsEnviado as number | null) ?? 0
-  );
-  await (prisma.empresaFiscal as any).update({
+  let serieSalva = serieDpsDaEmpresa(rps.serie);
+  try {
+    serieSalva = serieDpsNumerica(rps.serie);
+  } catch {
+    serieSalva = '1';
+  }
+  await prisma.empresaFiscal.update({
     where: { id: empresaId },
     data: {
-      ultimoRpsEnviado: maxNumeroRpsEnviado,
-      serieRps: input.listaRps[0]?.serie?.trim() || ((empresa as any).serieRps as string | null) || 'A1'
+      ultimoRpsEnviado: Math.max(nDps, empresa.ultimoRpsEnviado ?? 0),
+      serieRps: serieSalva
     }
   });
 
   return {
     sucesso: true,
-    protocolo: envio.protocolo,
+    protocolo: envio.idDps || idApi,
+    chaveAcesso: envio.chaveAcesso,
+    numeroNfse: envio.numeroNfse,
     nfseId: nfseReg.id
   };
 }
 
 /**
- * Consulta resultado do processamento do lote pelo protocolo.
+ * Consulta a NFS-e nacional pelo id da DPS (42 dígitos, gravado em protocolo) ou pela chave (50).
  */
 export async function consultarProtocolo(
   empresaId: string,
@@ -358,7 +382,7 @@ export async function consultarProtocolo(
 ): Promise<{
   sucesso: boolean;
   situacao?: string;
-  listaNfse?: Array<{ numero: string; codigoVerificacao?: string }>;
+  listaNfse?: Array<{ numero: string; codigoVerificacao?: string; chaveAcesso?: string }>;
   erro?: string;
 }> {
   const empresa = await prisma.empresaFiscal.findUnique({
@@ -367,62 +391,51 @@ export async function consultarProtocolo(
   if (!empresa || !empresa.inscricaoMunicipal) {
     return { sucesso: false, erro: 'Empresa não encontrada ou sem inscrição municipal' };
   }
-  if (!empresa.certificadoPath || !empresa.certificadoSenha) {
-    return { sucesso: false, erro: 'Certificado não configurado' };
+  const cert = await carregarCertificadoEmpresa(empresaId, empresa);
+  if ('erro' in cert) return { sucesso: false, erro: cert.erro };
+
+  const resultado = await consultarDpsOuChave(numeroProtocolo, ambiente, cert.certPem, cert.keyPem);
+  if (!resultado.sucesso) {
+    return { sucesso: false, erro: resultado.erro };
   }
 
-  const certPathResolvido = resolveCertificadoPath(empresa.certificadoPath);
-  if (!certPathResolvido || !fs.existsSync(certPathResolvido)) {
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '(consultar protocolo) - arquivo não encontrado');
-    return { sucesso: false, erro: 'Certificado: arquivo não encontrado. Reenvie o certificado pela interface.' };
-  }
-
-  let certPem: string;
-  let keyPem: string;
-  try {
-    const senha = CryptoUtil.decrypt(empresa.certificadoSenha);
-    const cert = NFeSignatureService.carregarCertificado(certPathResolvido, senha);
-    keyPem = cert.key;
-    certPem = cert.cert;
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '(consultar protocolo) | Erro:', msg);
-    return { sucesso: false, erro: msg };
-  }
-
-  const homolog = ambiente === '2';
-  const cnpj = empresa.cnpj.replace(/\D/g, '');
-  const resultado = await consultarLoteRps(
-    numeroProtocolo,
-    cnpj,
-    empresa.inscricaoMunicipal,
-    homolog,
-    certPem,
-    keyPem
-  );
-
-  if (resultado.sucesso && resultado.listaNfse?.length && resultado.listaNfse[0]?.numero) {
-    const numeroNfse = resultado.listaNfse[0].numero;
+  const numero = resultado.numeroNfse;
+  const identificador = numeroProtocolo.replace(/\D/g, '');
+  if (numero || resultado.chaveAcesso) {
     await prisma.nfse.updateMany({
-      where: { empresaFiscalId: empresaId, protocolo: numeroProtocolo },
+      where: {
+        empresaFiscalId: empresaId,
+        OR: [
+          { protocolo: identificador },
+          { chaveAcesso: resultado.chaveAcesso || identificador },
+          ...(numero ? [{ numeroNfse: numero }] : [])
+        ]
+      },
       data: {
         situacao: 'Processado',
-        numeroNfse,
-        codigoVerificacao: resultado.listaNfse[0].codigoVerificacao ?? undefined
+        numeroNfse: numero,
+        chaveAcesso: resultado.chaveAcesso,
+        protocolo: resultado.idDps || undefined,
+        xmlResposta: resultado.xmlRetorno
       }
     });
   }
 
   return {
-    sucesso: resultado.sucesso,
-    situacao: resultado.situacao,
-    listaNfse: resultado.listaNfse,
-    erro: resultado.erro ? mensagemErroNfse(resultado.erro) : undefined
+    sucesso: true,
+    situacao: 'Processado',
+    listaNfse: [
+      {
+        numero: numero || '',
+        chaveAcesso: resultado.chaveAcesso,
+        codigoVerificacao: resultado.chaveAcesso
+      }
+    ]
   };
 }
 
 /**
- * Cancela NFS-e (CancelarNfse). Gera e assina PedidoCancelamento, envia.
+ * Cancela NFS-e nacional pelo evento 101101. O número informado pode ser o da nota ou a chave de 50 dígitos.
  */
 export async function cancelarNfsePorNumero(
   empresaId: string,
@@ -431,55 +444,55 @@ export async function cancelarNfsePorNumero(
   ambiente: AmbienteNfse
 ): Promise<{ sucesso: boolean; erro?: string }> {
   if (!justificativa || justificativa.trim().length < 15) {
-    return { sucesso: false, erro: 'E90: Justificativa obrigatória com no mínimo 15 caracteres' };
+    return { sucesso: false, erro: 'Justificativa obrigatória com no mínimo 15 caracteres' };
   }
 
   const empresa = await prisma.empresaFiscal.findUnique({
     where: { id: empresaId }
   });
-  if (!empresa || !empresa.certificadoPath || !empresa.certificadoSenha) {
-    return { sucesso: false, erro: 'Empresa ou certificado não encontrado' };
+  if (!empresa) return { sucesso: false, erro: 'Empresa ou certificado não encontrado' };
+  const cert = await carregarCertificadoEmpresa(empresaId, empresa);
+  if ('erro' in cert) return { sucesso: false, erro: cert.erro };
+
+  const informado = numeroNfse.replace(/\D/g, '');
+  let chave = informado.length === 50 ? informado : '';
+  if (!chave) {
+    const nota = await prisma.nfse.findFirst({
+      where: { empresaFiscalId: empresaId, numeroNfse: numeroNfse.trim() },
+      orderBy: { createdAt: 'desc' }
+    });
+    chave = nota?.chaveAcesso || '';
+  }
+  if (chave.length !== 50) {
+    return {
+      sucesso: false,
+      erro: 'Esta NFS-e não tem chave de acesso do Sistema Nacional. Notas antigas da Pública precisam ser canceladas no portal municipal.'
+    };
   }
 
-  const certPathResolvido = resolveCertificadoPath(empresa.certificadoPath);
-  if (!certPathResolvido || !fs.existsSync(certPathResolvido)) {
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '(cancelar NFS-e) - arquivo não encontrado');
-    return { sucesso: false, erro: 'Certificado: arquivo não encontrado. Reenvie o certificado pela interface.' };
-  }
-
-  let keyPem: string;
-  let certPem: string;
+  let xmlAssinado: string;
   try {
-    const senha = CryptoUtil.decrypt(empresa.certificadoSenha);
-    const cert = NFeSignatureService.carregarCertificado(certPathResolvido, senha);
-    keyPem = cert.key;
-    certPem = cert.cert;
+    const xmlPedido = gerarXmlPedidoCancelamento({
+      chaveAcesso: chave,
+      cnpjAutor: empresa.cnpj,
+      justificativa: justificativa.trim(),
+      ambiente
+    });
+    xmlAssinado = assinarXmlNfseNacional(xmlPedido, cert.keyPem, cert.certPem, 'infPedReg');
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('LOG: Falha ao carregar certificado para a empresa', empresaId, '(cancelar NFS-e) | Erro:', msg);
     return { sucesso: false, erro: msg };
   }
 
-  const xmlPedido = gerarPedidoCancelamentoNfse({
-    numeroNfse,
-    codigoCancelamento: justificativa.trim(),
-    cnpjPrestador: empresa.cnpj
-  });
-  const xmlAssinado = assinarPedidoCancelamento(xmlPedido, keyPem, certPem);
-  const homolog = ambiente === '2';
-  const resultado = await cancelarNfse(xmlAssinado, homolog, certPem, keyPem);
-
+  const resultado = await registrarEventoNfse(chave, xmlAssinado, ambiente, cert.certPem, cert.keyPem);
   if (resultado.sucesso) {
     await prisma.nfse.updateMany({
-      where: { empresaFiscalId: empresaId, numeroNfse },
-      data: { situacao: 'Cancelada' }
+      where: { empresaFiscalId: empresaId, chaveAcesso: chave },
+      data: { situacao: 'Cancelada', xmlResposta: resultado.xmlRetorno }
     });
   }
 
-  return {
-    sucesso: resultado.sucesso,
-    erro: resultado.erro ? mensagemErroNfse(resultado.erro) : undefined
-  };
+  return { sucesso: resultado.sucesso, erro: resultado.erro };
 }
 
 /**
@@ -492,8 +505,10 @@ export async function listarNfse(
 ): Promise<{
   id: string;
   protocolo: string | null;
+  chaveAcesso: string | null;
   numeroNfse: string | null;
   situacao: string;
+  ambiente: string;
   createdAt: Date;
   tomadorRazaoSocial: string | null;
   tomadorEmail: string | null;
@@ -510,8 +525,10 @@ export async function listarNfse(
     select: {
       id: true,
       protocolo: true,
+      chaveAcesso: true,
       numeroNfse: true,
       situacao: true,
+      ambiente: true,
       createdAt: true,
       tomadorRazaoSocial: true,
       tomadorEmail: true,
@@ -523,7 +540,7 @@ export async function listarNfse(
 
 /**
  * Atualiza a numeração RPS da empresa (último RPS enviado e série).
- * Usado para sincronizar com o site da prefeitura: usuário informa o último RPS emitido lá e o próximo no sistema será ultimo + 1.
+ * Usado para sincronizar a numeração da DPS: o próximo número emitido será ultimo + 1.
  */
 export async function configurarNumeracaoRps(
   empresaId: string,
@@ -544,7 +561,13 @@ export async function configurarNumeracaoRps(
     update.ultimoRpsEnviado = n;
   }
   if (dados.serieRps !== undefined) {
-    const s = (dados.serieRps || '').trim() || 'A1';
+    const s = (dados.serieRps || '').trim();
+    if (!/^[1-9][0-9]{0,4}$/.test(s)) {
+      return {
+        sucesso: false,
+        erro: 'A série da DPS nacional é numérica, de 1 a 5 dígitos, sem zero à esquerda.'
+      };
+    }
     update.serieRps = s;
   }
   if (Object.keys(update).length === 0) {
