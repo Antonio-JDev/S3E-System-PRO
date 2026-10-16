@@ -11,6 +11,7 @@ import {
   getOrcamentos,
   getWhatsappStatus,
 } from './debugMcp.extra.handlers';
+import { consultarBackendLogs, consultarHttpRequests } from '../utils/runtimeLogBuffer';
 
 function textoJson(dados: unknown) {
   const falha = typeof dados === 'object' && dados !== null && (dados as { ok?: boolean }).ok === false;
@@ -26,6 +27,15 @@ async function executar(fn: () => Promise<Record<string, unknown>>) {
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : 'falha desconhecida';
     return textoJson({ ok: false, error: `Erro ao consultar o banco: ${mensagem}` });
+  }
+}
+
+function executarBuffer(fn: () => Record<string, unknown>) {
+  try {
+    return textoJson(fn());
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : 'falha desconhecida';
+    return textoJson({ ok: false, error: mensagem });
   }
 }
 
@@ -145,6 +155,42 @@ export async function tratarRequisicaoMcp(req: Request, res: Response): Promise<
         annotations: { readOnlyHint: true },
       },
       async (args) => executar(() => getOrcamentos(args))
+    );
+
+    server.registerTool(
+      'get_backend_logs',
+      {
+        title: 'Logs do backend em tempo real',
+        description:
+          'Lê o buffer em memória dos últimos eventos do processo Node (o que o console imprime e as requisições HTTP recentes). Não consulta o banco e não altera nada. Não inclui corpo, Authorization, cookie nem token de query. Healthcheck e /api/mcp não entram no buffer.',
+        inputSchema: {
+          level: z.enum(['ERROR', 'WARN', 'INFO', 'DEBUG']).optional().describe('Nível do evento'),
+          limit: z.number().int().min(1).max(500).optional().describe('Quantidade máxima. Padrão: 100'),
+          since: z.string().optional().describe('Somente eventos a partir desta data ISO-8601'),
+          path: z.string().optional().describe('Trecho do path, sem query string'),
+          statusMin: z.number().int().min(200).max(599).optional().describe('Status HTTP mínimo, inclusive'),
+          statusMax: z.number().int().min(200).max(599).optional().describe('Status HTTP máximo, inclusive'),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      async (args) => executarBuffer(() => consultarBackendLogs(args))
+    );
+
+    server.registerTool(
+      'get_http_requests',
+      {
+        title: 'Requisições HTTP recentes',
+        description:
+          'Lista as últimas requisições do buffer: método, rota sem query, status (2xx, 3xx, 4xx e 5xx), duração em ms e userId se já existir na requisição. Faixa padrão 200–599. Não grava Authorization, cookie, token nem corpo.',
+        inputSchema: {
+          method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional().describe('Filtra o método HTTP'),
+          statusMin: z.number().int().min(200).max(599).optional().describe('Status mínimo, inclusive. Padrão: 200'),
+          statusMax: z.number().int().min(200).max(599).optional().describe('Status máximo, inclusive. Padrão: 599 (cobre todo 5xx)'),
+          limit: z.number().int().min(1).max(500).optional().describe('Quantidade máxima. Padrão: 100'),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      async (args) => executarBuffer(() => consultarHttpRequests(args))
     );
 
     server.registerTool(
