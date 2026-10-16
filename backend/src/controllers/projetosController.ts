@@ -8,7 +8,6 @@ import {
   EstoqueInsuficienteError,
   validarCamposPlanejamentoOs,
   sincronizarWorkflowTasks,
-  isOsWorkflowTipo,
   type CamposPlanejamentoOsInput,
 } from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
@@ -635,13 +634,10 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
     });
 
     let tasksWorkflowCriadas = 0;
+    let tasksWorkflowRemovidas = 0;
     const tipoAlterado =
       tipo !== undefined && String(tipo) !== String(projetoExistente.tipo);
-    if (
-      tipoAlterado &&
-      isOsWorkflowTipo(String(tipo)) &&
-      projetoExistente.status !== 'CONCLUIDO'
-    ) {
+    if (tipoAlterado && projetoExistente.status !== 'CONCLUIDO') {
       const authUser = (req as AuthRequest).user;
       const sync = await sincronizarWorkflowTasks(
         id,
@@ -649,6 +645,7 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
         authUser?.userId ?? null,
       );
       tasksWorkflowCriadas = sync.criadas;
+      tasksWorkflowRemovidas = sync.removidas;
     }
 
     res.json({
@@ -660,10 +657,13 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
           : null
       },
       tasksWorkflowCriadas,
+      tasksWorkflowRemovidas,
       message:
         tasksWorkflowCriadas > 0
-          ? `Projeto atualizado. ${tasksWorkflowCriadas} tarefa(s) do checklist foram adicionadas ao Kanban.`
-          : 'Projeto atualizado com sucesso'
+          ? `Tipo atualizado. O checklist anterior foi substituído por ${tasksWorkflowCriadas} tarefa(s) no Kanban.`
+          : tasksWorkflowRemovidas > 0
+            ? 'Tipo atualizado. As tarefas do checklist anterior foram removidas do Kanban.'
+            : 'Projeto atualizado com sucesso'
     });
   } catch (error) {
     console.error('Erro ao atualizar projeto:', error);
