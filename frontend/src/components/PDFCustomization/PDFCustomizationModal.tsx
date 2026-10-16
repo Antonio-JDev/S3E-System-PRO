@@ -1,13 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { useReactToPrint } from 'react-to-print';
 import { usePDFCustomization } from '../../hooks/usePDFCustomization';
 import { pdfCustomizationService } from '../../services/pdfCustomizationService';
-import { OrcamentoPDFData, CORNER_DESIGNS } from '../../types/pdfCustomization';
+import { OrcamentoPDFData } from '../../types/pdfCustomization';
 import { getUploadUrl } from '../../config/api';
-import PDFViewer from './PDFViewer';
 
-// Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -36,15 +33,15 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
     const {
         customization,
         handleCornerDesignChange,
-        handleContentChange,
+        handleWatermarkChange,
         resetToDefault,
-        hasUnsavedChanges
+        hasUnsavedChanges,
     } = usePDFCustomization();
 
-    const [activeTab, setActiveTab] = useState<'design' | 'preview'>('preview');
-    const [showSaveTemplate, setShowSaveTemplate] = useState(false);
-    const [templateName, setTemplateName] = useState('');
-    const [previewKey, setPreviewKey] = useState(0);
+    const [previewReloadToken, setPreviewReloadToken] = useState(0);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
     const [folhasTimbradas, setFolhasTimbradas] = useState<Array<{
         filename: string;
         url: string;
@@ -54,70 +51,162 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
     }>>([]);
     const [loadingFolhas, setLoadingFolhas] = useState(false);
     const [uploadingFolha, setUploadingFolha] = useState(false);
-    
-    // Ref para o componente printable
-    const printableRef = useRef<HTMLDivElement>(null);
+    const [baixandoPdf, setBaixandoPdf] = useState(false);
+    const [drawerVisible, setDrawerVisible] = useState(false);
+    const previewUrlRef = useRef<string | null>(null);
+    const previewAbortRef = useRef<AbortController | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    // Configurar react-to-print — margin: 0 porque cada página renderiza seu próprio timbre
-    const handlePrint = useReactToPrint({
-        contentRef: printableRef,
-        documentTitle: `Orcamento-${orcamentoData.numero}`,
-        pageStyle: `
-            @page {
-                size: A4;
-                margin: 0 !important;
-            }
-            @media print {
-                html, body {
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    -webkit-print-color-adjust: exact;
-                    print-color-adjust: exact;
-                }
-                /* Garantir visibilidade do conteúdo */
-                .print-container,
-                .print-container * {
-                    visibility: visible !important;
-                }
-            }
-        `,
-        onBeforePrint: async () => {
-            console.log('Preparando para imprimir...');
-            // Aguardar carregamento de imagens (timbre)
-            if (printableRef.current) {
-                const images = printableRef.current.querySelectorAll('img');
-                const promises = Array.from(images).map(img => {
-                    if (img.complete) return Promise.resolve();
-                    return new Promise<void>((resolve) => {
-                        img.onload = () => resolve();
-                        img.onerror = () => resolve();
-                    });
-                });
-                await Promise.all(promises);
-            }
-        },
-        onAfterPrint: () => {
-            console.log('Impressão concluída ou cancelada');
+    const revokePreviewUrl = useCallback(() => {
+        if (previewUrlRef.current) {
+            URL.revokeObjectURL(previewUrlRef.current);
+            previewUrlRef.current = null;
         }
-    });
-
-    // NOTE: Lógica de geração/baixar PDF removida — agora o modal só fornece preview e impressão
-
-    // O preview visual do modal é 100% client-side (`PDFViewer`).
-    // Em DEV, a geração de preview via backend + múltiplos useEffects (e StrictMode) causava 2-3 requests e rerenders pesados.
-    // Mantemos apenas a opção de "atualizar" re-montando o viewer.
-    const atualizarPreview = React.useCallback(() => {
-        setPreviewKey((k) => k + 1);
+        setPreviewUrl(null);
     }, []);
 
-    // Carregar folhas timbradas quando o modal abrir
+    const handleBaixarPdf = async () => {
+        if (!orcamentoId || !customization) {
+            toast.error('Aguarde o carregamento da personalização.');
+            return;
+        }
+        setBaixandoPdf(true);
+        try {
+            const result = await pdfCustomizationService.downloadPersonalizedPDF(orcamentoId, customization);
+            if (result.success) {
+                toast.success('PDF gerado com a folha timbrada selecionada.');
+            } else {
+                toast.error(result.error || 'Erro ao gerar PDF');
+            }
+        } catch (error) {
+            console.error('Erro ao baixar PDF:', error);
+            toast.error('Erro ao gerar PDF do orçamento');
+        } finally {
+            setBaixandoPdf(false);
+        }
+    };
+
+    const atualizarPreview = useCallback(() => {
+        setPreviewReloadToken((k) => k + 1);
+    }, []);
+
+    // Animação de entrada do drawer
+    useEffect(() => {
+        if (!isOpen) {
+            setDrawerVisible(false);
+            return;
+        }
+        const id = window.requestAnimationFrame(() => setDrawerVisible(true));
+        return () => window.cancelAnimationFrame(id);
+    }, [isOpen]);
+
+    // Trava scroll do body enquanto o drawer está aberto
+    useEffect(() => {
+        if (!isOpen) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = prev;
+        };
+    }, [isOpen]);
+
+    // Esc fecha o painel
+    useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [isOpen, onClose]);
+
+    // Preview = PDF real do backend (pdfmake), sem paginação DOM no browser
+    useEffect(() => {
+        if (!isOpen || !orcamentoId || !customization) {
+            previewAbortRef.current?.abort();
+            revokePreviewUrl();
+            setPreviewLoading(false);
+            setPreviewError(null);
+            return;
+        }
+
+        const controller = new AbortController();
+        previewAbortRef.current?.abort();
+        previewAbortRef.current = controller;
+
+        setPreviewLoading(true);
+        setPreviewError(null);
+
+        const timer = window.setTimeout(() => {
+            void (async () => {
+                const result = await pdfCustomizationService.fetchPreviewPdfBlob(
+                    orcamentoId,
+                    customization,
+                    controller.signal
+                );
+                if (controller.signal.aborted) return;
+                if (result.error === 'aborted') return;
+
+                if (!result.success || !result.blob) {
+                    setPreviewError(result.error || 'Não foi possível gerar o preview');
+                    revokePreviewUrl();
+                    setPreviewLoading(false);
+                    return;
+                }
+
+                const pdfBlob =
+                    result.blob.type === 'application/pdf'
+                        ? result.blob
+                        : new Blob([result.blob], { type: 'application/pdf' });
+                const nextUrl = URL.createObjectURL(pdfBlob);
+                if (previewUrlRef.current) {
+                    URL.revokeObjectURL(previewUrlRef.current);
+                }
+                previewUrlRef.current = nextUrl;
+                setPreviewUrl(nextUrl);
+                setPreviewLoading(false);
+            })();
+        }, 400);
+
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [
+        isOpen,
+        orcamentoId,
+        customization,
+        customization.watermark.opacity,
+        customization.design.corners.enabled,
+        customization.design.corners.design,
+        customization.design.corners.image,
+        previewReloadToken,
+        revokePreviewUrl,
+    ]);
+
+    useEffect(() => {
+        if (!isOpen) {
+            previewAbortRef.current?.abort();
+            revokePreviewUrl();
+        }
+    }, [isOpen, revokePreviewUrl]);
+
+    useEffect(() => {
+        return () => {
+            previewAbortRef.current?.abort();
+            if (previewUrlRef.current) {
+                URL.revokeObjectURL(previewUrlRef.current);
+                previewUrlRef.current = null;
+            }
+        };
+    }, []);
+
     useEffect(() => {
         if (isOpen) {
-            loadFolhasTimbradas();
+            void loadFolhasTimbradas();
         }
     }, [isOpen]);
 
-    // Função para carregar lista de folhas timbradas
     const loadFolhasTimbradas = async () => {
         setLoadingFolhas(true);
         try {
@@ -125,21 +214,16 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
             if (response.success && response.data) {
                 setFolhasTimbradas(response.data);
             } else {
-                // Se der erro 404 ou não houver folhas, apenas mostrar lista vazia
                 setFolhasTimbradas([]);
             }
         } catch (error) {
             console.error('Erro ao carregar folhas timbradas:', error);
-            // Não mostrar erro ao usuário, apenas lista vazia
             setFolhasTimbradas([]);
         } finally {
             setLoadingFolhas(false);
         }
     };
 
-    // Preview é client-side, então não há geração automática via backend aqui.
-
-    // Deletar folha timbrada
     const handleDeleteFolha = async (filename: string) => {
         if (!confirm('Tem certeza que deseja deletar esta folha timbrada?')) {
             return;
@@ -149,15 +233,15 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
             const response = await pdfCustomizationService.deleteFolhaTimbrada(filename);
             if (response.success) {
                 toast.success('Folha timbrada deletada com sucesso!');
-                // Recarregar lista
                 await loadFolhasTimbradas();
-                // Se a folha deletada estava selecionada, limpar seleção
-                if (customization.design.corners.design === 'custom' && 
-                    customization.design.corners.image?.includes(filename)) {
+                if (
+                    customization.design.corners.design === 'custom' &&
+                    customization.design.corners.image?.includes(filename)
+                ) {
                     handleCornerDesignChange({
                         enabled: false,
                         design: 'none',
-                        image: undefined
+                        image: undefined,
                     });
                 }
             } else {
@@ -169,29 +253,64 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
         }
     };
 
-    // Selecionar folha timbrada da lista
     const handleSelectFolha = (url: string) => {
         const fullUrl = getUploadUrl(url);
         handleCornerDesignChange({
             enabled: true,
             design: 'custom',
-            image: fullUrl
+            image: fullUrl,
         });
         toast.success('Folha timbrada selecionada!');
     };
 
+    const handleClearFolha = () => {
+        handleCornerDesignChange({
+            enabled: false,
+            design: 'none',
+            image: undefined,
+        });
+        toast.success('Folha timbrada removida.');
+    };
+
+    const handleUploadFolha = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setUploadingFolha(true);
+        try {
+            const uploadResponse = await pdfCustomizationService.uploadFolhaTimbrada(file);
+            if (uploadResponse.success && uploadResponse.data) {
+                const imageUrl = getUploadUrl(uploadResponse.data.url);
+                handleCornerDesignChange({
+                    enabled: true,
+                    design: 'custom',
+                    image: imageUrl,
+                });
+                toast.success('Folha timbrada carregada e salva!');
+                await loadFolhasTimbradas();
+            } else {
+                toast.error(uploadResponse.error || 'Erro ao fazer upload');
+            }
+        } catch (error) {
+            console.error('Erro ao fazer upload:', error);
+            toast.error('Erro ao fazer upload da folha timbrada');
+        } finally {
+            setUploadingFolha(false);
+            e.target.value = '';
+        }
+    };
+
     if (!isOpen) return null;
 
-    // Validar props necessárias
     if (!orcamentoId) {
         return (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                <div className="bg-white dark:bg-dark-card rounded-2xl p-6 max-w-md">
-                    <h3 className="text-xl font-bold text-red-600 mb-4">Erro</h3>
-                    <p className="text-gray-700 dark:text-dark-text mb-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div className="max-w-md rounded-2xl bg-white p-6 dark:bg-dark-card">
+                    <h3 className="mb-4 text-xl font-bold text-red-600">Erro</h3>
+                    <p className="mb-4 text-gray-700 dark:text-dark-text">
                         ID do orçamento não fornecido. Por favor, feche e tente novamente.
                     </p>
-                    <button onClick={onClose} className="btn-primary w-full">
+                    <button type="button" onClick={onClose} className="btn-primary w-full">
                         Fechar
                     </button>
                 </div>
@@ -199,13 +318,12 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
         );
     }
 
-    // Validar se customization foi carregado
     if (!customization) {
         return (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                <div className="bg-white dark:bg-dark-card rounded-2xl p-6 max-w-md">
-                    <div className="flex items-center justify-center mb-4">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div className="max-w-md rounded-2xl bg-white p-6 dark:bg-dark-card">
+                    <div className="mb-4 flex items-center justify-center">
+                        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600" />
                     </div>
                     <p className="text-center text-gray-700 dark:text-dark-text">
                         Carregando configurações...
@@ -215,371 +333,283 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
         );
     }
 
-    // NOTE: Lógica de geração de PDF via backend removida — mantenha apenas preview e impressão
+    const orcamentoLabel =
+        orcamentoData.numeroSequencial != null
+            ? `Orçamento #${orcamentoData.numeroSequencial}`
+            : orcamentoData.numero
+              ? `Orçamento ${orcamentoData.numero}`
+              : 'Orçamento';
 
-    // Salvar template
-    const handleSaveTemplate = async () => {
-        if (!templateName.trim()) {
-            toast.error('Nome obrigatório', {
-                description: 'Digite um nome para o template'
-            });
-            return;
-        }
-
-        const promise = (async () => {
-            const response = await pdfCustomizationService.saveTemplate(templateName, customization);
-            if (response.success) {
-                setShowSaveTemplate(false);
-                setTemplateName('');
-                return templateName;
-            } else {
-                throw new Error(response.error || 'Erro ao salvar template');
-            }
-        })();
-
-        toast.promise(promise, {
-            loading: 'Salvando template...',
-            success: (name) => ({
-                title: 'Template salvo!',
-                description: `"${name}" está disponível para reutilização`,
-                icon: '💾'
-            }),
-            error: (err) => err.message || 'Erro ao salvar template'
-        });
-    };
+    const selectedFolha =
+        customization.design.corners.enabled &&
+        customization.design.corners.design === 'custom' &&
+        customization.design.corners.image;
 
     return (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-7xl max-h-[95vh] flex flex-col">
-                {/* Header */}
-                <div className="p-4 border-b border-gray-200 dark:border-dark-border bg-[#0a1a2f]">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-4">
-                            <div>
-                                <h2 className="text-xl font-bold text-white">🎨 Personalizar PDF</h2>
-                                <p className="text-xs text-white/80 mt-1">Customize o design e conteúdo do seu orçamento</p>
-                            </div>
-                            
-                            {/* Tabs ao lado do título */}
-                            <div className="flex gap-2 ml-4">
-                                {[
-                                    { id: 'design', label: '🎨 Design', icon: '🎨' },
-                                    { id: 'preview', label: '👁️ Pré-visualização', icon: '👁️' }
-                                ].map(tab => (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as any)}
-                                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                            activeTab === tab.id
-                                                ? 'bg-white text-[#0a1a2f]'
-                                                : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                    >
-                                        {tab.label}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
+        <>
+            {/* Overlay */}
+            <button
+                type="button"
+                aria-label="Fechar personalização de PDF"
+                onClick={onClose}
+                className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${
+                    drawerVisible ? 'opacity-100' : 'opacity-0'
+                }`}
+            />
+
+            {/* Drawer lateral direito — wrapper em tela cheia */}
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="pdf-customization-title"
+                className={`fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-slate-900 shadow-2xl transition-transform duration-300 ease-out lg:w-[85vw] xl:w-[80vw] ${
+                    drawerVisible ? 'translate-x-0' : 'translate-x-full'
+                }`}
+            >
+                {/* Header fixo */}
+                <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5">
+                    <div className="min-w-0">
+                        <h2
+                            id="pdf-customization-title"
+                            className="truncate text-lg font-semibold text-white sm:text-xl"
                         >
-                            <XMarkIcon className="w-6 h-6" />
-                        </button>
+                            Personalizar PDF
+                        </h2>
+                        <p className="truncate text-xs text-slate-400 sm:text-sm">
+                            {orcamentoLabel}
+                            {orcamentoData.cliente?.nome ? ` · ${orcamentoData.cliente.nome}` : ''}
+                        </p>
                     </div>
-                </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="shrink-0 rounded-xl p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+                        aria-label="Fechar"
+                    >
+                        <XMarkIcon className="h-6 w-6" />
+                    </button>
+                </header>
 
-                {/* Content Area */}
-                <div className="flex-1 overflow-hidden flex">
-                    {/* Painel de Controles: na aba Preview mesma largura do modal Gerar Contrato (barra estreita); na Design mais largo */}
-                    <div className={`overflow-y-auto border-r border-gray-200 dark:border-dark-border bg-white dark:bg-dark-elevated ${activeTab === 'preview' ? 'w-56 max-w-[220px] p-4 flex-shrink-0' : 'w-[calc(40%-10px)] p-6'}`}>
-                        {/* TAB: Design */}
-                        {activeTab === 'design' && (
-                            <div className="space-y-6">
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">🎨 Design</h3>
-                                    
-                                    {/* Upload de Folha Timbrada Personalizada */}
-                                    <div className="mb-6">
-                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">
-                                            📄 Folha Timbrada Personalizada
-                                        </label>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mb-3">
-                                            Faça upload de uma imagem de fundo personalizada para usar como folha timbrada (PNG ou JPG)
-                                        </p>
-                                        <input
-                                            type="file"
-                                            accept="image/png,image/jpeg,image/jpg"
-                                            disabled={uploadingFolha}
-                                            onChange={async (e) => {
-                                                const file = e.target.files?.[0];
-                                                if (file) {
-                                                    setUploadingFolha(true);
-                                                    try {
-                                                        // Fazer upload para o servidor
-                                                        const uploadResponse = await pdfCustomizationService.uploadFolhaTimbrada(file);
-                                                        if (uploadResponse.success && uploadResponse.data) {
-                                                            const imageUrl = getUploadUrl(uploadResponse.data.url);
-                                                            handleCornerDesignChange({ 
-                                                                enabled: true,
-                                                                design: 'custom',
-                                                                image: imageUrl
-                                                            });
-                                                            toast.success('Folha timbrada carregada e salva!');
-                                                            // Recarregar lista
-                                                            await loadFolhasTimbradas();
-                                                        } else {
-                                                            toast.error(uploadResponse.error || 'Erro ao fazer upload');
-                                                        }
-                                                    } catch (error) {
-                                                        console.error('Erro ao fazer upload:', error);
-                                                        toast.error('Erro ao fazer upload da folha timbrada');
-                                                    } finally {
-                                                        setUploadingFolha(false);
-                                                        // Limpar input
-                                                        e.target.value = '';
-                                                    }
-                                                }
-                                            }}
-                                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 disabled:opacity-50"
-                                        />
-                                        {uploadingFolha && (
-                                            <div className="mt-2 p-2 bg-blue-50 text-blue-700 rounded flex items-center gap-2 text-xs">
-                                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
-                                                Enviando...
-                                            </div>
-                                        )}
-                                        {customization.design.corners.enabled && customization.design.corners.design === 'custom' && customization.design.corners.image && (
-                                            <div className="mt-2 p-2 bg-green-50 text-green-700 rounded flex items-center gap-2 text-xs">
-                                                <span>✓</span> Folha timbrada carregada
-                                            </div>
-                                        )}
+                {/* Corpo: sidebar + canvas */}
+                <div className="flex min-h-0 flex-1 overflow-hidden">
+                    {/* Sidebar — galeria + controles */}
+                    <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r border-slate-800 bg-slate-950/40 p-4 sm:w-80">
+                        <div>
+                            <h3 className="mb-1 text-sm font-semibold text-white">Folhas Timbradas</h3>
+                            <p className="mb-3 text-xs text-slate-400">
+                                Selecione uma folha para o fundo do PDF. O preview atualiza automaticamente.
+                            </p>
 
-                                        {/* Lista de Folhas Timbradas Já Importadas */}
-                                        <div className="mt-6">
-                                            <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">
-                                                📋 Folhas Timbradas Disponíveis:
-                                            </p>
-                                            {loadingFolhas ? (
-                                                <div className="flex flex-col items-center justify-center p-6">
-                                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 dark:border-purple-400 mb-2"></div>
-                                                    <p className="text-sm text-gray-600 dark:text-gray-400">Carregando folhas timbradas...</p>
-                                                </div>
-                                            ) : folhasTimbradas.length === 0 ? (
-                                                <div className="text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                                                    <svg className="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                    </svg>
-                                                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                                                        Nenhuma folha timbrada importada ainda
-                                                    </p>
-                                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                                                        Faça upload de uma folha timbrada acima para começar
-                                                    </p>
-                                                </div>
-                                            ) : (
-                                                <div className="grid grid-cols-3 md:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-1">
-                                                    {folhasTimbradas.map((folha) => {
-                                                        const isSelected = customization.design.corners.design === 'custom' && 
-                                                                          (customization.design.corners.image?.includes(folha.filename) || 
-                                                                           customization.design.corners.image?.includes(folha.url));
-                                                        return (
-                                                            <div
-                                                                key={folha.filename}
-                                                                className={`relative group border-2 rounded-xl overflow-hidden cursor-pointer transition-all shadow-sm hover:shadow-md ${
-                                                                    isSelected 
-                                                                        ? 'border-blue-600 ring-4 ring-blue-300 dark:ring-blue-800 scale-105' 
-                                                                        : 'border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-600'
-                                                                }`}
-                                                                onClick={() => {
-                                                                    handleSelectFolha(folha.url);
-                                                                    // Preview é client-side; só força re-mount para garantir atualização imediata
-                                                                    setTimeout(() => atualizarPreview(), 0);
-                                                                }}
-                                                                title={folha.filename}
-                                                            >
-                                                                <div className="aspect-[3/4] bg-gray-100 dark:bg-gray-900 relative">
-                                                                    <img
-                                                                        src={getUploadUrl(folha.url)}
-                                                                        alt={folha.filename}
-                                                                        className="w-full h-full object-cover"
-                                                                        onError={(e) => {
-                                                                            (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23ddd" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%23999"%3EImagem%3C/text%3E%3C/svg%3E';
-                                                                        }}
-                                                                    />
-                                                                    {/* Overlay escuro quando hover */}
-                                                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                                                                </div>
-                                                                
-                                                                {/* Botão de deletar (vermelho redondo no canto superior direito) */}
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleDeleteFolha(folha.filename);
-                                                                    }}
-                                                                    className="absolute top-2 right-2 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-10"
-                                                                    title="Deletar folha timbrada"
-                                                                >
-                                                                    <XMarkIcon className="w-4 h-4" />
-                                                                </button>
-                                                                
-                                                                {/* Indicador de seleção */}
-                                                                {isSelected && (
-                                                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-blue-600 to-blue-500 text-white text-xs py-2 px-2 text-center font-semibold">
-                                                                        ✓ Selecionada
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {/* Badge de seleção no canto superior esquerdo */}
-                                                                {isSelected && (
-                                                                    <div className="absolute top-2 left-2 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center shadow-lg z-10">
-                                                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                                                        </svg>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* TAB: Preview */}
-                        {activeTab === 'preview' && (
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">👁️ Pré-visualização</h3>
-                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                    Preview em tempo real do PDF que será gerado. Ajuste as configurações nas outras abas e clique em "Atualizar Preview".
-                                </p>
-                                
-                                {/* Botões de Ação */}
-                                <div className="space-y-3 pt-4">
-                                    <button
-                                        type="button"
-                                        onClick={atualizarPreview}
-                                        className="btn-primary w-full flex items-center justify-center gap-2"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                        </svg>
-                                        Atualizar Preview
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={resetToDefault}
-                                        className="btn-ghost w-full"
-                                    >
-                                        Restaurar Padrão
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Área de Preview - Sempre visível */}
-                    <div className="flex-1 overflow-auto">
-                        {/* Visualizador de PDF profissional - sempre visível */}
-                        <div style={{ height: '100%' }}>
-                            <PDFViewer
-                                key={`pdf-viewer-${previewKey}`}
-                                orcamento={orcamentoData}
-                                folhaTimbradaUrl={customization.design.corners.enabled && customization.design.corners.design === 'custom' ? customization.design.corners.image : undefined}
-                                opacidade={customization.watermark.opacity}
-                                printableRef={printableRef}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg"
+                                disabled={uploadingFolha}
+                                onChange={handleUploadFolha}
+                                className="hidden"
                             />
+                            <button
+                                type="button"
+                                disabled={uploadingFolha}
+                                onClick={() => fileInputRef.current?.click()}
+                                className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-900/60 px-3 py-3 text-sm text-slate-200 transition-colors hover:border-blue-500 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                                <UploadIcon className="h-5 w-5" />
+                                {uploadingFolha ? 'Enviando…' : 'Enviar nova folha'}
+                            </button>
+
+                            {selectedFolha ? (
+                                <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-800/50 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-300">
+                                    <span>✓ Folha selecionada</span>
+                                    <button
+                                        type="button"
+                                        onClick={handleClearFolha}
+                                        className="font-medium text-emerald-200 underline-offset-2 hover:underline"
+                                    >
+                                        Remover
+                                    </button>
+                                </div>
+                            ) : null}
+
+                            {loadingFolhas ? (
+                                <div className="flex flex-col items-center justify-center gap-2 py-8">
+                                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                                    <p className="text-xs text-slate-400">Carregando folhas…</p>
+                                </div>
+                            ) : folhasTimbradas.length === 0 ? (
+                                <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-center">
+                                    <p className="text-sm text-slate-400">Nenhuma folha importada ainda</p>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                        Envie uma imagem PNG ou JPG acima
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    {folhasTimbradas.map((folha) => {
+                                        const isSelected =
+                                            customization.design.corners.design === 'custom' &&
+                                            (customization.design.corners.image?.includes(folha.filename) ||
+                                                customization.design.corners.image?.includes(folha.url));
+                                        return (
+                                            <div
+                                                key={folha.filename}
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => handleSelectFolha(folha.url)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        handleSelectFolha(folha.url);
+                                                    }
+                                                }}
+                                                title={folha.filename}
+                                                className={`group relative cursor-pointer overflow-hidden rounded-xl border-2 transition-all ${
+                                                    isSelected
+                                                        ? 'border-blue-500 ring-2 ring-blue-500/40'
+                                                        : 'border-slate-700 hover:border-slate-500'
+                                                }`}
+                                            >
+                                                <div className="aspect-[3/4] bg-slate-800">
+                                                    <img
+                                                        src={getUploadUrl(folha.url)}
+                                                        alt={folha.filename}
+                                                        className="h-full w-full object-cover"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).src =
+                                                                'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23334155" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%2394a3b8"%3EImagem%3C/text%3E%3C/svg%3E';
+                                                        }}
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void handleDeleteFolha(folha.filename);
+                                                    }}
+                                                    className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white opacity-0 shadow transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                                                    title="Deletar folha timbrada"
+                                                >
+                                                    <XMarkIcon className="h-3.5 w-3.5" />
+                                                </button>
+                                                {isSelected ? (
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-blue-600/90 py-1 text-center text-[10px] font-semibold text-white">
+                                                        Selecionada
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
-                    </div>
+
+                        {/* Controles */}
+                        <div className="border-t border-slate-800 pt-4">
+                            <h3 className="mb-3 text-sm font-semibold text-white">Ajustes</h3>
+                            <label className="mb-1 block text-xs font-medium text-slate-300">
+                                Opacidade da marca d&apos;água:{' '}
+                                {Math.round(customization.watermark.opacity * 100)}%
+                            </label>
+                            <input
+                                type="range"
+                                min={5}
+                                max={100}
+                                value={Math.round(customization.watermark.opacity * 100)}
+                                onChange={(e) =>
+                                    handleWatermarkChange({
+                                        opacity: Number(e.target.value) / 100,
+                                    })
+                                }
+                                className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-700 accent-blue-500"
+                            />
+                            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                                Preview gerado no servidor com pdfmake (mesmo arquivo do download).
+                            </p>
+                        </div>
+                    </aside>
+
+                    {/* Canvas do PDF */}
+                    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-slate-950 p-3 sm:p-4">
+                        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-100 shadow-inner dark:bg-zinc-900">
+                            {previewLoading && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-950/70">
+                                    <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                                    <p className="text-sm text-slate-300">Gerando preview no servidor…</p>
+                                </div>
+                            )}
+                            {previewError && !previewLoading ? (
+                                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                                    <p className="text-sm text-red-400">{previewError}</p>
+                                    <button type="button" onClick={atualizarPreview} className="btn-primary">
+                                        Tentar novamente
+                                    </button>
+                                </div>
+                            ) : null}
+                            {previewUrl && !previewError ? (
+                                <iframe
+                                    title={`Preview PDF ${orcamentoLabel}`}
+                                    src={previewUrl}
+                                    className="h-full min-h-0 w-full flex-1 border-0 bg-slate-100 dark:bg-zinc-900"
+                                />
+                            ) : null}
+                            {!previewUrl && !previewLoading && !previewError ? (
+                                <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+                                    <p className="text-sm text-slate-500">O preview aparecerá aqui.</p>
+                                </div>
+                            ) : null}
+                        </div>
+                    </section>
                 </div>
 
-                {/* Footer */}
-                <div className="p-6 bg-gray-50 dark:bg-dark-elevated border-t border-gray-200 dark:border-dark-border flex justify-between items-center">
-                    <div className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                        {hasUnsavedChanges && <span className="text-orange-600 dark:text-orange-400">⚠️ Alterações não salvas</span>}
+                {/* Footer fixo */}
+                <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/80 px-4 py-3 sm:px-5">
+                    <div className="min-w-0 text-sm text-slate-400">
+                        {hasUnsavedChanges ? (
+                            <span className="text-amber-400">Alterações não salvas</span>
+                        ) : (
+                            <span className="hidden sm:inline">Ajuste a folha e baixe o PDF</span>
+                        )}
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                         <button
                             type="button"
-                            onClick={onClose}
-                            className="btn-secondary"
+                            onClick={resetToDefault}
+                            className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
                         >
+                            Restaurar Padrão
+                        </button>
+                        <button
+                            type="button"
+                            onClick={atualizarPreview}
+                            disabled={previewLoading}
+                            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                        >
+                            {previewLoading ? 'Gerando…' : 'Atualizar Preview'}
+                        </button>
+                        <button type="button" onClick={onClose} className="btn-secondary">
                             Cancelar
                         </button>
                         <button
                             type="button"
-                            onClick={() => {
-                                try {
-                                    if (printableRef.current) {
-                                        handlePrint();
-                                        toast.success('Abrindo janela de impressão...');
-                                    } else {
-                                        toast.error('Erro: Preview não carregado. Vá para aba "Pré-visualização" primeiro.');
-                                    }
-                                } catch (error) {
-                                    console.error('Erro ao imprimir:', error);
-                                    toast.error('Erro ao abrir janela de impressão');
-                                }
-                            }}
-                            className="btn-secondary disabled:opacity-50 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                            onClick={handleBaixarPdf}
+                            disabled={baixandoPdf}
+                            className="inline-flex items-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 10v6m0 0l-3-3m3 3l3-3M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1"
+                                />
                             </svg>
-                            Imprimir
+                            {baixandoPdf ? 'Gerando PDF...' : 'Baixar PDF'}
                         </button>
                     </div>
-                </div>
+                </footer>
             </div>
-
-            {/* Modal de Salvar Template */}
-            {showSaveTemplate && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
-                    <div className="modal-content max-w-md w-full">
-                        <div className="modal-header">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text">Salvar Template</h3>
-                        </div>
-                        <div className="modal-body">
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Nome do Template</label>
-                            <input
-                                type="text"
-                                value={templateName}
-                                onChange={(e) => setTemplateName(e.target.value)}
-                                className="input-field"
-                                placeholder="Ex: Orçamento Padrão S3E"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="modal-footer">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setShowSaveTemplate(false);
-                                    setTemplateName('');
-                                }}
-                                className="btn-secondary"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveTemplate}
-                                className="btn-primary"
-                            >
-                                Salvar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+        </>
     );
 };
 
 export default PDFCustomizationModal;
-
