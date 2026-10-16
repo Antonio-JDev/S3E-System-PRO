@@ -2,7 +2,7 @@
  * Notas de atualização exibidas no login (produção).
  * Ao publicar um novo pacote, incremente `RELEASE_NOTES_VERSION` e atualize `items`.
  */
-export const RELEASE_NOTES_VERSION = '2026-10-08-deploy';
+export const RELEASE_NOTES_VERSION = '2026-10-16-deploy';
 
 export type ReleaseNoteTipo = 'novo' | 'melhoria' | 'correcao' | 'removido';
 
@@ -17,77 +17,100 @@ export type ReleaseNoteItem = {
 export const RELEASE_NOTES_META = {
   titulo: 'Novidades do sistema',
   subtitulo: 'Confira o que mudou nesta versão e marque os itens conforme for revisando.',
-  dataLabel: '08/10/2026',
+  dataLabel: '16/10/2026',
 };
 
 export const RELEASE_NOTES_ITEMS: ReleaseNoteItem[] = [
   {
-    id: 'dre-gerencial',
-    area: 'Financeiro',
-    tipo: 'novo',
-    titulo: 'DRE gerencial do período',
+    id: 'cotacoes-banco-frio-removido',
+    area: 'Orçamentos',
+    tipo: 'removido',
+    titulo: 'Cotações / banco frio fora do sistema',
     descricao:
-      'O CMV passa a vir da baixa de material, e não da compra. Entram imposto, outras receitas, despesas por classificação e o resultado financeiro. Não há depreciação nem IR/CSLL. O que aparece é o resultado do período.',
+      'Não dá mais para incluir itens do banco frio em orçamentos, kits ou quadros. Orçamentos antigos que ainda tenham esses itens aparecem só como legado. A API de cotações foi desligada.',
   },
   {
-    id: 'dashboard-caixa-realizado',
-    area: 'Dashboard',
+    id: 'modal-adicionar-item-orcamento',
+    area: 'Orçamentos',
     tipo: 'melhoria',
-    titulo: 'Card Caixa realizado',
+    titulo: 'Modal Adicionar item mais rápido e maior',
     descricao:
-      'O card do dashboard que se chamava Lucro líquido passou a se chamar Caixa realizado.',
+      'O modal abre mais leve (lista paginada), usa melhor a tela no desktop e mantém materiais, serviços, kits e quadros.',
   },
   {
-    id: 'os-cmv-materiais',
-    area: 'Ordens de Serviço',
-    tipo: 'novo',
-    titulo: 'CMV de materiais no resultado da OS',
-    descricao: 'A aba Resultado da OS mostra o CMV de materiais.',
-  },
-  {
-    id: 'venda-nao-baixa-estoque',
-    area: 'Vendas',
+    id: 'condicao-pagamento-pdf',
+    area: 'Orçamentos',
     tipo: 'melhoria',
-    titulo: 'Venda não baixa estoque',
-    descricao: 'Registrar a venda não tira material do estoque.',
+    titulo: 'Texto de condição de pagamento',
+    descricao:
+      'Opção e observação no PDF: “Pagamentos conforme condições a serem acordadas.”',
   },
   {
-    id: 'kit-baixa-nfe',
-    area: 'Estoque',
+    id: 'pdf-orcamento-pdfmake',
+    area: 'Orçamentos',
     tipo: 'melhoria',
-    titulo: 'Kit reservado até a NF-e',
-    descricao: 'O kit fica reservado e só é baixado quando a NF-e é autorizada.',
+    titulo: 'PDF do orçamento (pdfmake)',
+    descricao:
+      'Geração e envio do PDF (incluindo WhatsApp) pelo caminho pdfmake, com ajustes de layout e descrição.',
   },
   {
-    id: 'material-obra-baixa',
-    area: 'Estoque',
+    id: 'config-fiscais-dark',
+    area: 'Fiscal',
+    tipo: 'correcao',
+    titulo: 'Configurações fiscais no tema escuro',
+    descricao:
+      'Cards das empresas e regras fiscais da NF-e ficam legíveis no dark mode (fundos e textos ajustados).',
+  },
+  {
+    id: 'regras-fiscais-nfe',
+    area: 'Fiscal',
+    tipo: 'novo',
+    titulo: 'Regras fiscais da NF-e',
+    descricao:
+      'Cadastro de CFOP, CST/CSOSN e alíquotas por regime, NCM e empresa, usados na emissão.',
+  },
+  {
+    id: 'empresa-fiscal-receita',
+    area: 'Fiscal',
     tipo: 'melhoria',
-    titulo: 'Baixa de material de obra',
-    descricao: 'Material de obra baixa em Iniciar obra ou em Sem obra.',
+    titulo: 'Preenchimento por CNPJ na empresa fiscal',
+    descricao: 'Consulta à Receita preenche dados da empresa ao cadastrar/editar configuração fiscal.',
   },
   {
-    id: 'folha-acrescimo-desconto',
-    area: 'Folha',
-    tipo: 'novo',
-    titulo: 'Acréscimo e desconto na folha',
-    descricao:
-      'Dá para editar acréscimo e desconto, com valor e descrição, e salvar. O total da folha atualiza o salário pendente em Contas a pagar.',
+    id: 'nfse-nacional',
+    area: 'Fiscal',
+    tipo: 'melhoria',
+    titulo: 'NFS-e nacional e chave de acesso',
+    descricao: 'Evolução na integração NFS-e (XML, assinatura e chave de acesso) e fluxo de emissão.',
   },
   {
-    id: 'banco-horas-manual',
-    area: 'RH',
-    tipo: 'novo',
-    titulo: 'Horas manuais no mês do pagamento',
+    id: 'query-modulos',
+    area: 'Sistema',
+    tipo: 'melhoria',
+    titulo: 'Listas mais rápidas (TanStack Query)',
     descricao:
-      'No banco de horas, dá para lançar horas manuais com justificativa no mês em que serão pagas. Exemplo: setembro já fechado e o pagamento em outubro. Na lista de funcionários, o botão Ações abre o menu.',
+      'Orçamentos, clientes, serviços, compras, fornecedores, dashboard, funil, emissão NF-e e outros módulos passam a cachear e pré-carregar dados ao navegar.',
   },
   {
-    id: 'contas-bancarias',
-    area: 'Financeiro',
+    id: 'orcamento-voltar-dialog',
+    area: 'Orçamentos',
+    tipo: 'melhoria',
+    titulo: 'Confirmação ao descartar orçamento',
+    descricao: 'Ao voltar com alterações não salvas, o sistema pede confirmação em vez de só um aviso rápido.',
+  },
+  {
+    id: 'backup-agendado',
+    area: 'Sistema',
     tipo: 'novo',
-    titulo: 'Contas bancárias, transferência e extrato',
-    descricao:
-      'Dá para cadastrar contas bancárias, transferir entre bancos e ver o extrato de cada banco com filtro de período. A transferência não entra como receita e não entra no DRE.',
+    titulo: 'Backup do banco',
+    descricao: 'Rotinas de backup do PostgreSQL (serviço e agenda) para proteção dos dados.',
+  },
+  {
+    id: 'fornecedores-cnpj',
+    area: 'Suprimentos',
+    tipo: 'melhoria',
+    titulo: 'Fornecedores por CNPJ',
+    descricao: 'Normalização e unificação de fornecedores com o mesmo CNPJ, evitando cadastros duplicados.',
   },
 ];
 
