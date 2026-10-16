@@ -22,8 +22,13 @@ import {
   type OrcamentoRegredirTarget,
 } from '../utils/orcamentoStatus';
 import { OrcamentoRegredirStatusModal } from './OrcamentoRegredirStatusModal';
+import { OrcamentosListaTable } from './OrcamentosListaTable';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import {
+    useInvalidateOrcamentosLista,
+    useOrcamentosLista,
+} from '../hooks/useOrcamentosQuery';
 import {
     generateEmptyTemplate,
     generateExampleTemplate,
@@ -268,11 +273,25 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
       contatoLeadId?: string;
     } | null>(null);
 
-    const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
+    const {
+        data: orcamentosQueryData,
+        isLoading: orcamentosLoading,
+        isFetching: orcamentosFetching,
+        error: orcamentosQueryError,
+        refetch: refetchOrcamentosLista,
+    } = useOrcamentosLista();
+    const invalidateOrcamentosLista = useInvalidateOrcamentosLista();
+    const orcamentos = useMemo(
+        () => (Array.isArray(orcamentosQueryData) ? orcamentosQueryData : []),
+        [orcamentosQueryData]
+    );
+
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [materiais, setMateriais] = useState<Material[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [auxLoading, setAuxLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const loading = orcamentosLoading || auxLoading;
+    const refreshing = orcamentosFetching || auxLoading;
 
     const [statusFilter, setStatusFilter] = useState<string>('Todos');
     const [sortAprovadosPorDataAprovacao, setSortAprovadosPorDataAprovacao] = useState(false);
@@ -301,7 +320,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         const tipos: { [key: string]: string } = {
             'MATERIAL': 'Material',
             'SERVICO': 'Serviço',
-            'COTACAO': 'Banco Frio',
+            'COTACAO': 'Legado',
             'QUADRO_PRONTO': 'Quadro',
             'CUSTO_EXTRA': 'Custo Extra',
             'KIT': 'Kit'
@@ -373,31 +392,19 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
     const [quantidadesServicos, setQuantidadesServicos] = useState<Map<string, number>>(new Map());
     const [quantidadesKits, setQuantidadesKits] = useState<Map<string, number>>(new Map());
     const [quantidadesQuadros, setQuantidadesQuadros] = useState<Map<string, number>>(new Map());
-    const [quantidadesCotacoes, setQuantidadesCotacoes] = useState<Map<string, number>>(new Map());
     const [itemSearchTerm, setItemSearchTerm] = useState('');
     const [tipoItemSelecionado, setTipoItemSelecionado] = useState<'material' | 'kit' | 'servico' | 'quadro' | 'cotacao' | 'extra'>('material');
-    const [cotacoes, setCotacoes] = useState<any[]>([]);
     const [kits, setKits] = useState<any[]>([]);
     const [servicos, setServicos] = useState<any[]>([]);
     const [quadrosProntos, setQuadrosProntos] = useState<any[]>([]);
 
-    // Estados para modal de comparação (estoque vs banco frio)
     const [modalExpandido, setModalExpandido] = useState(false);
-    const [materiaisComEstoque, setMateriaisComEstoque] = useState<Material[]>([]);
-    const [cotacoesBancoFrio, setCotacoesBancoFrio] = useState<any[]>([]);
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [empresasFiscais, setEmpresasFiscais] = useState<EmpresaFiscal[]>([]);
-    const [searchEstoque, setSearchEstoque] = useState('');
-    const [searchCotacoes, setSearchCotacoes] = useState('');
-    const [searchGlobalComparacao, setSearchGlobalComparacao] = useState('');
-    const [materialSelecionadoComparacao, setMaterialSelecionadoComparacao] = useState<Material | null>(null);
-    const [cotacaoSelecionadaComparacao, setCotacaoSelecionadaComparacao] = useState<any | null>(null);
-    const [materiaisSelecionadosComparacao, setMateriaisSelecionadosComparacao] = useState<Set<string>>(new Set());
-    const [cotacoesSelecionadasComparacao, setCotacoesSelecionadasComparacao] = useState<Set<string>>(new Set());
 
     // Estado para busca global e modo de adição
     const [buscaGlobal, setBuscaGlobal] = useState('');
-    const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'cotacoes' | 'manual' | 'comparacao'>('materiais');
+    const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'manual'>('materiais');
     const [resultadosBuscaGlobal, setResultadosBuscaGlobal] = useState<{
         materiais: Material[];
         servicos: any[];
@@ -485,124 +492,79 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         return !!item.descricao && item.descricao !== nome;
     };
 
-    // Carregar dados iniciais usando os serviços adequados
-    const loadData = async () => {
+    /** Dados auxiliares do formulário/modal — a lista de orçamentos vem do TanStack Query */
+    const loadAuxData = async () => {
         try {
-            setLoading(true);
+            setAuxLoading(true);
             setError(null);
 
-            console.log('🔍 Carregando dados de orçamentos via serviços...');
-
-            const [orcamentosRes, clientesRes, materiaisRes, cotacoesRes, kitsRes, servicosRes, empresasRes, empresasFiscaisRes] = await Promise.all([
-                orcamentosService.listar(),
+            const [clientesRes, materiaisRes, kitsRes, servicosRes, empresasRes, empresasFiscaisRes] = await Promise.all([
                 clientesService.listar(),
                 axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
-                axiosApiService.get('/api/cotacoes'),
-                axiosApiService.get(ENDPOINTS.KITS),
+                                axiosApiService.get(ENDPOINTS.KITS),
                 axiosApiService.get(ENDPOINTS.SERVICOS),
                 empresasService.listar({ ativo: true }),
                 empresaFiscalService.listar()
             ]);
 
-            console.log('📊 Resposta do serviço - Orçamentos:', orcamentosRes);
-            console.log('👥 Resposta do serviço - Clientes:', clientesRes);
-            console.log('📦 Resposta da API - Materiais:', materiaisRes);
-
-            // Tratar orçamentos usando o serviço
-            if (orcamentosRes.success && orcamentosRes.data) {
-                const orcamentosData = Array.isArray(orcamentosRes.data) ? orcamentosRes.data : [];
-                setOrcamentos(orcamentosData);
-                console.log(`✅ ${orcamentosData.length} orçamentos carregados`);
-            } else {
-                console.warn('⚠️ Erro ao carregar orçamentos:', orcamentosRes.error);
-                setOrcamentos([]);
-            }
-
-            // Tratar clientes usando o serviço
             if (clientesRes.success && clientesRes.data) {
-                const clientesData = Array.isArray(clientesRes.data) ? clientesRes.data : [];
-                setClientes(clientesData);
-                console.log(`✅ ${clientesData.length} clientes carregados`);
+                setClientes(Array.isArray(clientesRes.data) ? clientesRes.data : []);
             } else {
-                console.warn('⚠️ Erro ao carregar clientes:', clientesRes.error);
                 setClientes([]);
             }
 
-            // Tratar materiais
             if (materiaisRes.success && materiaisRes.data) {
-                const materiaisData = Array.isArray(materiaisRes.data) ? materiaisRes.data : [];
-                setMateriais(materiaisData);
-                console.log(`✅ ${materiaisData.length} materiais carregados`);
+                setMateriais(Array.isArray(materiaisRes.data) ? materiaisRes.data : []);
             } else {
-                console.warn('⚠️ Erro ao carregar materiais:', materiaisRes.error);
                 setMateriais([]);
             }
 
-            // Tratar cotações
-            if (cotacoesRes.success && cotacoesRes.data) {
-                const cotacoesData = Array.isArray(cotacoesRes.data) ? cotacoesRes.data : [];
-                setCotacoes(cotacoesData);
-                console.log(`✅ ${cotacoesData.length} cotações carregadas`);
-            } else {
-                console.warn('⚠️ Erro ao carregar cotações:', cotacoesRes.error);
-                setCotacoes([]);
-            }
 
-            // Tratar kits
             if (kitsRes.success && kitsRes.data) {
-                const kitsData = Array.isArray(kitsRes.data) ? kitsRes.data : [];
-                setKits(kitsData);
-                console.log(`✅ ${kitsData.length} kits carregados`);
+                setKits(Array.isArray(kitsRes.data) ? kitsRes.data : []);
             } else {
-                console.warn('⚠️ Erro ao carregar kits:', kitsRes.error);
                 setKits([]);
             }
 
-            // Tratar serviços
             if (servicosRes.success && servicosRes.data) {
-                const servicosData = Array.isArray(servicosRes.data) ? servicosRes.data : [];
-                setServicos(servicosData);
-                console.log(`✅ ${servicosData.length} serviços carregados`);
+                setServicos(Array.isArray(servicosRes.data) ? servicosRes.data : []);
             } else {
-                console.warn('⚠️ Erro ao carregar serviços:', servicosRes.error);
                 setServicos([]);
             }
 
-            // Tratar empresas (CNPJs da S3E)
             if (empresasRes.success && empresasRes.data) {
-                const empresasData = Array.isArray(empresasRes.data) ? empresasRes.data : [];
-                setEmpresas(empresasData);
-                console.log(`✅ ${empresasData.length} empresas carregadas`);
+                setEmpresas(Array.isArray(empresasRes.data) ? empresasRes.data : []);
             } else {
-                console.warn('⚠️ Erro ao carregar empresas:', empresasRes.error);
                 setEmpresas([]);
             }
 
-            // Tratar empresas fiscais (empresa executora: Orçamento → PV → NF-e/NFS-e)
             if (empresasFiscaisRes?.data) {
-                const list = Array.isArray(empresasFiscaisRes.data) ? empresasFiscaisRes.data : [];
-                setEmpresasFiscais(list);
-                console.log(`✅ ${list.length} empresas fiscais carregadas`);
+                setEmpresasFiscais(Array.isArray(empresasFiscaisRes.data) ? empresasFiscaisRes.data : []);
             } else {
                 setEmpresasFiscais([]);
             }
-
         } catch (err) {
-            console.error('❌ Erro crítico ao carregar dados:', err);
+            console.error('❌ Erro crítico ao carregar dados auxiliares:', err);
             setError('Erro de conexão ao carregar dados');
-            setOrcamentos([]);
             setClientes([]);
             setMateriais([]);
-            setCotacoes([]);
             setKits([]);
             setServicos([]);
         } finally {
-            setLoading(false);
+            setAuxLoading(false);
         }
     };
 
+    const loadData = async () => {
+        await Promise.all([refetchOrcamentosLista(), loadAuxData()]);
+    };
+
+    const refreshOrcamentosLista = async () => {
+        await invalidateOrcamentosLista();
+    };
+
     useEffect(() => {
-        loadData();
+        void loadAuxData();
     }, []);
 
     // Ao montar: se veio do Funil de Atendimento com "Gerar Orçamento", abrir aba novo e passar dados
@@ -711,92 +673,36 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             );
     }, [materiais, itemSearchTerm]);
 
-    // Filtrar cotações para seleção
-    const filteredCotacoes = useMemo(() => {
-        if (!Array.isArray(cotacoes)) return [];
-
-        return cotacoes
-            .filter(cotacao => cotacao.ativo)
-            .filter(cotacao =>
-                matchCrossSearch(itemSearchTerm, cotacao.nome) ||
-                cotacao.ncm?.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-                cotacao.fornecedorNome?.toLowerCase().includes(itemSearchTerm.toLowerCase())
-            );
-    }, [cotacoes, itemSearchTerm]);
-
-    // Filtrar kits para seleção
-    const filteredKits = useMemo(() => {
-        if (!Array.isArray(kits)) return [];
-
-        return kits
-            .filter(kit => kit.ativo)
-            .filter(kit =>
-                matchCrossSearch(itemSearchTerm, kit.nome) ||
-                kit.descricao?.toLowerCase().includes(itemSearchTerm.toLowerCase())
-            );
-    }, [kits, itemSearchTerm]);
-
-    // Filtrar serviços para seleção
     const filteredServicos = useMemo(() => {
         if (!Array.isArray(servicos)) return [];
-
         return servicos
-            .filter(servico => servico.ativo)
-            .filter(servico =>
-                matchCrossSearch(itemSearchTerm, servico.nome) ||
-                servico.descricao?.toLowerCase().includes(itemSearchTerm.toLowerCase())
+            .filter(s => s.ativo)
+            .filter(s =>
+                matchCrossSearch(itemSearchTerm, s.nome) ||
+                (s.codigo || '').toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                (s.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
     }, [servicos, itemSearchTerm]);
 
-    // Filtrar quadros prontos para seleção (será implementado quando houver backend)
-    const filteredQuadrosProntos = useMemo(() => {
-        if (!Array.isArray(quadrosProntos)) return [];
+    const filteredKits = useMemo(() => {
+        if (!Array.isArray(kits)) return [];
+        return kits
+            .filter(k => k.ativo)
+            .filter(k =>
+                matchCrossSearch(itemSearchTerm, k.nome) ||
+                (k.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
+            );
+    }, [kits, itemSearchTerm]);
 
+    const filteredQuadros = useMemo(() => {
+        if (!Array.isArray(quadrosProntos)) return [];
         return quadrosProntos
-            .filter(quadro => quadro.ativo)
-            .filter(quadro =>
-                quadro.nome.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-                quadro.descricao?.toLowerCase().includes(itemSearchTerm.toLowerCase())
+            .filter(q => q.ativo)
+            .filter(q =>
+                matchCrossSearch(itemSearchTerm, q.nome) ||
+                (q.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
     }, [quadrosProntos, itemSearchTerm]);
-
-    // Alias para compatibilidade com modal de comparação
-    const filteredQuadros = filteredQuadrosProntos;
-
-    // Popular materiais com estoque e cotações do banco frio para comparação
-    useEffect(() => {
-            if (Array.isArray(materiais)) {
-            setMateriaisComEstoque(materiais.filter(m => m.ativo));
-        }
-        if (Array.isArray(cotacoes)) {
-            setCotacoesBancoFrio(cotacoes.filter(c => c.ativo !== false));
-        }
-    }, [materiais, cotacoes]);
-
-    // Filtrar materiais com estoque para comparação
-    const filteredMateriaisEstoque = useMemo(() => {
-        const termoBusca = searchGlobalComparacao || searchEstoque;
-        if (!termoBusca) return materiaisComEstoque || [];
-        return (materiaisComEstoque || []).filter(material =>
-            material && (
-                (material.nome || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
-                (material.sku || '').toLowerCase().includes(termoBusca.toLowerCase())
-            )
-        );
-    }, [materiaisComEstoque, searchEstoque, searchGlobalComparacao]);
-
-    // Filtrar cotações para comparação
-    const filteredCotacoesComparacao = useMemo(() => {
-        const termoBusca = searchGlobalComparacao || searchCotacoes;
-        if (!termoBusca) return cotacoesBancoFrio || [];
-        return (cotacoesBancoFrio || []).filter(cotacao =>
-            cotacao && (
-                matchCrossSearch(termoBusca, cotacao.nome || '') ||
-                (cotacao.ncm || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
-                (cotacao.fornecedorNome || '').toLowerCase().includes(termoBusca.toLowerCase())
-            )
-        );
-    }, [cotacoesBancoFrio, searchCotacoes, searchGlobalComparacao]);
 
     // Busca global em todos os tipos de itens
     useEffect(() => {
@@ -842,22 +748,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 (q.descricao || '').toLowerCase().includes(termo)
             );
 
-        const cotacoesEncontradas = (cotacoes || [])
-            .filter(c => c && c.ativo !== false)
-            .filter(c =>
-                (c.nome || '').toLowerCase().includes(termo) ||
-                (c.ncm || '').toLowerCase().includes(termo) ||
-                (c.fornecedorNome || '').toLowerCase().includes(termo)
-            );
-
         setResultadosBuscaGlobal({
             materiais: materiaisEncontrados,
             servicos: servicosEncontrados,
             kits: kitsEncontrados,
             quadros: quadrosEncontrados,
-            cotacoes: cotacoesEncontradas
+            cotacoes: []
         });
-    }, [buscaGlobal, materiais, servicos, kits, quadrosProntos, cotacoes]);
+    }, [buscaGlobal, materiais, servicos, kits, quadrosProntos]);
 
     // Filtrar orçamentos
     // Função para verificar se um orçamento está expirado
@@ -1067,12 +965,18 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         }
     };
 
-    const handleExportData = () => {
+    const handleExportData = async () => {
         try {
+            const detalhes = await Promise.all(
+                orcamentos.map(async (orc) => {
+                    const response = await orcamentosService.buscar(orc.id);
+                    return response.success && response.data ? response.data : orc;
+                })
+            );
             const template: ImportExportData = {
                 version: '1.0.0',
                 exportDate: new Date().toISOString(),
-                orcamentos: orcamentos.map(orc => ({
+                orcamentos: detalhes.map(orc => ({
                     clienteId: orc.clienteId,
                     clienteNome: orc.cliente?.nome,
                     titulo: orc.titulo,
@@ -1259,7 +1163,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             setDadosParaImportar(null);
 
             toast.success(`✅ Importação concluída! ${successCount} orçamento(s) importado(s), ${errorCount} erro(s)`);
-            await loadData(); // Recarregar lista
+            await refreshOrcamentosLista();
         } catch (error) {
             console.error('Erro ao confirmar importação:', error);
             toast.error('❌ Erro ao confirmar importação');
@@ -1318,18 +1222,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         });
     };
 
-    const atualizarQuantidadeCotacao = (cotacaoId: string, quantidade: number) => {
-        setQuantidadesCotacoes(prev => {
-            const novo = new Map(prev);
-            if (quantidade > 0) {
-                novo.set(cotacaoId, quantidade);
-            } else {
-                novo.delete(cotacaoId);
-            }
-            return novo;
-        });
-    };
-
     const handleAddItem = (material: Material, manterModalAberto = false, quantidade?: number) => {
         const qtd = quantidade || quantidadesMateriais.get(material.id) || 1;
 
@@ -1362,212 +1254,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         toast.success(`Material adicionado ao orçamento (${qtd}x)`);
     };
 
-    // Adicionar cotação ao orçamento (BANCO FRIO)
-    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVenda?: string, quantidade?: number) => {
-        const qtd = quantidade || quantidadesCotacoes.get(cotacao.id) || 1;
-        const unidadeVendaFinal = unidadeVenda || cotacao.unidadeMedida || 'UN';
-
-        // Calcular custo baseado na unidade de venda
-        let custoUnitario = cotacao.valorUnitario || 0;
-        // Se a unidade de medida da cotação permitir venda em M/cm e estiver vendendo em cm, ajustar o preço
-        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeVendaFinal === 'cm') {
-            // Se vender em cm, dividir o preço por metro por 100
-            custoUnitario = cotacao.valorUnitario / 100;
-        }
-        custoUnitario = roundMoney(custoUnitario);
-
-        // Calcular preço de venda: usar valorVenda se disponível, senão usar custo unitário
-        const valorVendaBase = cotacao.valorVenda || custoUnitario;
-        const precoBase = roundMoney(valorVendaBase); // Preço base (2 decimais)
-
-        // Identificar tipo de material baseado no nome da cotação
-        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
-
-        const newItem: OrcamentoItem = {
-            tipo: 'COTACAO',
-            cotacaoId: cotacao.id,
-            nome: cotacao.nome,
-            descricao: cotacao.nome, // ✅ Apenas o nome do material (não mostrar fornecedor)
-            dataAtualizacaoCotacao: cotacao.dataAtualizacao,
-            unidadeMedida: unidadeVendaFinal,
-            unidadeVenda: unidadeVendaFinal, // Unidade de venda
-            tipoMaterial: tipoMaterial,
-            quantidade: qtd,
-            custoUnit: custoUnitario, // Custo é sempre o valor da cotação (valorUnitario)
-            precoBase: precoBase, // Preço base
-            precoUnit: precoBase,
-            subtotal: roundMoney(precoBase * qtd)
-        };
-
-        setItems(prev => [...prev, newItem]);
-
-        // Limpar quantidade após adicionar
-        atualizarQuantidadeCotacao(cotacao.id, 0);
-
-        if (!manterModalAberto) {
-            setShowItemModal(false);
-        }
-        setItemSearchTerm('');
-
-        // Verificar se a cotação tem mais de 30 dias
-        if (cotacao.dataAtualizacao) {
-            const dataAtualizacao = new Date(cotacao.dataAtualizacao);
-            const diasDesdeAtualizacao = Math.floor((new Date().getTime() - dataAtualizacao.getTime()) / (1000 * 60 * 60 * 24));
-
-            if (diasDesdeAtualizacao > 30) {
-                toast.warning(`⚠️ Cotação antiga: ${diasDesdeAtualizacao} dias desde a última atualização`, {
-                    description: `A cotação "${cotacao.nome}" foi atualizada há mais de 30 dias. Considere realizar uma nova cotação.`,
-                    duration: 5000
-                });
-            } else {
-                toast.success(`Cotação adicionada do banco frio (${qtd}x)`);
-            }
-        } else {
-            toast.success(`Cotação adicionada do banco frio (${qtd}x)`);
-        }
-    };
-
-    // Funções para modal de comparação
-    const toggleMaterialSelecionado = (materialId: string) => {
-        setMateriaisSelecionadosComparacao(prev => {
-            const novo = new Set(prev);
-            if (novo.has(materialId)) {
-                novo.delete(materialId);
-            } else {
-                novo.add(materialId);
-            }
-            return novo;
-        });
-    };
-
-    const toggleCotacaoSelecionada = (cotacaoId: string) => {
-        setCotacoesSelecionadasComparacao(prev => {
-            const novo = new Set(prev);
-            if (novo.has(cotacaoId)) {
-                novo.delete(cotacaoId);
-            } else {
-                novo.add(cotacaoId);
-            }
-            return novo;
-        });
-    };
-
-    const handleAddItemComValidacao = (material?: Material, cotacao?: any, quantidade?: number, unidadeVenda?: string) => {
-        const qtd = quantidade || 1;
-
-        // Validar estoque se for material
-        if (material) {
-            if (material.estoque < qtd) {
-                toast.warning('Estoque insuficiente', {
-                    description: `Estoque disponível: ${material.estoque} ${material.unidadeMedida}. Solicitado: ${qtd} ${material.unidadeMedida}`
-                });
-                // Não bloquear a adição; apenas avisar
-            }
-
-            const unidadeVendaFinal = unidadeVenda || material.unidadeMedida;
-
-            // Determinar preço de venda baseado na unidade
-            let precoVenda = material.preco || 0;
-
-            // Se a unidade de medida permitir venda em M/cm, usar valores específicos
-            if (podeVenderEmMetroOuCm(material.unidadeMedida)) {
-                if (unidadeVendaFinal === 'm') {
-                    precoVenda = (material as any).valorVendaM || material.valorVenda || material.preco || 0;
-                } else if (unidadeVendaFinal === 'cm') {
-                    precoVenda = (material as any).valorVendaCM ||
-                        ((material as any).valorVendaM ? (material as any).valorVendaM / 100 :
-                            (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
-                }
-            } else {
-                precoVenda = material.valorVenda || material.preco || 0;
-            }
-
-            const precoBase = precoVenda;
-
-            const newItem: OrcamentoItem = {
-                tipo: 'MATERIAL',
-                materialId: material.id,
-                nome: material.nome,
-                descricao: material.nome,
-                unidadeMedida: material.unidadeMedida, // Unidade de estoque
-                unidadeVenda: unidadeVendaFinal, // Unidade de venda (pode ser diferente)
-                quantidade: qtd,
-                custoUnit: material.preco,
-                precoBase: precoBase,
-                precoUnit: precoBase,
-                subtotal: precoBase * qtd
-            };
-
-            setItems(prev => [...prev, newItem]);
-            toast.success('Material adicionado', {
-                description: `${material.nome} (${qtd} ${unidadeVendaFinal}) - Estoque: ${material.estoque} ${material.unidadeMedida}`
-            });
-        }
-
-        // Adicionar cotação se fornecida
-        if (cotacao) {
-            const valorVenda = cotacao.valorVenda || cotacao.valorUnitario * 1.4;
-            const precoBase = valorVenda;
-
-            const newItem: OrcamentoItem = {
-                tipo: 'COTACAO',
-                cotacaoId: cotacao.id,
-                nome: cotacao.nome,
-                descricao: cotacao.nome,
-                unidadeMedida: cotacao.unidadeMedida || 'UN',
-                quantidade: qtd,
-                custoUnit: cotacao.valorUnitario || 0,
-                precoBase: precoBase,
-                precoUnit: precoBase,
-                subtotal: precoBase * qtd,
-                dataAtualizacaoCotacao: cotacao.dataAtualizacao
-            };
-
-            setItems(prev => [...prev, newItem]);
-            toast.success('Cotação adicionada', {
-                description: `${cotacao.nome} do banco frio - Fornecedor: ${cotacao.fornecedorNome || 'N/A'}`
-            });
-        }
-
-        // Limpar seleções
-        setMaterialSelecionadoComparacao(null);
-        setCotacaoSelecionadaComparacao(null);
-        setMateriaisSelecionadosComparacao(new Set());
-        setCotacoesSelecionadasComparacao(new Set());
-    };
-
-    const handleInserirSelecionados = () => {
-        let inseridos = 0;
-
-        // Inserir materiais selecionados
-        materiaisSelecionadosComparacao.forEach(materialId => {
-            const material = materiaisComEstoque.find(m => m.id === materialId);
-            if (material) {
-                const qtd = quantidadesMateriais.get(materialId) || 1;
-                handleAddItemComValidacao(material, undefined, qtd);
-                inseridos++;
-            }
-        });
-
-        // Inserir cotações selecionadas
-        cotacoesSelecionadasComparacao.forEach(cotacaoId => {
-            const cotacao = cotacoesBancoFrio.find(c => c.id === cotacaoId);
-            if (cotacao) {
-                const qtd = quantidadesCotacoes.get(cotacaoId) || 1;
-                handleAddItemComValidacao(undefined, cotacao, qtd);
-                inseridos++;
-            }
-        });
-
-        if (inseridos > 0) {
-            toast.success(`${inseridos} item(ns) inserido(s) com sucesso!`);
-            // Limpar seleções e quantidades
-            setMateriaisSelecionadosComparacao(new Set());
-            setCotacoesSelecionadasComparacao(new Set());
-            setQuantidadesMateriais(new Map());
-            setQuantidadesCotacoes(new Map());
-        }
-    };
 
     // Função para inserir múltiplos itens com quantidades definidas
     const handleInserirItensComQuantidades = () => {
@@ -1617,17 +1303,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             }
         });
 
-        // Inserir cotações com quantidades
-        quantidadesCotacoes.forEach((qtd, cotacaoId) => {
-            if (qtd > 0) {
-                const cotacao = cotacoes.find(c => c.id === cotacaoId);
-                if (cotacao) {
-                    handleAddCotacao(cotacao, true, undefined, qtd);
-                    inseridos++;
-                }
-            }
-        });
-
         if (inseridos > 0) {
             toast.success(`${inseridos} item(ns) inserido(s) com sucesso!`);
             // Limpar todas as quantidades
@@ -1635,7 +1310,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             setQuantidadesServicos(new Map());
             setQuantidadesKits(new Map());
             setQuantidadesQuadros(new Map());
-            setQuantidadesCotacoes(new Map());
         } else {
             toast.warning('Nenhum item com quantidade definida para inserir');
         }
@@ -1919,7 +1593,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             if (response.success) {
                 console.log('✅ Orçamento salvo com sucesso');
                 handleCloseModal();
-                await loadData();
+                await refreshOrcamentosLista();
 
                 // Mostrar mensagem de sucesso
                 toast.success(`Orçamento ${orcamentoToEdit ? 'atualizado' : 'criado'}!`, {
@@ -1982,7 +1656,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 });
             }
 
-            await loadData();
+            await refreshOrcamentosLista();
         } else {
             toast.error('Erro ao aprovar', {
                 description: response.error
@@ -2092,7 +1766,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             toast.success(deletePermanent ? 'Orçamento excluído' : 'Orçamento cancelado', {
                 description: message
             });
-            await loadData();
+            await refreshOrcamentosLista();
         } else {
             toast.error('Erro ao excluir', {
                 description: response.error || 'Não foi possível excluir o orçamento'
@@ -2113,7 +1787,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
             if (response.success) {
                 console.log('✅ Status alterado com sucesso');
-                await loadData();
+                await refreshOrcamentosLista();
                 return response.message || `Status alterado para ${novoStatus}`;
             } else {
                 const errorMsg = response.error || 'Erro ao alterar status';
@@ -2146,7 +1820,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             if (response.success) {
                 toast.success(response.message || `Status regredido para ${novoStatus}`);
                 setOrcamentoRegredir(null);
-                await loadData();
+                await refreshOrcamentosLista();
             } else {
                 toast.error(response.error || 'Erro ao regredir status');
             }
@@ -2233,12 +1907,16 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
     };
 
     // Abrir modal de customização de PDF
-    const handlePersonalizarPDF = (orcamento: Orcamento) => {
+    const handlePersonalizarPDF = async (orcamento: Orcamento) => {
         setPdfLoadingId(orcamento.id);
-        requestAnimationFrame(() => {
-            setOrcamentoForPDF(orcamento);
+        try {
+            const response = await orcamentosService.buscar(orcamento.id);
+            const completo = response.success && response.data ? response.data : orcamento;
+            setOrcamentoForPDF(completo);
             setShowPDFCustomization(true);
-        });
+        } finally {
+            setPdfLoadingId(null);
+        }
     };
 
     const handleGerarPedidoVenda = (orcamentoId: string) => {
@@ -2337,7 +2015,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
         return (
             <NovoOrcamentoPage
                 setAbaAtiva={setAbaAtiva}
-                onOrcamentoCriado={loadData}
+                onOrcamentoCriado={() => { void refreshOrcamentosLista(); }}
                 initialDataFromLead={initialDataFromLead ?? undefined}
                 onConsumedInitialData={() => setInitialDataFromLead(null)}
                 onNavigate={onNavigate}
@@ -2365,14 +2043,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                             className="flex-shrink-0"
                             actions={[
                                 {
-                                    label: loading ? 'Carregando...' : 'Atualizar',
+                                    label: refreshing ? 'Carregando...' : 'Atualizar',
                                     icon: (
-                                        <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
                                     ),
-                                    onClick: loadData,
-                                    disabled: loading,
+                                    onClick: () => { void loadData(); },
+                                    disabled: refreshing,
                                     variant: 'primary'
                                 },
                                 {
@@ -2416,12 +2094,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             </header>
 
             {/* Error Message */}
-            {error && (
+            {(error || orcamentosQueryError) && (
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 animate-fade-in">
                     <div className="flex items-center justify-between">
-                        <p className="text-red-800 font-medium">⚠️ {error}</p>
+                        <p className="text-red-800 font-medium">
+                            ⚠️ {error || (orcamentosQueryError instanceof Error ? orcamentosQueryError.message : 'Erro ao carregar orçamentos')}
+                        </p>
                         <button
-                            onClick={loadData}
+                            onClick={() => { void loadData(); }}
                             className="text-red-700 hover:text-red-900 font-medium underline"
                         >
                             Tentar novamente
@@ -2799,7 +2479,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                 </div>
                                 <div className="flex items-center gap-1.5 justify-end text-right">
                                     <span className="shrink-0">📝</span>
-                                    <span>{orcamento.items?.length || 0} item(s)</span>
+                                    <span>{orcamento.itemsCount ?? orcamento.items?.length ?? 0} item(s)</span>
                                 </div>
                                 {statusVisual !== 'Aprovado' && statusVisual !== 'Concretizado' && (
                                     <div className={`col-span-2 flex items-center gap-1.5 ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 dark:text-orange-400 font-semibold' : ''}`}>
@@ -2831,7 +2511,11 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
                             {/* Ações agrupadas */}
                             <div className="pt-2 border-t border-gray-100 dark:border-dark-border space-y-1.5 min-w-0">
-                                <div className="grid grid-cols-4 gap-1">
+                                {(() => {
+                                    const whatsappComoCta =
+                                        orcamento.status === 'Aprovado' && !isOrcamentoConcretizado(orcamento);
+                                    return (
+                                <div className={`grid gap-1 ${whatsappComoCta ? 'grid-cols-3' : 'grid-cols-4'}`}>
                                     <button
                                         type="button"
                                         onClick={async () => {
@@ -2847,6 +2531,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         <EyeIcon className="w-3.5 h-3.5 shrink-0" />
                                         <span className="truncate">Ver</span>
                                     </button>
+                                    {!whatsappComoCta && (
                                     <button
                                         type="button"
                                         onClick={() => void abrirChatWhatsappDoOrcamento({
@@ -2862,6 +2547,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         <span className="truncate hidden min-[400px]:inline">WhatsApp</span>
                                         <span className="truncate min-[400px]:hidden">Zap</span>
                                     </button>
+                                    )}
                                     <button
                                         type="button"
                                         onClick={() => handlePersonalizarPDF(orcamento)}
@@ -2890,6 +2576,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         <span className="truncate">Editar</span>
                                     </button>
                                 </div>
+                                    );
+                                })()}
                                 <div className={`grid gap-1 ${canDelete(user) ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                     <button
                                         type="button"
@@ -2949,11 +2637,11 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     </div>
                                 )}
                                 {orcamento.status === 'Enviado ao Cliente' && (
-                                    <div className="flex gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <button
                                             type="button"
                                             onClick={() => handleAprovarOrcamento(orcamento.id)}
-                                            className={`${denseCardStatusBtnClasses} bg-green-600 text-white hover:bg-green-700`}
+                                            className={`${denseCardStatusBtnClasses} w-full bg-green-600 text-white hover:bg-green-700`}
                                         >
                                             <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -2963,26 +2651,38 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         <button
                                             type="button"
                                             onClick={() => handleDeclinarOrcamento(orcamento)}
-                                            className={`${denseCardStatusBtnClasses} bg-gray-800 text-white hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600`}
+                                            className="self-end px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:underline"
+                                            title="Declinar orçamento"
                                         >
-                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                            <span className="truncate">Declinar</span>
+                                            Declinar
                                         </button>
                                     </div>
                                 )}
                                 {orcamento.status === 'Aprovado' && !isOrcamentoConcretizado(orcamento) && (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleDeclinarOrcamento(orcamento)}
-                                        className={`${denseCardStatusBtnClasses} w-full bg-orange-600 text-white hover:bg-orange-700`}
-                                    >
-                                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                        <span className="truncate">Declinar</span>
-                                    </button>
+                                    <div className="flex flex-col gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => void abrirChatWhatsappDoOrcamento({
+                                                orcamentoId: orcamento.id,
+                                                telefone: orcamento.cliente?.telefone,
+                                                nome: orcamento.cliente?.nome,
+                                                onNavigate,
+                                            })}
+                                            className={`${denseCardStatusBtnClasses} w-full bg-emerald-600 text-white hover:bg-emerald-700`}
+                                            title="Chamar cliente no WhatsApp"
+                                        >
+                                            <WhatsAppIcon className="w-4 h-4 shrink-0" />
+                                            <span className="truncate">WhatsApp</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeclinarOrcamento(orcamento)}
+                                            className="self-end px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:underline"
+                                            title="Declinar orçamento"
+                                        >
+                                            Declinar
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                             </div>
@@ -2991,273 +2691,77 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     })}
                 </div>
             ) : (
-                /* Visualização em Lista */
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-soft" style={{ overflow: 'visible', position: 'relative' }}>
-                    <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
-                        <table className="w-full">
-                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                                <tr>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase w-16">Nº</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Título</th>
-                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">A receber (PV)</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Validade</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {filteredOrcamentos.map((orcamento, index) => {
-                                    const statusVisual = isOrcamentoConcretizado(orcamento) ? 'Concretizado' : orcamento.status;
-                                    return (
-                                    <tr key={orcamento.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className={`px-6 py-4 text-center ${getOrcamentoRowLateralBorderClass(statusVisual, abaAtiva)}`}>
-
-                                            <span className="text-sm font-semibold text-gray-600">{orcamento.numeroSequencial || index + 1}</span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <p className="font-semibold text-gray-900">{orcamento.cliente?.nome || 'N/A'}</p>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <p className="font-medium text-gray-900">{orcamento.titulo}</p>
-                                            <p className="text-xs text-gray-500">#{orcamento.numeroSequencial ?? orcamento.numero ?? orcamento.id.substring(0, 8)}</p>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            {(() => {
-                                                const valorAReceber = calcularValorAReceberDoOrcamento(orcamento as any);
-                                                const valorVendaDireta = calcularValorVendaDiretaDoOrcamento(orcamento as any);
-                                                const totalCliente = roundMoney(Number((orcamento as any).precoVenda) || 0);
-                                                const temVendaDireta = valorVendaDireta > 0.009 && totalCliente > valorAReceber + 0.009;
-                                                return (
-                                                    <div className="flex flex-col items-end leading-tight">
-                                                        <span className="text-lg font-bold text-purple-700">
-                                                            R$ {valorAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </span>
-                                                        {temVendaDireta && (
-                                                            <span className="text-xs text-gray-500">
-                                                                Total cliente: R$ {totalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            {statusVisual === 'Concretizado' ? (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <p className="text-xs text-violet-600 font-semibold">PV gerado</p>
-                                                    <p className="text-xs text-gray-500">
-                                                        {new Date(orcamento.venda?.createdAt || orcamento.venda?.dataVenda || orcamento.updatedAt).toLocaleDateString('pt-BR')}
-                                                    </p>
-                                                    {orcamento.venda?.numeroSequencial && (
-                                                        <span className="text-xs font-bold text-violet-700">#{orcamento.venda.numeroSequencial}</span>
-                                                    )}
-                                                </div>
-                                            ) : statusVisual === 'Aprovado' ? (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <p className="text-xs text-gray-400 italic">Histórico</p>
-                                                    <p className="text-xs text-gray-500">{new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}</p>
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <p className={`text-sm ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 font-semibold' : 'text-gray-600'}`}>
-                                                        {new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}
-                                                    </p>
-                                                    {isOrcamentoExpirado(orcamento) && (
-                                                        <span className="text-xs text-orange-600 font-semibold">⏰ Expirado</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <div className="flex flex-col items-center gap-1">
-                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(statusVisual)}`}>
-                                                    {statusVisual === 'Pendente' && '⏳ '}
-                                                    {statusVisual === 'Enviado ao Cliente' && '📤 '}
-                                                    {statusVisual === 'Aprovado' && '✅ '}
-                                                    {statusVisual === 'Concretizado' && '📦 '}
-                                                    {statusVisual === 'Recusado' && '❌ '}
-                                                    {statusVisual === 'Declinado' && '🔻 '}
-                                                    {statusVisual === 'Cancelado' && '🚫 '}
-                                                    {statusVisual}
-                                                </span>
-                                                {isOrcamentoConcretizado(orcamento) && orcamento.venda?.numeroSequencial && (
-                                                    <span className="px-2 py-0.5 text-xs font-bold rounded bg-violet-100 text-violet-800">
-                                                        PV #{orcamento.venda.numeroSequencial}
-                                                    </span>
-                                                )}
-                                                {isOrcamentoExpirado(orcamento) && (
-                                                    <span className="px-2 py-0.5 text-xs font-bold rounded bg-orange-100 text-orange-800">
-                                                        ⏰ Expirado
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
-                                            <div className="flex items-center justify-center" style={{ position: 'relative' }}>
-                                                <ActionsDropdown
-                                                    actions={[
-                                                        {
-                                                            label: 'Visualizar',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: async () => {
-                                                                // Buscar orçamento completo do backend para garantir relações carregadas
-                                                                const response = await orcamentosService.buscar(orcamento.id);
-                                                                if (response.success && response.data) {
-                                                                    setOrcamentoToView(response.data);
-                                                                } else {
-                                                                    // Fallback: usar o orçamento da lista
-                                                                    setOrcamentoToView(orcamento);
-                                                                }
-                                                            },
-                                                            variant: 'primary'
-                                                        },
-                                                        {
-                                                            label: 'Editar',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: () => handleOpenModal(orcamento),
-                                                            variant: 'default'
-                                                        },
-                                                        {
-                                                            label: 'Chamar no WhatsApp',
-                                                            icon: <WhatsAppIcon className="w-4 h-4" />,
-                                                            onClick: () => void abrirChatWhatsappDoOrcamento({
-                                                                orcamentoId: orcamento.id,
-                                                                telefone: orcamento.cliente?.telefone,
-                                                                nome: orcamento.cliente?.nome,
-                                                                onNavigate,
-                                                            }),
-                                                            variant: 'success'
-                                                        },
-                                                        {
-                                                            label: 'Copiar',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: async () => {
-                                                                // Buscar orçamento completo
-                                                                const response = await orcamentosService.buscar(orcamento.id);
-                                                                if (response.success && response.data) {
-                                                                    const orcData = response.data;
-                                                                    const itemsMapeados = mapItensOrcamentoParaCopia(orcData.items || []);
-
-                                                                    // Salvar no localStorage (sem cliente)
-                                                                    const orcamentoCopia = {
-                                                                        empresaCNPJ: orcData.empresaCNPJ,
-                                                                        titulo: orcData.titulo,
-                                                                        descricao: orcData.descricao,
-                                                                        descricaoProjeto: orcData.descricaoProjeto,
-                                                                        validade: orcData.validade,
-                                                                        endereco: orcData.enderecoObra,
-                                                                        bairro: orcData.bairro,
-                                                                        cidade: orcData.cidade,
-                                                                        cep: orcData.cep,
-                                                                        responsavelObra: orcData.responsavelObra,
-                                                                        bdi: orcData.bdi,
-                                                                        previsaoInicio: orcData.previsaoInicio,
-                                                                        previsaoTermino: orcData.previsaoTermino,
-                                                                        condicaoPagamento: orcData.condicaoPagamento,
-                                                                        items: itemsMapeados
-                                                                    };
-                                                                    localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
-                                                                    toast.success('Orçamento copiado', {
-                                                                        description: 'Abrindo novo orçamento...'
-                                                                    });
-                                                                    setAbaAtiva('novo');
-                                                                } else {
-                                                                    toast.error('Erro ao copiar orçamento', {
-                                                                        description: response.error || 'Não foi possível buscar os dados'
-                                                                    });
-                                                                }
-                                                            },
-                                                            variant: 'default'
-                                                        },
-                                                        {
-                                                            label: pdfLoadingId === orcamento.id ? 'Abrindo…' : 'PDF',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: () => handlePersonalizarPDF(orcamento),
-                                                            loading: pdfLoadingId === orcamento.id,
-                                                            closeOnClick: false,
-                                                            variant: 'default'
-                                                        },
-                                                        // Ações de status
-                                                        {
-                                                            label: 'Regredir status',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: () => setOrcamentoRegredir(orcamento),
-                                                            variant: 'default',
-                                                            show:
-                                                                canRegredirOrcamentoStatus(user) &&
-                                                                getRegredirStatusTargets(
-                                                                    isOrcamentoConcretizado(orcamento)
-                                                                        ? 'Concretizado'
-                                                                        : orcamento.status,
-                                                                    Boolean(orcamento.venda?.id)
-                                                                ).length > 0
-                                                        },
-                                                        {
-                                                            label: 'Enviado-Cliente',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: () => handleChangeStatus(orcamento.id, 'Enviado ao Cliente'),
-                                                            variant: 'primary',
-                                                            show: orcamento.status === 'Pendente'
-                                                        },
-                                                        {
-                                                            label: 'Declinar Orçamento',
-                                                            icon: (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                                </svg>
-                                                            ),
-                                                            onClick: () => handleDeclinarOrcamento(orcamento),
-                                                            variant: 'danger',
-                                                            show: statusVisual === 'Aprovado' && !isOrcamentoConcretizado(orcamento)
-                                                        },
-                                                        {
-                                                            label: 'Excluir Permanentemente',
-                                                            icon: <TrashIcon className="w-4 h-4" />,
-                                                            onClick: () => {
-                                                                setOrcamentoToDelete(orcamento);
-                                                                setDeletePermanent(true);
-                                                                setShowDeleteDialog(true);
-                                                            },
-                                                            variant: 'danger',
-                                                            show: canDelete(user)
-                                                        }
-                                                    ]}
-                                                />
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <OrcamentosListaTable
+                    data={filteredOrcamentos}
+                    searchTerm={searchTerm}
+                    abaAtiva={abaAtiva}
+                    pdfLoadingId={pdfLoadingId}
+                    canDeleteRow={canDelete(user)}
+                    canRegredir={canRegredirOrcamentoStatus(user)}
+                    getStatusClass={getStatusClass}
+                    getRowBorderClass={getOrcamentoRowLateralBorderClass}
+                    isConcretizado={isOrcamentoConcretizado}
+                    isExpirado={isOrcamentoExpirado}
+                    onView={async (orcamento) => {
+                        const response = await orcamentosService.buscar(orcamento.id);
+                        if (response.success && response.data) {
+                            setOrcamentoToView(response.data);
+                        } else {
+                            setOrcamentoToView(orcamento);
+                        }
+                    }}
+                    onEdit={handleOpenModal}
+                    onWhatsApp={(orcamento) => {
+                        void abrirChatWhatsappDoOrcamento({
+                            orcamentoId: orcamento.id,
+                            telefone: orcamento.cliente?.telefone,
+                            nome: orcamento.cliente?.nome,
+                            onNavigate,
+                        });
+                    }}
+                    onCopy={async (orcamento) => {
+                        const response = await orcamentosService.buscar(orcamento.id);
+                        if (response.success && response.data) {
+                            const orcData = response.data;
+                            const itemsMapeados = mapItensOrcamentoParaCopia(orcData.items || []);
+                            const orcamentoCopia = {
+                                empresaCNPJ: orcData.empresaCNPJ,
+                                titulo: orcData.titulo,
+                                descricao: orcData.descricao,
+                                descricaoProjeto: orcData.descricaoProjeto,
+                                validade: orcData.validade,
+                                endereco: orcData.enderecoObra,
+                                bairro: orcData.bairro,
+                                cidade: orcData.cidade,
+                                cep: orcData.cep,
+                                responsavelObra: orcData.responsavelObra,
+                                bdi: orcData.bdi,
+                                previsaoInicio: orcData.previsaoInicio,
+                                previsaoTermino: orcData.previsaoTermino,
+                                condicaoPagamento: orcData.condicaoPagamento,
+                                items: itemsMapeados
+                            };
+                            localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
+                            toast.success('Orçamento copiado', {
+                                description: 'Abrindo novo orçamento...'
+                            });
+                            setAbaAtiva('novo');
+                        } else {
+                            toast.error('Erro ao copiar orçamento', {
+                                description: response.error || 'Não foi possível buscar os dados'
+                            });
+                        }
+                    }}
+                    onPdf={handlePersonalizarPDF}
+                    onRegredir={setOrcamentoRegredir}
+                    onChangeStatus={handleChangeStatus}
+                    onDeclinar={handleDeclinarOrcamento}
+                    onDeletePermanent={(orcamento) => {
+                        setOrcamentoToDelete(orcamento);
+                        setDeletePermanent(true);
+                        setShowDeleteDialog(true);
+                    }}
+                />
             )}
 
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
@@ -3649,7 +3153,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                                     <option value="30 dias">30 dias</option>
                                                     <option value="30/60 dias">30/60 dias</option>
                                                     <option value="30/60/90 dias">30/60/90 dias</option>
-                                                    <option value="Pagamento conforme condições a serem acordadas.">Pagamento conforme condições a serem acordadas.</option>
+                                                    <option value="Pagamentos conforme condições a serem acordadas.">Pagamentos conforme condições a serem acordadas.</option>
                                                     <option value="Personalizado">Personalizado</option>
                                                 </select>
                                             </div>
@@ -3769,19 +3273,11 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     setItemSearchTerm('');
                                     setModoAdicao('materiais');
                                     setModalExpandido(false);
-                                    setMaterialSelecionadoComparacao(null);
-                                    setCotacaoSelecionadaComparacao(null);
-                                    setMateriaisSelecionadosComparacao(new Set());
-                                    setCotacoesSelecionadasComparacao(new Set());
-                                    setSearchEstoque('');
-                                    setSearchCotacoes('');
-                                    setSearchGlobalComparacao('');
                                     setBuscaGlobal('');
                                     setQuantidadesMateriais(new Map());
                                     setQuantidadesServicos(new Map());
                                     setQuantidadesKits(new Map());
                                     setQuantidadesQuadros(new Map());
-                                    setQuantidadesCotacoes(new Map());
                                 }}
                                 aria-label="Fechar"
                                 className="absolute top-3 right-3 z-20 p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors"
@@ -3814,7 +3310,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     { id: 'servicos' as const, label: '🔧 Serviços', active: modoAdicao === 'servicos' },
                                     { id: 'kits' as const, label: '📦 Kits', active: modoAdicao === 'kits' },
                                     { id: 'quadros' as const, label: '⚡ Quadros', active: modoAdicao === 'quadros' },
-                                    { id: 'cotacoes' as const, label: '🏷️ Cotações', active: modoAdicao === 'cotacoes' },
                                     { id: 'manual' as const, label: '✏️ Manual', active: modoAdicao === 'manual' },
                                 ]).map((tab) => (
                                     <button
@@ -4046,104 +3541,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         </div>
                                     )}
 
-                                    {/* Cotações */}
-                                    {resultadosBuscaGlobal.cotacoes.length > 0 && (
-                                        <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
-                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                <span>🏷️</span> Cotações - Banco Frio ({resultadosBuscaGlobal.cotacoes.length})
-                                            </h4>
-                                            <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                {resultadosBuscaGlobal.cotacoes.map(cotacao => {
-                                                    const quantidadeAtual = quantidadesCotacoes.get(cotacao.id) || 1;
-                                                    const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
-
-                                                    // Calcular valores para exibição
-                                                    const custoUnitario = cotacao.valorUnitario || 0;
-                                                    const valorVendaBase = cotacao.valorVenda || custoUnitario;
-                                                    const porcentagemLucro = custoUnitario > 0
-                                                        ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100
-                                                        : 0;
-                                                    const unidadeMedida = cotacao.unidadeMedida || 'UN';
-
-                                                    return (
-                                                        <div
-                                                            key={cotacao.id}
-                                                            className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                        >
-                                                            <div className="flex items-center gap-2 mb-1">
-                                                                <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                    📦 Banco Frio
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex justify-between items-start gap-3">
-                                                                <div className="flex-1">
-                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                        NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                        <br />
-                                                                        Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
-                                                                        {valorVendaBase > 0 && (
-                                                                            <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
-                                                                                {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
-                                                                            </>
-                                                                        )}
-                                                                    </p>
-                                                                    {temSelecaoUnidade && (
-                                                                        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                                                            💡 Metros ou cm
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min="1"
-                                                                        value={quantidadeAtual}
-                                                                        onChange={(e) => {
-                                                                            const qtd = parseInt(e.target.value) || 1;
-                                                                            atualizarQuantidadeCotacao(cotacao.id, qtd);
-                                                                        }}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                                                    />
-                                                                    {temSelecaoUnidade ? (
-                                                                        <>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleAddCotacao(cotacao, true, 'm', quantidadeAtual)}
-                                                                                className="px-2 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
-                                                                                title="Adicionar em metros"
-                                                                            >
-                                                                                + m
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleAddCotacao(cotacao, true, 'cm', quantidadeAtual)}
-                                                                                className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
-                                                                                title="Adicionar em centímetros"
-                                                                            >
-                                                                                + cm
-                                                                            </button>
-                                                                        </>
-                                                                    ) : (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleAddCotacao(cotacao, true, undefined, quantidadeAtual)}
-                                                                            className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
-                                                                        >
-                                                                            Inserir
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
                                     {/* Nenhum resultado */}
                                     {Object.values(resultadosBuscaGlobal).every(arr => arr.length === 0) && (
                                         <div className={`text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl ${modalExpandido ? 'col-span-2' : ''}`}>
@@ -4363,207 +3760,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                 </div>
                             )}
 
-                            {/* Modo: Cotações (Banco Frio) */}
-                            {!buscaGlobal.trim() && modoAdicao === 'cotacoes' && (
-                                <div>
-                                    <div className="mb-4">
-                                        <input
-                                            type="text"
-                                            value={itemSearchTerm}
-                                            onChange={(e) => setItemSearchTerm(e.target.value)}
-                                            className="input-field"
-                                            placeholder="🔍 Buscar cotação por nome, NCM ou fornecedor..."
-                                        />
-                                    </div>
-
-                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mb-4">
-                                        <p className="text-sm text-blue-800 dark:text-blue-300">
-                                            📦 <strong>Banco Frio:</strong> Materiais cotados com fornecedores, sem necessidade de estoque físico.
-                                        </p>
-                                    </div>
-
-                                    {filteredCotacoes.length === 0 ? (
-                                        <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                            <div className="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                <span className="text-2xl">🏷️</span>
-                                            </div>
-                                            <p className="text-gray-500 dark:text-dark-text-secondary font-medium">Nenhuma cotação encontrada</p>
-                                            <p className="text-gray-400 dark:text-dark-text-secondary text-sm mt-1">
-                                                Cadastre cotações na página de Cotações
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredCotacoes.map(cotacao => (
-                                                <button
-                                                    key={cotacao.id}
-                                                    type="button"
-                                                    onClick={() => handleAddCotacao(cotacao)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                >
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="flex-1">
-                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                            </p>
-                                                            {cotacao.observacoes && (
-                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
-                                                            )}
-                                                        </div>
-                                                        <div className="text-right ml-4">
-                                                            <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                                                                R$ {cotacao.valorUnitario.toFixed(2)}
-                                                            </p>
-                                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
-                                                                Atualizado em {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Modo: Criar Manualmente */}
-                            {!buscaGlobal.trim() && modoAdicao === 'manual' && (
-                                <div className="space-y-6">
-                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mb-6">
-                                        <p className="text-sm text-blue-800 dark:text-blue-300">
-                                            💡 <strong>Dica:</strong> Use esta opção para adicionar materiais/serviços que ainda não foram comprados.
-                                            Ideal para orçamentos baseados em cotações de fornecedores.
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Tipo de Item
-                                            </label>
-                                            <select
-                                                value={novoItemManual.tipo}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, tipo: e.target.value as any }))}
-                                                className="select-field"
-                                            >
-                                                <option value="MATERIAL">Material</option>
-                                                <option value="SERVICO">Serviço</option>
-                                                <option value="KIT">Kit</option>
-                                                <option value="CUSTO_EXTRA">Custo Extra</option>
-                                            </select>
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Nome/Descrição do Item
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={novoItemManual.nome}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, nome: e.target.value }))}
-                                                className="input-field"
-                                                placeholder="Ex: Disjuntor 32A Tripolar, Instalação de Quadro, etc."
-                                            />
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Descrição Técnica (Opcional)
-                                            </label>
-                                            <textarea
-                                                value={novoItemManual.descricao}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, descricao: e.target.value }))}
-                                                rows={2}
-                                                className="textarea-field"
-                                                placeholder="Detalhes técnicos, especificações, normas..."
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Unidade de Medida
-                                            </label>
-                                            <select
-                                                value={novoItemManual.unidadeMedida}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, unidadeMedida: e.target.value }))}
-                                                className="select-field"
-                                            >
-                                                <option value="UN">Unidade (UN)</option>
-                                                <option value="M">Metro (M)</option>
-                                                <option value="M²">Metro Quadrado (M²)</option>
-                                                <option value="M³">Metro Cúbico (M³)</option>
-                                                <option value="KG">Quilograma (KG)</option>
-                                                <option value="L">Litro (L)</option>
-                                                <option value="CX">Caixa (CX)</option>
-                                                <option value="PC">Peça (PC)</option>
-                                                <option value="SERV">Serviço (SERV)</option>
-                                                <option value="HR">Hora (HR)</option>
-                                                <option value="VERBA">Verba (VERBA)</option>
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Quantidade
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={novoItemManual.quantidade}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, quantidade: parseFloat(e.target.value) || 0 }))}
-                                                min="0.01"
-                                                step="0.01"
-                                                className="input-field"
-                                                placeholder="0"
-                                            />
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Custo Unitário (R$)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={novoItemManual.custoUnit}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, custoUnit: parseFloat(e.target.value) || 0 }))}
-                                                min="0"
-                                                step="0.01"
-                                                className="input-field"
-                                                placeholder="0,00"
-                                            />
-                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-2">
-                                                💡 Digite o custo/preço unitário do material ou serviço.
-                                            </p>
-                                        </div>
-
-                                        {/* Preview do Cálculo */}
-                                        {novoItemManual.custoUnit > 0 && novoItemManual.quantidade > 0 && (
-                                            <div className="md:col-span-2 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-800 p-4 rounded-lg">
-                                                <div className="grid grid-cols-3 gap-4 text-sm">
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Custo Total</p>
-                                                        <p className="text-lg font-bold text-gray-900 dark:text-dark-text">
-                                                            R$ {(novoItemManual.custoUnit * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Unitário</p>
-                                                        <p className="text-lg font-bold text-indigo-700 dark:text-indigo-300">
-                                                            R$ {novoItemManual.custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Total</p>
-                                                        <p className="text-lg font-bold text-green-700 dark:text-green-300">
-                                                            R$ {(novoItemManual.custoUnit * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
                         </div>
 
                         {/* Footer */}
@@ -4575,8 +3771,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         Array.from(quantidadesMateriais.values()).filter(q => q > 0).length +
                                         Array.from(quantidadesServicos.values()).filter(q => q > 0).length +
                                         Array.from(quantidadesKits.values()).filter(q => q > 0).length +
-                                        Array.from(quantidadesQuadros.values()).filter(q => q > 0).length +
-                                        Array.from(quantidadesCotacoes.values()).filter(q => q > 0).length;
+                                        Array.from(quantidadesQuadros.values()).filter(q => q > 0).length;
 
                                     return totalItensComQuantidade > 0 ? (
                                         <button
@@ -4602,20 +3797,12 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         setItemSearchTerm('');
                                         setModoAdicao('materiais');
                                         setModalExpandido(false);
-                                        setMaterialSelecionadoComparacao(null);
-                                        setCotacaoSelecionadaComparacao(null);
-                                        setMateriaisSelecionadosComparacao(new Set());
-                                        setCotacoesSelecionadasComparacao(new Set());
-                                        setSearchEstoque('');
-                                        setSearchCotacoes('');
-                                        setSearchGlobalComparacao('');
                                         setBuscaGlobal('');
                                         // Limpar todas as quantidades
                                         setQuantidadesMateriais(new Map());
                                         setQuantidadesServicos(new Map());
                                         setQuantidadesKits(new Map());
                                         setQuantidadesQuadros(new Map());
-                                        setQuantidadesCotacoes(new Map());
                                         setNovoItemManual({
                                             nome: '',
                                             descricao: '',
@@ -5618,7 +4805,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                                             {orcamento.validade ? new Date(orcamento.validade).toLocaleDateString('pt-BR') : 'N/A'}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
-                                                            {(orcamento.items || []).length} item(s)
+                                                            {orcamento.itemsCount ?? (orcamento.items || []).length} item(s)
                                                         </td>
                                                         <td className="px-4 py-3 text-sm border border-gray-300 dark:border-gray-600">
                                                             {temErros ? (
