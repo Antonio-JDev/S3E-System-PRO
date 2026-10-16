@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { type PurchaseOrder, type Supplier, PurchaseStatus, type PurchaseOrderItem, type Product, CatalogItemType } from '../types';
 import { parseNFeXML, readFileAsText } from '../utils/xmlParser';
 import { comprasService } from '../services/comprasService';
+import { useComprasLista } from '../hooks/useComprasQuery';
+import { useCartoesCredito } from '../hooks/useFinanceiroQuery';
 import { obrasService, type Obra } from '../services/obrasService';
 import { projetosService } from '../services/projetosService';
 import { formatDateBR, parseLocalDate } from '../utils/dateUtils';
@@ -21,7 +23,6 @@ import { scrollableNavItemClasses } from '../utils/responsiveNav';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { axiosApiService } from '../services/axiosApi';
 import { empresaFiscalService } from '../services/empresaFiscalService';
-import { financeiroService } from '../services/financeiroService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { formatCNPJ, formatTelefoneBR, onlyDigits } from '../utils/inputMasks';
 import {
@@ -222,8 +223,7 @@ interface ComprasProps {
 const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const { user } = useContext(AuthContext)!;
     const navigate = useNavigate();
-    const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingLocal, setIsLoadingLocal] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
     const [filter, setFilter] = useState<PurchaseStatus | 'Todos'>('Todos');
     const [filterEmpresaCNPJ, setFilterEmpresaCNPJ] = useState<string>('');
@@ -347,7 +347,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [condicaoPagamento, setCondicaoPagamento] = useState<'AVISTA' | 'PARCELADO'>('AVISTA');
     const [meioPagamento, setMeioPagamento] = useState<string>('PIX');
     const [cartaoCreditoId, setCartaoCreditoId] = useState<string>('');
-    const [cartoesCredito, setCartoesCredito] = useState<Array<{ id: string; nomeOuBanco: string; ultimosQuatroDigitos: string; bandeira: string }>>([]);
+    const { data: cartoesQueryData } = useCartoesCredito(true);
+    const cartoesCredito = (cartoesQueryData ?? []) as Array<{
+        id: string;
+        nomeOuBanco: string;
+        ultimosQuatroDigitos: string;
+        bandeira: string;
+    }>;
     const [numParcelas, setNumParcelas] = useState<string>('1');
     const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState<string>('');
 
@@ -633,32 +639,18 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         return roundMoney(baseProdutos + ipiNum + freteNum + outrasNum);
     }, [valorIPI, frete, outrasDespesas, descontos, totalProdutosCalculado]);
 
-    // Carregar compras reais
+    const {
+        data: comprasQueryData,
+        isLoading: comprasQueryLoading,
+        refetch: refetchCompras,
+    } = useComprasLista();
+    const purchaseOrders = (comprasQueryData ?? []) as PurchaseOrder[];
+    const isLoading = comprasQueryLoading || isLoadingLocal;
+
+    // Carregar compras reais (React Query)
     const loadPurchaseOrders = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            console.log('🔍 Carregando compras...');
-            const data = await comprasService.getCompras();
-            console.log('✅ Compras carregadas:', data.length, data);
-            setPurchaseOrders(data);
-        } catch (e) {
-            console.error('❌ Erro ao carregar compras:', e);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        loadPurchaseOrders();
-    }, [loadPurchaseOrders]);
-
-    useEffect(() => {
-        const carregarCartoes = async () => {
-            const res = await financeiroService.listarCartoes(true);
-            if (res.success && res.data) setCartoesCredito(res.data);
-        };
-        carregarCartoes();
-    }, []);
+        await refetchCompras();
+    }, [refetchCompras]);
 
     // ✅ NOVO: Carregar obras em andamento para compra avulsa
     useEffect(() => {
@@ -680,12 +672,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         carregarObras();
     }, []);
 
-interface ComprasPropsExtended {
-    toggleSidebar?: () => void;
-    suppressSuspenseSpinner?: boolean;
-}
-
-const filteredPurchases = useMemo(() => {
+    const filteredPurchases = useMemo(() => {
         let filtered = purchaseOrders;
         
         if (filter !== 'Todos') {
@@ -754,6 +741,7 @@ const filteredPurchases = useMemo(() => {
     };
 
     const handleCnpjFornecedorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSelectedSupplierId('');
         setSupplierCNPJ(formatCNPJ(e.target.value));
     };
 
@@ -766,6 +754,7 @@ const filteredPurchases = useMemo(() => {
     };
 
     const handleSelecionarFornecedor = (f: Fornecedor) => {
+        setSelectedSupplierId(f.id);
         setSupplierName(f.nome);
         setSupplierCNPJ(f.cnpj ? formatCNPJ(f.cnpj) : '');
         setSupplierPhone(f.telefone ? formatTelefoneBR(f.telefone) : '');
@@ -963,8 +952,7 @@ const filteredPurchases = useMemo(() => {
             await comprasService.updateCompra(purchaseToView.id, { observacoes: observacoesDetalheDraft });
             const refreshed = await comprasService.getCompraById(purchaseToView.id);
             setPurchaseToView(refreshed);
-            const data = await comprasService.getCompras();
-            setPurchaseOrders(data);
+            await loadPurchaseOrders();
             toast.success('Observações salvas');
         } catch (e) {
             console.error(e);
@@ -1027,8 +1015,7 @@ const filteredPurchases = useMemo(() => {
             );
             
             // Recarregar lista
-            const data = await comprasService.getCompras();
-            setPurchaseOrders(data);
+            await loadPurchaseOrders();
             
             // Fechar modais
             setIsReceivingModalOpen(false);
@@ -1377,6 +1364,7 @@ const filteredPurchases = useMemo(() => {
                 console.log('✏️ Atualizando compra completa:', purchaseToEdit.id);
                 
                 const updatePayload = {
+                    fornecedorId: selectedSupplierId || undefined,
                     fornecedorNome: supplierName,
                     fornecedorCNPJ: onlyDigits(supplierCNPJ) || supplierCNPJ,
                     fornecedorTel: onlyDigits(supplierPhone) || undefined,
@@ -1405,8 +1393,7 @@ const filteredPurchases = useMemo(() => {
                 const response = await comprasService.updateCompra(purchaseToEdit.id, updatePayload);
                 
                 // reload list
-                const data = await comprasService.getCompras();
-                setPurchaseOrders(data);
+                await loadPurchaseOrders();
 
                 toast.success('✅ Compra atualizada com sucesso!');
                 handleCloseModal();
@@ -1482,8 +1469,7 @@ const filteredPurchases = useMemo(() => {
                 || (response.data as { estatisticas?: Record<string, number> } | undefined)?.estatisticas;
 
             // reload list
-            const data = await comprasService.getCompras();
-            setPurchaseOrders(data);
+            await loadPurchaseOrders();
 
             // Exibir resumo se houver estatísticas
             if (estatisticas) {
