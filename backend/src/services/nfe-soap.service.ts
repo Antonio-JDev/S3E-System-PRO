@@ -3,6 +3,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as forge from 'node-forge';
+import { NFeEventoService } from './nfe-evento.service';
 
 type NFeModoEnvio = 'NORMAL' | 'SVC-AN' | 'SVC-RS';
 
@@ -630,15 +631,33 @@ export class NFeSoapService {
     }
   }
 
+  private static aplicarCabecalhoServico(
+    client: any,
+    namespace: string,
+    cUF: string,
+    versaoDados: string
+  ) {
+    const cabecalho = `<nfeCabecMsg xmlns="${namespace}"><cUF>${cUF}</cUF><versaoDados>${versaoDados}</versaoDados></nfeCabecMsg>`;
+    try {
+      if (typeof client.clearSoapHeaders === 'function') {
+        client.clearSoapHeaders();
+      }
+      client.addSoapHeader(cabecalho);
+    } catch (error) {
+      console.warn('Falha ao aplicar nfeCabecMsg no cliente SOAP:', error);
+    }
+  }
+
   /**
-   * Cancela uma NF-e autorizada
+   * Envia o lote envEvento. Se o XML ainda não tiver XML-DSig, assina o infEvento antes do SOAP.
+   * Sucesso somente com cStat 135 ou 136 e nProt numérico da SEFAZ.
    */
-  static async cancelarNFe(
-    chaveAcesso: string,
-    justificativa: string,
+  static async recepcionarEvento(
+    xmlEvento: string,
     ambiente: '1' | '2',
     certPem: string,
-    keyPem: string
+    keyPem: string,
+    opts?: { pfxPath?: string; pfxPassword?: string }
   ): Promise<{
     sucesso: boolean;
     protocolo?: string;
@@ -647,78 +666,66 @@ export class NFeSoapService {
     erro?: string;
   }> {
     try {
-      // Determinar WSDL
-      const wsdlUrl = ambiente === '1'
-        ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl'
-        : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl';
+      const temAssinatura = /<(?:[A-Za-z0-9]+:)?Signature[\s>]/.test(xmlEvento);
+      const xmlAssinado = temAssinatura
+        ? xmlEvento
+        : NFeEventoService.assinarEvento(xmlEvento, keyPem, certPem);
+      const xmlEnv = /<envEvento[\s>]/.test(xmlAssinado)
+        ? xmlAssinado
+        : NFeEventoService.montarEnvEvento(xmlAssinado);
 
-      // Criar cliente SOAP
-      const client = await this.criarClienteSOAP(wsdlUrl, certPem, keyPem);
-
-      // Montar XML de cancelamento (será assinado antes)
-      // Por enquanto, retornar estrutura básica
-      const xmlEvento = `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
-        <infEvento Id="ID110111${chaveAcesso}01">
-          <cOrgao>42</cOrgao>
-          <tpAmb>${ambiente}</tpAmb>
-          <chNFe>${chaveAcesso}</chNFe>
-          <dhEvento>${new Date().toISOString()}</dhEvento>
-          <tpEvento>110111</tpEvento>
-          <nSeqEvento>1</nSeqEvento>
-          <verEvento>1.00</verEvento>
-          <detEvento versao="1.00">
-            <descEvento>Cancelamento</descEvento>
-            <xJust>${justificativa}</xJust>
-          </detEvento>
-        </infEvento>
-      </evento>`;
-
-      // Chamar método (o XML já deve estar assinado)
-      const [result] = await client.nfeRecepcaoEventoAsync({
-        nfeDadosMsg: {
-          $xml: xmlEvento
-        }
-      });
-
-      // Processar resposta
-      const resposta = result.nfeResultMsg;
-      
-      if (resposta && resposta._xml) {
-        const cStatMatch = resposta._xml.match(/<cStat>(\d+)<\/cStat>/);
-        const xMotivoMatch = resposta._xml.match(/<xMotivo>([^<]+)<\/xMotivo>/);
-
-        const codigoStatus = cStatMatch ? cStatMatch[1] : null;
-        const mensagem = xMotivoMatch ? xMotivoMatch[1] : null;
-
-        // 135 = Evento registrado e vinculado à NF-e
-        if (codigoStatus === '135') {
-          return {
-            sucesso: true,
-            protocolo: resposta._xml,
-            codigoStatus,
-            mensagem: mensagem || undefined
-          };
-        } else {
-          return {
-            sucesso: false,
-            codigoStatus,
-            mensagem: mensagem || 'Erro no cancelamento',
-            erro: `Status ${codigoStatus}: ${mensagem}`
-          };
-        }
+      const cOrgao = xmlEnv.match(/<cOrgao>(\d{2})<\/cOrgao>/)?.[1];
+      if (!cOrgao) {
+        return { sucesso: false, erro: 'cOrgao ausente no XML do evento' };
       }
 
-      return {
-        sucesso: false,
-        erro: 'Resposta da SEFAZ inválida'
-      };
+      const wsdlUrl =
+        ambiente === '1'
+          ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl'
+          : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl';
+
+      const client = await this.criarClienteSOAP(wsdlUrl, certPem, keyPem, opts);
+      this.aplicarCabecalhoServico(
+        client,
+        'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4',
+        cOrgao,
+        '1.00'
+      );
+
+      const xmlEnvio = this.stripXmlDeclaration(xmlEnv);
+      const [result] = await client.nfeRecepcaoEventoAsync({
+        nfeDadosMsg: {
+          $xml: xmlEnvio,
+        },
+      });
+
+      return NFeEventoService.interpretarRespostaSoap(result, 'evento');
     } catch (error: any) {
-      console.error('Erro ao cancelar NF-e:', error);
+      console.error('Erro ao recepcionar evento de NF-e:', error);
       return {
         sucesso: false,
-        erro: error.message || 'Erro ao cancelar NF-e na SEFAZ'
+        erro: error.message || 'Erro ao enviar evento de NF-e à SEFAZ',
       };
     }
+  }
+
+  /**
+   * Cancela uma NF-e autorizada. O infEvento (tpEvento 110111) vai assinado à SEFAZ.
+   */
+  static async cancelarNFe(
+    xmlEvento: string,
+    ambiente: '1' | '2',
+    certPem: string,
+    keyPem: string,
+    opts?: { pfxPath?: string; pfxPassword?: string }
+  ): Promise<{
+    sucesso: boolean;
+    protocolo?: string;
+    codigoStatus?: string;
+    mensagem?: string;
+    erro?: string;
+  }> {
+    return this.recepcionarEvento(xmlEvento, ambiente, certPem, keyPem, opts);
   }
 
   /**
@@ -727,6 +734,7 @@ export class NFeSoapService {
   static async inutilizarNumeracao(
     params: {
       cnpj: string;
+      cUF: string;
       ano: string;
       modelo: string;
       serie: string;
@@ -736,7 +744,8 @@ export class NFeSoapService {
       ambiente: '1' | '2';
     },
     certPem: string,
-    keyPem: string
+    keyPem: string,
+    opts?: { pfxPath?: string; pfxPassword?: string }
   ): Promise<{
     sucesso: boolean;
     codigoStatus?: string;
@@ -744,77 +753,33 @@ export class NFeSoapService {
     protocolo?: string;
     erro?: string;
   }> {
-    const { cnpj, ano, modelo, serie, numeroInicial, numeroFinal, justificativa, ambiente } =
-      params;
-
     try {
-      const wsdlUrl = this.getInutilizacaoWsdl(ambiente);
+      const cUF = NFeEventoService.codigoUF(params.cUF);
+      const xmlInut = NFeEventoService.gerarXmlInutilizacao({ ...params, cUF });
+      const xmlAssinado = NFeEventoService.assinarInutilizacao(xmlInut, keyPem, certPem);
 
-      const client = await this.criarClienteSOAP(wsdlUrl, certPem, keyPem);
+      const wsdlUrl = this.getInutilizacaoWsdl(params.ambiente);
+      const client = await this.criarClienteSOAP(wsdlUrl, certPem, keyPem, opts);
+      this.aplicarCabecalhoServico(
+        client,
+        'http://www.portalfiscal.inf.br/nfe/wsdl/NFeInutilizacao4',
+        cUF,
+        '4.00'
+      );
 
-      // cUF fixo SC (42) por enquanto
-      const cUF = this.cUF_SC;
-
-      const id = `ID${cUF}${ano}${cnpj}${modelo}${serie}${numeroInicial
-        .padStart(9, '0')}${numeroFinal.padStart(9, '0')}`;
-
-      const xmlInut = `<inutNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-  <infInut Id="${id}">
-    <tpAmb>${ambiente}</tpAmb>
-    <xServ>INUTILIZAR</xServ>
-    <cUF>${cUF}</cUF>
-    <ano>${ano}</ano>
-    <CNPJ>${cnpj}</CNPJ>
-    <mod>${modelo}</mod>
-    <serie>${serie}</serie>
-    <nNFIni>${numeroInicial}</nNFIni>
-    <nNFFin>${numeroFinal}</nNFFin>
-    <xJust>${justificativa}</xJust>
-  </infInut>
-</inutNFe>`;
-
+      const xmlEnvio = this.stripXmlDeclaration(xmlAssinado);
       const [result] = await client.nfeInutilizacaoNFAsync({
         nfeDadosMsg: {
-          $xml: xmlInut
-        }
+          $xml: xmlEnvio,
+        },
       });
 
-      const resposta = result.nfeResultMsg;
-
-      if (resposta && resposta._xml) {
-        const cStatMatch = resposta._xml.match(/<cStat>(\d+)<\/cStat>/);
-        const xMotivoMatch = resposta._xml.match(/<xMotivo>([^<]+)<\/xMotivo>/);
-
-        const codigoStatus = cStatMatch ? cStatMatch[1] : null;
-        const mensagem = xMotivoMatch ? xMotivoMatch[1] : null;
-
-        // 102 = Inutilização de número homologado
-        if (codigoStatus === '102') {
-          return {
-            sucesso: true,
-            protocolo: resposta._xml,
-            codigoStatus,
-            mensagem: mensagem || undefined
-          };
-        }
-
-        return {
-          sucesso: false,
-          codigoStatus,
-          mensagem: mensagem || 'Erro na inutilização',
-          erro: `Status ${codigoStatus}: ${mensagem}`
-        };
-      }
-
-      return {
-        sucesso: false,
-        erro: 'Resposta da SEFAZ inválida na inutilização'
-      };
+      return NFeEventoService.interpretarRespostaSoap(result, 'inutilizacao');
     } catch (error: any) {
       console.error('Erro ao inutilizar numeração de NF-e:', error);
       return {
         sucesso: false,
-        erro: error.message || 'Erro ao inutilizar numeração na SEFAZ'
+        erro: error.message || 'Erro ao inutilizar numeração na SEFAZ',
       };
     }
   }
@@ -831,7 +796,8 @@ export class NFeSoapService {
       ambiente: '1' | '2';
     },
     certPem: string,
-    keyPem: string
+    keyPem: string,
+    opts?: { pfxPath?: string; pfxPassword?: string }
   ): Promise<{
     sucesso: boolean;
     codigoStatus?: string;
@@ -839,91 +805,14 @@ export class NFeSoapService {
     protocolo?: string;
     erro?: string;
   }> {
-    const { chaveAcesso, cnpj, tipoEvento, justificativa, ambiente } = params;
-
     try {
-      const wsdlUrl =
-        ambiente === '1'
-          ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl'
-          : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx?wsdl';
-
-      const client = await this.criarClienteSOAP(wsdlUrl, certPem, keyPem);
-
-      const descEventoMap: Record<string, string> = {
-        '210200': 'Confirmacao da Operacao',
-        '210210': 'Ciencia da Operacao',
-        '210220': 'Desconhecimento da Operacao',
-        '210240': 'Operacao nao Realizada'
-      };
-
-      const descEvento = descEventoMap[tipoEvento];
-
-      const id = `ID${tipoEvento}${chaveAcesso}01`;
-
-      const xJustXml =
-        tipoEvento === '210240' && justificativa
-          ? `<xJust>${justificativa}</xJust>`
-          : '';
-
-      const xmlEvento = `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
-  <infEvento Id="${id}">
-    <cOrgao>91</cOrgao>
-    <tpAmb>${ambiente}</tpAmb>
-    <CNPJ>${cnpj}</CNPJ>
-    <chNFe>${chaveAcesso}</chNFe>
-    <dhEvento>${new Date().toISOString()}</dhEvento>
-    <tpEvento>${tipoEvento}</tpEvento>
-    <nSeqEvento>1</nSeqEvento>
-    <verEvento>1.00</verEvento>
-    <detEvento versao="1.00">
-      <descEvento>${descEvento}</descEvento>
-      ${xJustXml}
-    </detEvento>
-  </infEvento>
-</evento>`;
-
-      const [result] = await client.nfeRecepcaoEventoAsync({
-        nfeDadosMsg: {
-          $xml: xmlEvento
-        }
-      });
-
-      const resposta = result.nfeResultMsg;
-
-      if (resposta && resposta._xml) {
-        const cStatMatch = resposta._xml.match(/<cStat>(\d+)<\/cStat>/);
-        const xMotivoMatch = resposta._xml.match(/<xMotivo>([^<]+)<\/xMotivo>/);
-
-        const codigoStatus = cStatMatch ? cStatMatch[1] : null;
-        const mensagem = xMotivoMatch ? xMotivoMatch[1] : null;
-
-        // 135 = Evento registrado e vinculado à NF-e
-        if (codigoStatus === '135') {
-          return {
-            sucesso: true,
-            protocolo: resposta._xml,
-            codigoStatus,
-            mensagem: mensagem || undefined
-          };
-        }
-
-        return {
-          sucesso: false,
-          codigoStatus,
-          mensagem: mensagem || 'Erro na manifestação',
-          erro: `Status ${codigoStatus}: ${mensagem}`
-        };
-      }
-
-      return {
-        sucesso: false,
-        erro: 'Resposta da SEFAZ inválida na manifestação'
-      };
+      const xmlEvento = NFeEventoService.gerarXmlManifestacao(params);
+      return this.recepcionarEvento(xmlEvento, params.ambiente, certPem, keyPem, opts);
     } catch (error: any) {
       console.error('Erro na manifestação do destinatário:', error);
       return {
         sucesso: false,
-        erro: error.message || 'Erro na manifestação do destinatário na SEFAZ'
+        erro: error.message || 'Erro na manifestação do destinatário na SEFAZ',
       };
     }
   }
