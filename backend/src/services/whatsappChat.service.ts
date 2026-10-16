@@ -183,7 +183,7 @@ function emitWhatsAppMessage(m: ChatMessage): void {
     getSocketServer().emit('whatsapp:chat_list_update', {
       id: dto.id,
       chatId: dto.chatId,
-      content: dto.content,
+      content: snippetPreview(dto.content),
       fromMe: dto.fromMe,
       timestamp: dto.timestamp,
       ack: dto.ack,
@@ -1605,8 +1605,28 @@ export interface ChatPreviewRow {
    * em `formatPhoneForDisplay(chatId)` e mostra o ID inteiro do LID.
    */
   phoneNumberFromS3e?: string | null;
-  /** URL da foto de perfil (última obtida no provedor). */
+  /** URL da foto de perfil (última obtida no provedor). A lista HTTP não envia a URL. */
   cachedProfilePictureUrl?: string | null;
+  /** Há foto no cache do servidor. O cliente baixa com Authorization, sem token na URL. */
+  hasProfilePicture?: boolean;
+}
+
+const PREVIEW_SNIPPET_MAX = 120;
+
+function snippetPreview(text: string | null | undefined): string {
+  const t = (text || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= PREVIEW_SNIPPET_MAX) return t;
+  return `${t.slice(0, PREVIEW_SNIPPET_MAX - 1)}…`;
+}
+
+function publicarPreviewLista(row: ChatPreviewRow): ChatPreviewRow {
+  const url = row.cachedProfilePictureUrl?.trim() || '';
+  return {
+    ...row,
+    lastContent: snippetPreview(row.lastContent),
+    hasProfilePicture: Boolean(url) || Boolean(row.hasProfilePicture),
+    cachedProfilePictureUrl: null
+  };
 }
 
 function canonicalPhoneDigitsFromChatId(chatId: string): string {
@@ -1988,7 +2008,7 @@ export async function listChatPreviews(userId: string): Promise<ChatPreviewRow[]
   const visible = sorted.filter((m) => !archivedCanon.has(m.chatId));
   const withFlags = applyReadStateFlags(visible, flagsByCanon);
   const withCrm = await enrichPreviewsWithContactNames(withFlags);
-  return await enrichPreviewsWithProviderCache(withCrm);
+  return (await enrichPreviewsWithProviderCache(withCrm)).map(publicarPreviewLista);
 }
 
 /** Conversas marcadas como arquivadas para este usuário no CRM. */
@@ -2033,7 +2053,7 @@ export async function listArchivedChatPreviews(userId: string): Promise<ChatPrev
   const flagsByCanon = await getReadStateFlagsByCanonicalChatId(userId, out.map((s) => s.chatId));
   const withFlags = applyReadStateFlags(out, flagsByCanon);
   const withCrm = await enrichPreviewsWithContactNames(withFlags);
-  return await enrichPreviewsWithProviderCache(withCrm);
+  return (await enrichPreviewsWithProviderCache(withCrm)).map(publicarPreviewLista);
 }
 
 /** Persiste nome/foto após GET contact-meta (ou quando quiser atualizar o cache).
