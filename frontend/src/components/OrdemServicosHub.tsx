@@ -24,6 +24,7 @@ import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
 import OsCardListagemBarras from './os/OsCardListagemBarras';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useInvalidateOsHub, useOsHub } from '../hooks/useOsQuery';
 import { serverDateToInput, formatDateDisplay, nowYmdInSaoPaulo, addDaysToYmd } from '../utils/date';
 import { projetoMatchesBusca } from '../utils/buscaOs.util';
 
@@ -180,6 +181,8 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     );
     
     // ==================== ESTADOS ====================
+    const { data: osHubData, isLoading: osHubLoading, refetch: refetchOsHub } = useOsHub();
+    const invalidateOsHub = useInvalidateOsHub();
     const [projetos, setProjetos] = useState<Projeto[]>([]);
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
@@ -304,7 +307,20 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
     // ==================== CARREGAMENTO DE DADOS ====================
     useEffect(() => {
-        loadData();
+        if (!osHubData) return;
+        setProjetos(osHubData.projetos as Projeto[]);
+        setClientes(osHubData.clientes as Cliente[]);
+        setOrcamentos(osHubData.orcamentos as Orcamento[]);
+        setUsuarios(osHubData.usuarios as Usuario[]);
+        setLoading(osHubLoading);
+        void loadEngInfo((osHubData.projetos as Projeto[]).map((p) => p.id));
+        fetchProgressForProjects(osHubData.projetos as Projeto[]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [osHubData, osHubLoading]);
+
+    useEffect(() => {
+        void loadData({ silent: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Recalcular progresso quando a lista de projetos mudar (após loadData)
@@ -381,76 +397,22 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             if (!opts?.silent) setLoading(true);
             setError(null);
 
-            const [projetosRes, clientesRes, orcamentosRes, usuariosRes] = await Promise.all([
-                projetosService.listar(),
-                clientesService.listar(),
-                orcamentosService.listar({ status: 'Aprovado' }),
-                axiosApiService.get<any[]>('/api/configuracoes/usuarios')
-            ]);
-
-            if (projetosRes.success && projetosRes.data) {
-                const projetosArray = Array.isArray(projetosRes.data) ? projetosRes.data : [];
-                const usuariosArray = usuariosRes.success && Array.isArray(usuariosRes.data)
-                    ? usuariosRes.data.map((u: any) => ({
-                        id: u.id,
-                        nome: u.name || u.nome || '',
-                        email: u.email || '',
-                        funcao: u.role || u.funcao || '',
-                        role: u.role || '',
-                    }))
-                    : [];
-                const enriched = projetosArray.map((p) => {
-                    if (p.responsavel?.nome) return p;
-                    const u = usuariosArray.find((x) => x.id === p.responsavelId);
-                    return u ? { ...p, responsavel: { id: u.id, nome: u.nome } } : p;
-                });
-                setProjetos(enriched);
-                void loadEngInfo(enriched.map((p) => p.id));
+            await invalidateOsHub();
+            const hubResult = await refetchOsHub();
+            const hub = hubResult.data;
+            if (hub) {
+                setProjetos(hub.projetos as Projeto[]);
+                setClientes(hub.clientes as Cliente[]);
+                setOrcamentos(hub.orcamentos as Orcamento[]);
+                setUsuarios(hub.usuarios as Usuario[]);
+                void loadEngInfo((hub.projetos as Projeto[]).map((p) => p.id));
+                fetchProgressForProjects(hub.projetos as Projeto[]);
                 if (opts?.silent) {
                     setProjetoToView((prev) => {
                         if (!prev) return prev;
-                        return enriched.find((p) => p.id === prev.id) ?? prev;
+                        return (hub.projetos as Projeto[]).find((p) => p.id === prev.id) ?? prev;
                     });
                 }
-            } else {
-                setProjetos([]);
-                setEngInfoMap({});
-            }
-
-            if (clientesRes.success && clientesRes.data) {
-                // Garantir que sempre seja um array
-                const clientesArray = Array.isArray(clientesRes.data) ? clientesRes.data : [];
-                setClientes(clientesArray);
-            } else {
-                setClientes([]);
-            }
-
-            if (orcamentosRes.success && orcamentosRes.data) {
-                // Garantir que sempre seja um array
-                const orcamentosArray = Array.isArray(orcamentosRes.data) ? orcamentosRes.data : [];
-                setOrcamentos(orcamentosArray);
-            } else {
-                setOrcamentos([]);
-            }
-
-            if (usuariosRes.success && usuariosRes.data) {
-                // Permitir que todos os usuários possam ser selecionados/visíveis (não apenas roles técnicas)
-                const usuariosArray = Array.isArray(usuariosRes.data) ? usuariosRes.data : [];
-                const usuariosMap = usuariosArray.map((u: any) => ({
-                    id: u.id,
-                    nome: u.name || u.nome || '',
-                    email: u.email || '',
-                    funcao: u.role || u.funcao || '',
-                    role: u.role || ''
-                }));
-                setUsuarios(usuariosMap);
-            } else {
-                setUsuarios([]);
-            }
-
-            // Após carregar projetos, buscar tasks para calcular progresso real
-            if (projetosRes.success && projetosRes.data) {
-                fetchProgressForProjects(Array.isArray(projetosRes.data) ? projetosRes.data : []);
             }
 
             // Atualizar lista de OS com minhas tarefas (a fazer / em andamento)
