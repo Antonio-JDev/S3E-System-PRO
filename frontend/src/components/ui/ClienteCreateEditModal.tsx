@@ -347,6 +347,7 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
                         }
 
                         const d: any = result.data;
+                        const ieApi = String(d.inscricaoEstadual || '').trim();
                         setFormState((prev) => ({
                           ...prev,
                           nome: d.razaoSocial || prev.nome,
@@ -356,15 +357,19 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
                           endereco: d.logradouro || prev.endereco || '',
                           numero: d.numero || prev.numero || '',
                           bairro: d.bairro || prev.bairro || '',
-                          inscricaoEstadual: d.inscricaoEstadual || (d.indIEDest === 2 ? 'ISENTO' : '') || prev.inscricaoEstadual || '',
-                          indIEDest: d.indIEDest,
+                          inscricaoEstadual: ieApi || prev.inscricaoEstadual || '',
+                          indIEDest: ieApi ? d.indIEDest : prev.indIEDest,
                           cidade: d.cidade || prev.cidade || '',
                           estado: d.estado || prev.estado || '',
                           cep: d.cep || prev.cep || '',
                         }));
                         setCnpjFetchedData(d.raw ?? d);
 
-                        toast.success('Dados carregados (CNPJ.ws). Ajuste IE/Contribuinte se necessário.');
+                        toast.success(
+                          d.codigoMunicipioIbge
+                            ? `Dados carregados (ReceitaWS). Código IBGE do município: ${d.codigoMunicipioIbge}.`
+                            : 'Dados carregados (ReceitaWS). Ajuste IE/Contribuinte se necessário.'
+                        );
                       } catch (err: any) {
                         console.error('Erro ao consultar CNPJ:', err);
                         setCnpjError(err?.message || 'Erro ao consultar CNPJ');
@@ -506,7 +511,7 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
                       placeholder="Inscrição Estadual"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      Preenchido automaticamente pela CNPJ.ws quando houver IE no mesmo estado. Ajuste manual se necessário.
+                      Preenchida quando a ReceitaWS devolver a IE. Ajuste manual se necessário.
                     </p>
                   </>
                 )}
@@ -526,7 +531,7 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
 
             {cnpjFetchedData && (
               <div className="md:col-span-2 border-t pt-4 mt-4">
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">Dados da CNPJ.ws (pré-visualização)</h4>
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">Dados da ReceitaWS (pré-visualização)</h4>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <section className="bg-gray-50/50 dark:bg-dark-hover/30 rounded-xl p-3 border border-gray-100 dark:border-dark-border">
                     <div className="flex items-center gap-2 mb-2">
@@ -569,6 +574,8 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
                         { label: 'País', value: cnpjFetchedData.estabelecimento?.pais ?? 'Brasil' },
                         { label: 'Estado', value: cnpjFetchedData.estabelecimento?.estado },
                         { label: 'Cidade', value: cnpjFetchedData.estabelecimento?.cidade },
+                        { label: 'Código do município (IBGE)', value: cnpjFetchedData.codigoMunicipioIbge || cnpjFetchedData.estabelecimento?.cidade?.ibge_id },
+                        { label: 'Código da UF (IBGE)', value: cnpjFetchedData.codigoUfIbge },
                         { label: 'CEP', value: cnpjFetchedData.estabelecimento?.cep },
                         { label: 'Bairro', value: cnpjFetchedData.estabelecimento?.bairro },
                         {
