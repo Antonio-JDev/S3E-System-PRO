@@ -6,8 +6,42 @@ import { hasPermission } from '../utils/permissions';
 import { getUploadUrl } from '../config/api';
 import { queryClient } from '../lib/queryClient';
 import { dashboardService } from '../services/dashboardService';
+import { clientesService } from '../services/clientesService';
 import { orcamentosService } from '../services/orcamentosService';
 import { vendasService } from '../services/vendasService';
+import {
+  fetchContasPagarLista,
+  fetchContasReceberLista,
+  fetchFinanceiroResumo,
+  fetchVendasLista,
+  FINANCEIRO_RESUMO_QUERY_KEY,
+  VENDAS_LISTA_QUERY_KEY,
+} from '../hooks/useFinanceiroQuery';
+import { fetchServicosLista, SERVICOS_LISTA_QUERY_KEY } from '../hooks/useServicosQuery';
+import { fetchContatosS3eLista, CONTATOS_S3E_LISTA_QUERY_KEY } from '../hooks/useContatosS3eQuery';
+import { fetchCatalogoKits, CATALOGO_KITS_QUERY_KEY } from '../hooks/useCatalogoQuery';
+import {
+  fetchEstoqueItens,
+  fetchEstoqueMovimentacoes,
+  ESTOQUE_ITENS_QUERY_KEY,
+  ESTOQUE_MOVIMENTACOES_QUERY_KEY,
+} from '../hooks/useEstoqueQuery';
+import { fetchInventarioMateriais, INVENTARIO_MATERIAIS_QUERY_KEY } from '../hooks/useInventarioQuery';
+import { fetchComprasLista, COMPRAS_LISTA_QUERY_KEY } from '../hooks/useComprasQuery';
+import { fetchFerramentasHub, FERRAMENTAS_HUB_QUERY_KEY } from '../hooks/useFerramentasQuery';
+import { fetchOsHub, OS_HUB_QUERY_KEY } from '../hooks/useOsQuery';
+import {
+  fetchGestaoRhHub,
+  GESTAO_RH_HUB_QUERY_KEY,
+} from '../hooks/useGestaoEmpresarialQuery';
+import { fetchFunilLeads, FUNIL_LEADS_QUERY_KEY } from '../hooks/useFunilAtendimentoQuery';
+import {
+  fetchEmissaoEmpresasFiscais,
+  fetchEmissaoVendasFaturamento,
+  EMISSAO_EMPRESAS_FISCAIS_QUERY_KEY,
+  EMISSAO_VENDAS_FATURAMENTO_QUERY_KEY,
+} from '../hooks/useEmissaoNfeQuery';
+import { fetchFornecedoresLista, FORNECEDORES_LISTA_QUERY_KEY } from '../hooks/useFornecedoresQuery';
 import {
   SidebarProvider,
   Sidebar,
@@ -223,8 +257,20 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
     Financeiro: () => import('../components/Financeiro'),
     Vendas: () => import('../components/Vendas'),
     Clientes: () => import('../components/ClientesModerno'),
+    'Serviços': () => import('../components/Servicos'),
     'Chat WhatsApp': () => import('../pages/WhatsAppChatPage'),
     'Contatos S3E': () => import('../pages/ContatosS3ePage'),
+    Catálogo: () => import('../components/Catalogo'),
+    Estoque: () => import('../components/Materiais'),
+    Movimentações: () => import('../components/Movimentacoes'),
+    Inventário: () => import('../components/Inventario'),
+    Compras: () => import('../components/Compras'),
+    Fornecedores: () => import('../components/FornecedoresModerno'),
+    'Ordem De Serviços': () => import('../components/OrdemServicosHub'),
+    Ferramentas: () => import('../components/GerenciamentoFerramentas'),
+    'Gestão empresarial': () => import('../components/GestaoEmpresarial'),
+    'Funil de Atendimento': () => import('../pages/FunilAtendimentoPage'),
+    'Emissão NF-e': () => import('../components/EmissaoNFe'),
   };
 
   const handlePrefetch = useCallback((viewName: string) => {
@@ -238,6 +284,75 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
     }
     if (viewName === 'Financeiro') {
       queryClient.prefetchQuery({ queryKey: ['financeiro', 'dashboard-vendas'], queryFn: async () => (await vendasService.getDashboard()).data });
+      queryClient.prefetchQuery({ queryKey: ['financeiro', 'contas-a-receber'], queryFn: fetchContasReceberLista });
+      queryClient.prefetchQuery({ queryKey: ['financeiro', 'contas-a-pagar'], queryFn: fetchContasPagarLista });
+      queryClient.prefetchQuery({ queryKey: FINANCEIRO_RESUMO_QUERY_KEY, queryFn: fetchFinanceiroResumo });
+    }
+    if (viewName === 'Vendas') {
+      queryClient.prefetchQuery({
+        queryKey: [...VENDAS_LISTA_QUERY_KEY, { limit: 1000 }],
+        queryFn: () => fetchVendasLista({ limit: 1000 }),
+      });
+    }
+    if (viewName === 'Clientes') {
+      queryClient.prefetchQuery({ queryKey: ['clientes', 'lista'], queryFn: async () => (await clientesService.listar()).data ?? [] });
+    }
+    if (viewName === 'Serviços') {
+      queryClient.prefetchQuery({ queryKey: SERVICOS_LISTA_QUERY_KEY, queryFn: fetchServicosLista });
+    }
+    if (viewName === 'Contatos S3E') {
+      queryClient.prefetchQuery({
+        queryKey: [...CONTATOS_S3E_LISTA_QUERY_KEY, '', 'todos', 1, 50, 'recentes'],
+        queryFn: () => fetchContatosS3eLista({ page: 1, pageSize: 50 }),
+      });
+    }
+    if (viewName === 'Catálogo') {
+      queryClient.prefetchQuery({ queryKey: CATALOGO_KITS_QUERY_KEY, queryFn: fetchCatalogoKits });
+    }
+    if (viewName === 'Estoque') {
+      queryClient.prefetchQuery({ queryKey: ESTOQUE_ITENS_QUERY_KEY, queryFn: fetchEstoqueItens });
+    }
+    if (viewName === 'Movimentações') {
+      queryClient.prefetchQuery({ queryKey: ESTOQUE_MOVIMENTACOES_QUERY_KEY, queryFn: fetchEstoqueMovimentacoes });
+    }
+    if (viewName === 'Inventário') {
+      queryClient.prefetchQuery({
+        queryKey: [...INVENTARIO_MATERIAIS_QUERY_KEY, ''],
+        queryFn: () => fetchInventarioMateriais(),
+      });
+    }
+    if (viewName === 'Compras') {
+      queryClient.prefetchQuery({ queryKey: COMPRAS_LISTA_QUERY_KEY, queryFn: fetchComprasLista });
+    }
+    if (viewName === 'Fornecedores') {
+      queryClient.prefetchQuery({ queryKey: FORNECEDORES_LISTA_QUERY_KEY, queryFn: fetchFornecedoresLista });
+    }
+    if (viewName === 'Ordem De Serviços') {
+      queryClient.prefetchQuery({ queryKey: OS_HUB_QUERY_KEY, queryFn: fetchOsHub });
+    }
+    if (viewName === 'Ferramentas') {
+      queryClient.prefetchQuery({ queryKey: FERRAMENTAS_HUB_QUERY_KEY, queryFn: fetchFerramentasHub });
+    }
+    if (viewName === 'Gestão empresarial') {
+      const hoje = new Date();
+      const mesRef = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+      queryClient.prefetchQuery({
+        queryKey: [...GESTAO_RH_HUB_QUERY_KEY, mesRef],
+        queryFn: () => fetchGestaoRhHub(mesRef),
+      });
+    }
+    if (viewName === 'Funil de Atendimento') {
+      queryClient.prefetchQuery({ queryKey: FUNIL_LEADS_QUERY_KEY, queryFn: fetchFunilLeads });
+    }
+    if (viewName === 'Emissão NF-e') {
+      queryClient.prefetchQuery({
+        queryKey: EMISSAO_EMPRESAS_FISCAIS_QUERY_KEY,
+        queryFn: fetchEmissaoEmpresasFiscais,
+      });
+      queryClient.prefetchQuery({
+        queryKey: EMISSAO_VENDAS_FATURAMENTO_QUERY_KEY,
+        queryFn: fetchEmissaoVendasFaturamento,
+      });
     }
   }, []);
 
