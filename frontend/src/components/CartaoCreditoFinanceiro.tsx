@@ -5,6 +5,7 @@ import {
   type CartaoCredito,
   type FaturaCartaoPreview,
 } from '../services/financeiroService';
+import { useCartoesCredito } from '../hooks/useFinanceiroQuery';
 
 interface CartaoCreditoFinanceiroProps {
   toggleSidebar: () => void;
@@ -39,8 +40,8 @@ const CartaoCreditoFinanceiro: React.FC<CartaoCreditoFinanceiroProps> = ({
   setAbaAtiva,
 }) => {
   const hoje = new Date();
-  const [cartoes, setCartoes] = useState<CartaoCredito[]>([]);
-  const [loadingCartoes, setLoadingCartoes] = useState(true);
+  const { data: cartoesQueryData, isLoading: loadingCartoes, refetch: refetchCartoes } = useCartoesCredito();
+  const cartoes = (cartoesQueryData ?? []) as CartaoCredito[];
   const [modalCartaoOpen, setModalCartaoOpen] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [formCartao, setFormCartao] = useState(emptyForm);
@@ -58,19 +59,11 @@ const CartaoCreditoFinanceiro: React.FC<CartaoCreditoFinanceiroProps> = ({
   const [pagando, setPagando] = useState(false);
 
   const carregarCartoes = useCallback(async () => {
-    setLoadingCartoes(true);
-    const res = await financeiroService.listarCartoes();
-    if (res.success && res.data) {
-      setCartoes(res.data);
-      if (!cartaoFiltroId && res.data.length > 0) {
-        const ativo = res.data.find((c) => c.ativo) || res.data[0];
-        setCartaoFiltroId(ativo.id);
-      }
-    } else {
-      toast.error(res.error || 'Erro ao carregar cartões');
+    const result = await refetchCartoes();
+    if (result.error) {
+      toast.error(result.error instanceof Error ? result.error.message : 'Erro ao carregar cartões');
     }
-    setLoadingCartoes(false);
-  }, [cartaoFiltroId]);
+  }, [refetchCartoes]);
 
   const carregarPreview = useCallback(async () => {
     if (!cartaoFiltroId) {
@@ -93,8 +86,11 @@ const CartaoCreditoFinanceiro: React.FC<CartaoCreditoFinanceiroProps> = ({
   }, [cartaoFiltroId, mesCompetencia, anoCompetencia]);
 
   useEffect(() => {
-    carregarCartoes();
-  }, []);
+    if (!cartaoFiltroId && cartoes.length > 0) {
+      const ativo = cartoes.find((c) => c.ativo) || cartoes[0];
+      setCartaoFiltroId(ativo.id);
+    }
+  }, [cartoes, cartaoFiltroId]);
 
   useEffect(() => {
     carregarPreview();
