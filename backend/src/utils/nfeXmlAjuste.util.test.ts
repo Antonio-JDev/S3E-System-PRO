@@ -34,6 +34,41 @@ describe('nfeXmlAjuste.util', () => {
       if (!r.ok) expect(r.message).toMatch(/CNPJ/);
     });
 
+    it('aceita CNPJ do fornecedor vinculado quando o snapshot está vazio', () => {
+      expect(
+        validarIdentidadeNfeCompra(
+          { numeroNF: '123', fornecedorCNPJ: '', fornecedorVinculadoCNPJ: '12.345.678/0001-99' },
+          { numeroNF: '123', fornecedorCNPJ: '12345678000199', serieNF: null, chaveAcesso: null }
+        )
+      ).toEqual({ ok: true });
+    });
+
+    it('aceita CNPJ do fornecedor vinculado quando o snapshot diverge', () => {
+      expect(
+        validarIdentidadeNfeCompra(
+          {
+            numeroNF: '123',
+            fornecedorCNPJ: '00000000000000',
+            fornecedorVinculadoCNPJ: '12345678000199',
+          },
+          { numeroNF: '123', fornecedorCNPJ: '12.345.678/0001-99', serieNF: null, chaveAcesso: null }
+        )
+      ).toEqual({ ok: true });
+    });
+
+    it('rejeita NF diferente mesmo com CNPJ do vínculo igual', () => {
+      const r = validarIdentidadeNfeCompra(
+        {
+          numeroNF: '123',
+          fornecedorCNPJ: '',
+          fornecedorVinculadoCNPJ: '12345678000199',
+        },
+        { numeroNF: '999', fornecedorCNPJ: '12345678000199', serieNF: null, chaveAcesso: null }
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.message).toMatch(/NF 999/);
+    });
+
     it('rejeita série divergente quando ambas existem', () => {
       const r = validarIdentidadeNfeCompra(
         { numeroNF: '123', fornecedorCNPJ: '12345678000199', serieNF: '1' },
@@ -92,6 +127,20 @@ describe('nfeXmlAjuste.util', () => {
       expect(dados.items[0].valorICMS).toBe(9);
       expect(dados.totais.valorICMS).toBe(9);
       expect(dados.totais.valorIPI).toBe(1);
+    });
+
+    it('completa zero à esquerda quando o CNPJ do emitente vem numérico', () => {
+      const dados = extrairDadosAjusteDeNfe({
+        NFe: {
+          infNFe: {
+            ide: { nNF: '10', serie: '1' },
+            emit: { CNPJ: 1234567800019 },
+            det: { prod: { xProd: 'Item', qCom: '1', vUnCom: '1', vProd: '1' } },
+            total: { ICMSTot: {} },
+          },
+        },
+      });
+      expect(dados.identidade.fornecedorCNPJ).toBe('01234567800019');
     });
 
     it('trata cEAN SEM GTIN como ean null', () => {
