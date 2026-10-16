@@ -30,7 +30,11 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { maskCpfCnpj, maskWhatsApp, maskCep, onlyDigits } from '../utils/masks';
 import { toWhatsappChatId } from '../utils/whatsappChat';
 import { fetchWhatsappResolveOpenChat } from '../services/whatsappChatService';
-import { axiosApiService } from '../services/axiosApi';
+import {
+  useFunilLeads,
+  useFunilUsuarios,
+  useInvalidateFunilLeads,
+} from '../hooks/useFunilAtendimentoQuery';
 
 const HORAS_ALERTA_ATRASO = 48;
 const MAX_ANEXOS_LEAD = 8;
@@ -305,6 +309,15 @@ interface FunilAtendimentoPageProps {
 
 const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSidebar, onNavigate }) => {
   const navigate = useNavigate();
+  const {
+    data: leadsQueryData,
+    isLoading: leadsQueryLoading,
+    isError: leadsQueryError,
+    error: leadsQueryErr,
+    refetch: refetchLeads,
+  } = useFunilLeads();
+  const { data: usuariosQueryData } = useFunilUsuarios();
+  const invalidateFunilLeads = useInvalidateFunilLeads();
   const [leads, setLeads] = useState<ContatoLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -371,13 +384,40 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
     onNavigate('Chat WhatsApp', toWhatsappChatId(phoneInput), lead.nome);
   };
 
+  useEffect(() => {
+    if (!leadsQueryData) return;
+    setLeads(leadsQueryData as ContatoLead[]);
+    setLoading(false);
+  }, [leadsQueryData]);
+
+  useEffect(() => {
+    if (leadsQueryLoading) setLoading(true);
+  }, [leadsQueryLoading]);
+
+  useEffect(() => {
+    if (leadsQueryError) {
+      toast.error(
+        leadsQueryErr instanceof Error ? leadsQueryErr.message : 'Erro ao carregar leads'
+      );
+      setLeads([]);
+      setLoading(false);
+    }
+  }, [leadsQueryError, leadsQueryErr]);
+
+  useEffect(() => {
+    if (usuariosQueryData) setUsuariosSistema(usuariosQueryData);
+  }, [usuariosQueryData]);
+
   const loadLeads = async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
-      const res = await atendimentoCrmService.listar();
-      const list = Array.isArray(res?.data) ? res.data : [];
+      await invalidateFunilLeads();
+      const result = await refetchLeads();
+      const list = (result.data ?? []) as ContatoLead[];
       setLeads(list);
-      if (list.length === 0 && showLoading) toast.info('Nenhum lead no funil. Clique em "Novo Lead" para começar.');
+      if (list.length === 0 && showLoading) {
+        toast.info('Nenhum lead no funil. Clique em "Novo Lead" para começar.');
+      }
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao carregar leads');
       setLeads([]);
@@ -385,28 +425,6 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       if (showLoading) setLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadLeads();
-    void (async () => {
-      try {
-        const res = await axiosApiService.get<any[]>('/api/configuracoes/usuarios');
-        if (res.success && Array.isArray(res.data)) {
-          setUsuariosSistema(
-            res.data
-              .filter((u) => (u.role || u.funcao || '') !== 'eletricista')
-              .map((u) => ({
-                id: u.id,
-                nome: u.name || u.nome || u.email || 'Usuário',
-                role: u.role || u.funcao || '',
-              }))
-          );
-        }
-      } catch {
-        setUsuariosSistema([]);
-      }
-    })();
-  }, []);
 
   useEscapeKey(showClienteOficialModal, () => setShowClienteOficialModal(false));
 

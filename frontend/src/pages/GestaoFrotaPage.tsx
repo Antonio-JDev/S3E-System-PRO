@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { veiculosService, gastosVeiculoService } from '../services/gerenciamentoService';
-import { financeiroService } from '../services/financeiroService';
 import { useAuth } from '../hooks/useAuth';
 import { hasPermission } from '../utils/permissions';
 import { formatDatePtBrInSaoPaulo, nowYmdInSaoPaulo, serverDateToInput } from '../utils/date';
@@ -226,51 +225,6 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
     const cancelarDelecaoVeiculo = () => {
         setShowDeleteDialog(false);
         setVeiculoParaDeletar(null);
-    };
-
-    const handleRegistrarPagamentoGastoFrota = async () => {
-        if (!gastoVisualizando || !veiculoSelecionado) return;
-
-        const valor = parseFloat(gastoVisualizando.valor);
-        const descricao = `Frota - ${gastoVisualizando.tipo} | ${veiculoSelecionado.modelo} (${veiculoSelecionado.placa})`;
-        const dataVencimento = serverDateToInput(gastoVisualizando.data);
-
-        try {
-            // Criar conta a pagar tipo FROTA (não despesa fixa) e dar baixa = registra só nas movimentações
-            const criarRes = await financeiroService.criarContaPagar({
-                tipo: 'FROTA',
-                descricao,
-                valor,
-                dataVencimento,
-                observacoes: gastoVisualizando.descricao || `${gastoVisualizando.tipo} - ${veiculoSelecionado.modelo}`
-            });
-
-            if (!criarRes.success || !criarRes.data?.id) {
-                toast.error(criarRes.error || 'Erro ao registrar pagamento');
-                return;
-            }
-
-            const hoje = nowYmdInSaoPaulo();
-            const pagarRes = await financeiroService.pagarContaPagar(criarRes.data.id, {
-                dataPagamento: hoje,
-                valorPago: valor,
-                meioPagamento: 'PIX',
-                observacoes: `Pagamento gasto frota - ${veiculoSelecionado.placa}`
-            });
-
-            if (!pagarRes.success) {
-                toast.error(pagarRes.error || 'Conta criada, mas falha ao registrar pagamento');
-                return;
-            }
-
-            toast.success('Pagamento registrado nas movimentações.', {
-                description: 'O gasto permanece no histórico do veículo e aparece no extrato (Financeiro > Movimentações).',
-            });
-            setGastoVisualizando(null);
-        } catch (error) {
-            console.error('Erro ao registrar pagamento do gasto da frota:', error);
-            toast.error('Erro ao registrar pagamento.');
-        }
     };
 
     const handleSubmitVeiculo = async (e: React.FormEvent) => {
@@ -1307,12 +1261,6 @@ const GestaoFrotaPage: React.FC<GestaoFrotaPageProps> = ({ toggleSidebar }) => {
                                     Excluir
                                 </button>
                             </div>
-                            <button
-                                onClick={handleRegistrarPagamentoGastoFrota}
-                                className="w-full btn-success"
-                            >
-                                💳 Registrar pagamento (movimentações)
-                            </button>
                         </div>
                     </div>
                 </div>
