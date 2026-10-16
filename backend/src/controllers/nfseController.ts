@@ -11,7 +11,7 @@ type RpsNfsePayload = RpsNfse & { dataEmissao?: string | Date };
 
 /**
  * POST /api/nfse/enviar-lote
- * Envia lote de RPS (RecepcionarLoteRps). Retorna protocolo para consulta posterior.
+ * Emite NFS-e nacional (DPS) de forma síncrona. Retorna a chave de acesso e o id da DPS.
  */
 export async function enviarLote(req: Request, res: Response): Promise<void> {
   try {
@@ -59,9 +59,13 @@ export async function enviarLote(req: Request, res: Response): Promise<void> {
       success: true,
       data: {
         protocolo: resultado.protocolo,
+        chaveAcesso: resultado.chaveAcesso,
+        numeroNfse: resultado.numeroNfse,
         nfseId: resultado.nfseId
       },
-      message: 'Lote enviado. Use o protocolo para consultar o resultado.'
+      message: resultado.numeroNfse
+        ? `NFS-e nacional nº ${resultado.numeroNfse} autorizada.`
+        : 'NFS-e nacional autorizada.'
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -71,7 +75,7 @@ export async function enviarLote(req: Request, res: Response): Promise<void> {
 
 /**
  * POST /api/nfse/consultar-protocolo
- * Consulta resultado do processamento do lote pelo protocolo.
+ * Consulta a NFS-e nacional pelo id da DPS (42 dígitos) ou pela chave de acesso (50).
  */
 export async function consultarProtocolo(req: Request, res: Response): Promise<void> {
   try {
@@ -112,7 +116,7 @@ export async function consultarProtocolo(req: Request, res: Response): Promise<v
 
 /**
  * POST /api/nfse/cancelar
- * Cancela NFS-e (CancelarNfse). Justificativa mínima 15 caracteres.
+ * Cancela NFS-e nacional (evento 101101). Informe o número da nota ou a chave de 50 dígitos.
  */
 export async function cancelar(req: Request, res: Response): Promise<void> {
   try {
@@ -212,7 +216,7 @@ export async function dadosVenda(req: Request, res: Response): Promise<void> {
 
 /**
  * PATCH /api/nfse/configurar-numeracao
- * Atualiza último RPS enviado e/ou série RPS da empresa (sincronização com site da prefeitura).
+ * Atualiza o último número de DPS e a série numérica da empresa.
  * Body: { empresaId: string; ultimoRpsEnviado?: number; serieRps?: string }
  */
 export async function configurarNumeracaoRps(req: Request, res: Response): Promise<void> {
