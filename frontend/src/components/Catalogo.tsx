@@ -12,6 +12,7 @@ import { roundMoney } from '../utils/currency';
 import { kitTemCotacaoBancoFrio } from '../utils/kitCatalogFlags';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useCatalogoKits, useInvalidateCatalogoKits } from '../hooks/useCatalogoQuery';
 import ScrollableRow from './ui/ScrollableRow';
 import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
@@ -73,9 +74,18 @@ interface CatalogoProps {
 }
 
 const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
-    const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const {
+        data: catalogQueryData,
+        isLoading: loading,
+        error: catalogQueryError,
+    } = useCatalogoKits();
+    const invalidateCatalogo = useInvalidateCatalogoKits();
+    const catalogItems = (catalogQueryData ?? []) as CatalogItem[];
+    const error = catalogQueryError
+        ? catalogQueryError instanceof Error
+            ? catalogQueryError.message
+            : 'Erro ao carregar catálogo'
+        : null;
     const [filter, setFilter] = useState<CatalogItemType | 'Todos'>('Todos');
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Catálogo'));
@@ -90,84 +100,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
     const [kitParaEditar, setKitParaEditar] = useState<any>(null);
 
     const loadCatalogItems = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            
-            const catalogItems: CatalogItem[] = [];
-            
-            // Carregar apenas Kits e Serviços (NÃO carregar Produtos/Materiais - eles ficam apenas no Estoque)
-            try {
-                // Carregar Kits
-                const kitsResponse = await axiosApiService.get(ENDPOINTS.KITS);
-                if (kitsResponse.success && kitsResponse.data) {
-                    const kits = Array.isArray(kitsResponse.data) ? kitsResponse.data : [];
-                    kits.forEach((kit: any) => {
-                        // Calcular preço total incluindo itens do banco frio
-                        let precoTotal = 0;
-                        
-                        // Somar itens do estoque real
-                        if (kit.items && Array.isArray(kit.items)) {
-                            kit.items.forEach((item: any) => {
-                                const precoVenda = item.material?.valorVenda || item.material?.preco || 0;
-                                precoTotal += (item.quantidade || 0) * precoVenda;
-                            });
-                        }
-                        
-                        // Somar itens do banco frio
-                        if (kit.itensFaltantes && Array.isArray(kit.itensFaltantes) && kit.itensFaltantes.length > 0) {
-                            kit.itensFaltantes.forEach((item: any) => {
-                                const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
-                                const quantidade = item.quantidade || 0;
-                                precoTotal += precoUnit * quantidade;
-                            });
-                        }
-                        
-                        // Usar preço calculado se for maior que 0, senão usar o preço salvo (sempre 2 decimais)
-                        const precoFinal = roundMoney(precoTotal > 0 ? precoTotal : (kit.preco || 0));
-                        
-                        catalogItems.push({
-                            id: kit.id,
-                            name: kit.nome,
-                            description: kit.descricao || 'Kit sem descrição',
-                            price: precoFinal,
-                            category: kit.tipo || 'Kit',
-                            type: 'Kit' as CatalogItemType,
-                            createdAt: kit.createdAt || new Date().toISOString(),
-                            updatedAt: kit.updatedAt || new Date().toISOString(),
-                            // Campos adicionais para controle de estoque
-                            temItensCotacao: kitTemCotacaoBancoFrio(kit),
-                            itensFaltantes: kit.itensFaltantes || [],
-                            statusEstoque: kit.statusEstoque || 'COMPLETO',
-                            isActive: kit.ativo !== false
-                        } as any);
-                    });
-                    console.log(`✅ ${kits.length} kits carregados`);
-                }
-                
-                // TODO: Implementar carregamento de Serviços quando endpoint estiver disponível  
-                // const servicosResponse = await axiosApiService.get(ENDPOINTS.SERVICOS);
-                // if (servicosResponse.success && servicosResponse.data) { ... }
-                
-                console.log('📦 Catálogo configurado para mostrar apenas Kits e Serviços');
-                console.log('ℹ️ Produtos/Materiais estão disponíveis na página de Estoque');
-            } catch (err) {
-                console.warn('Erro ao carregar kits/serviços:', err);
-            }
-            
-            setCatalogItems(catalogItems);
-        } catch (err) {
-            setError('Erro ao carregar catálogo');
-            console.error('Erro ao carregar catálogo:', err);
-            setCatalogItems([]);
-        } finally {
-            setLoading(false);
-        }
+        await invalidateCatalogo();
     };
-
-    useEffect(() => {
-        loadCatalogItems();
-    }, []);
 
     // Filtros
     const filteredItems = useMemo(() => {
@@ -689,17 +623,6 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     </div>
                                 )}
                                 
-                                {(item as any).temItensCotacao && (
-                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-lg">❄️</span>
-                                            <div className="flex-1">
-                                                <p className="text-xs font-bold text-blue-900 dark:text-blue-300">Banco Frio</p>
-                                                <p className="text-xs text-blue-700 dark:text-blue-400">Requer compra de itens</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
 
                             {/* Botões de Ação */}
@@ -755,11 +678,6 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                 {(item as any).statusEstoque === 'PENDENTE' && (
                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300">
                                                         ⚠️ {(item as any).itensFaltantes?.length || 0} Faltantes
-                                                    </span>
-                                                )}
-                                                {(item as any).temItensCotacao && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
-                                                        ❄️ Banco Frio
                                                     </span>
                                                 )}
                                             </div>
@@ -1044,19 +962,19 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                 </div>
                                             )}
 
-                                            {/* Coluna 2: Itens do Banco Frio e Serviços */}
+                                            {/* Coluna 2: Itens legados e Serviços */}
                                             {kitDetalhes.itensFaltantes && Array.isArray(kitDetalhes.itensFaltantes) && kitDetalhes.itensFaltantes.length > 0 && (() => {
                                                 const itensBancoFrio = kitDetalhes.itensFaltantes.filter((item: any) => !item.tipo || item.tipo === 'COTACAO');
                                                 const itensServicos = kitDetalhes.itensFaltantes.filter((item: any) => item.tipo === 'SERVICO');
                                                 
                                                 return (
                                                     <>
-                                                        {/* Itens do Banco Frio */}
+                                                        {/* Itens legados (cotação) — somente leitura */}
                                                         {itensBancoFrio.length > 0 && (
                                                             <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-blue-200 dark:border-blue-700 shadow-lg overflow-hidden">
                                                                 <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
                                                                     <h4 className="text-base font-bold text-white flex items-center gap-2">
-                                                                        <span>❄️</span> Itens do Banco Frio ({itensBancoFrio.length})
+                                                                        <span>📋</span> Itens legados ({itensBancoFrio.length})
                                                                     </h4>
                                                                 </div>
                                                                 <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
@@ -1106,12 +1024,6 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                             </div>
                                                                         );
                                                                     })}
-                                                                </div>
-                                                                <div className="p-4 bg-orange-50 dark:bg-orange-900/30 border-t border-orange-200 dark:border-orange-800">
-                                                                    <p className="text-xs text-orange-800 dark:text-orange-300 font-medium flex items-center gap-2">
-                                                                        <span>⚠️</span>
-                                                                        Estes itens precisam ser comprados e adicionados ao estoque antes de usar o kit em obras
-                                                                    </p>
                                                                 </div>
                                                             </div>
                                                         )}
