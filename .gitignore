@@ -55,6 +55,9 @@ coverage/
 *.tmp
 .cache/
 
+# Chave da Service Account do Google Drive (backup). Nunca versionar.
+backend/credentials/*.json
+
 # Backups locais / produção (manter script versionado)
 backups/*.sql
 backups/*.sql.gz
