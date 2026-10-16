@@ -5,7 +5,13 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import type { AuthRequest } from '../middlewares/auth';
-import { resolveMarcaDaguaFromUserTemplate } from '../utils/orcamentoPdfPersonalization.util';
+import {
+    buildMarcaDaguaFromPdfCustomization,
+    resolveMarcaDaguaFromUserTemplate,
+    resolveUploadPathToDataUrl,
+    type OrcamentoPdfMarcaDaguaConfig,
+} from '../utils/orcamentoPdfPersonalization.util';
+import type { MarcaDaguaConfig } from '../services/pdfOrcamento.service';
 
 // Configurar multer para upload de arquivos
 const storage = multer.memoryStorage();
@@ -79,52 +85,83 @@ export class PDFOrcamentoController {
     }
 
     /**
+     * Mesma folha/opacidade do modal, do template do usuário ou do arquivo enviado.
+     * Upload tem prioridade; em seguida a URL /uploads e o JSON de personalização.
+     */
+    private static async montarMarcaDagua(req: Request): Promise<MarcaDaguaConfig> {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+        const userId = (req as AuthRequest).user?.userId;
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const base: OrcamentoPdfMarcaDaguaConfig = userId
+            ? await resolveMarcaDaguaFromUserTemplate(userId)
+            : { tipo: 'template', opacidade: 0.05 };
+
+        let fromBody: OrcamentoPdfMarcaDaguaConfig | null = null;
+        const rawCustom = body.pdfCustomization;
+        if (typeof rawCustom === 'string' && rawCustom.trim()) {
+            try {
+                fromBody = buildMarcaDaguaFromPdfCustomization(JSON.parse(rawCustom));
+            } catch {
+                fromBody = null;
+            }
+        } else if (rawCustom && typeof rawCustom === 'object') {
+            fromBody = buildMarcaDaguaFromPdfCustomization(rawCustom);
+        }
+
+        const urlFromField = resolveUploadPathToDataUrl(
+            typeof body.folhaTimbradaUrl === 'string' ? body.folhaTimbradaUrl : null
+        );
+
+        let logoUrl = fromBody?.logoUrl ?? base.logoUrl;
+        let folhaTimbradaUrl = urlFromField ?? fromBody?.folhaTimbradaUrl ?? base.folhaTimbradaUrl;
+
+        if (files?.logo?.[0]) {
+            logoUrl = `data:${files.logo[0].mimetype};base64,${files.logo[0].buffer.toString('base64')}`;
+        }
+        if (files?.folhaTimbrada?.[0]) {
+            folhaTimbradaUrl = `data:${files.folhaTimbrada[0].mimetype};base64,${files.folhaTimbrada[0].buffer.toString('base64')}`;
+        }
+
+        const opRaw = body.opacidade ?? req.query?.opacidade;
+        const opParsed = opRaw != null && String(opRaw) !== '' ? parseFloat(String(opRaw)) : Number.NaN;
+        const opacidade = Number.isFinite(opParsed)
+            ? Math.min(1, Math.max(0, opParsed))
+            : (fromBody?.opacidade ?? base.opacidade);
+
+        return {
+            tipo: 'template',
+            opacidade,
+            ...(logoUrl ? { logoUrl } : {}),
+            ...(folhaTimbradaUrl ? { folhaTimbradaUrl } : {}),
+        };
+    }
+
+    /**
      * POST /api/orcamentos/:id/pdf/preview-personalizado
-     * Gera preview do PDF personalizado com uploads
+     * Gera o mesmo PDF pdfmake do download, com Content-Disposition: inline (preview no browser).
      */
     static async gerarPreviewPersonalizado(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { opacidade = '0.05' } = req.body;
-            const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-            const userId = (req as AuthRequest).user?.userId;
 
-            console.log('📄 Gerando preview personalizado para orçamento:', id);
+            console.log('📄 Gerando preview PDF (pdfmake) para orçamento:', id);
 
-            let logoUrl: string | undefined;
-            let folhaTimbradaUrl: string | undefined;
+            const marcaDaguaConfig = await PDFOrcamentoController.montarMarcaDagua(req);
+            const pdfBuffer = await PDFOrcamentoService.gerarPDF(id, marcaDaguaConfig);
+            const nomeArquivo = await PDFOrcamentoController.gerarNomeArquivo(id);
+            const nomeArquivoEncoded = encodeURIComponent(nomeArquivo);
 
-            // Converter imagens para data URLs
-            if (files?.logo?.[0]) {
-                const logoBuffer = files.logo[0].buffer;
-                const logoBase64 = logoBuffer.toString('base64');
-                logoUrl = `data:${files.logo[0].mimetype};base64,${logoBase64}`;
-            }
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader(
+                'Content-Disposition',
+                `inline; filename="${nomeArquivoEncoded}"; filename*=UTF-8''${nomeArquivoEncoded}`
+            );
+            res.setHeader('Content-Length', pdfBuffer.length.toString());
+            res.setHeader('Cache-Control', 'no-store');
 
-            if (files?.folhaTimbrada?.[0]) {
-                const folhaBuffer = files.folhaTimbrada[0].buffer;
-                const folhaBase64 = folhaBuffer.toString('base64');
-                folhaTimbradaUrl = `data:${files.folhaTimbrada[0].mimetype};base64,${folhaBase64}`;
-            }
+            res.send(pdfBuffer);
 
-            const base = userId ? await resolveMarcaDaguaFromUserTemplate(userId) : { tipo: 'template' as const, opacidade: 0.05 };
-            const opParsed = parseFloat(String(opacidade));
-            const opacidadeFinal = Number.isFinite(opParsed) ? Math.min(1, Math.max(0, opParsed)) : base.opacidade;
-
-            const marcaDaguaConfig = {
-                tipo: 'template' as const,
-                opacidade: opacidadeFinal,
-                logoUrl: logoUrl ?? base.logoUrl,
-                folhaTimbradaUrl: folhaTimbradaUrl ?? base.folhaTimbradaUrl
-            };
-
-            const html = await PDFOrcamentoService.gerarHTMLOrcamento(id, marcaDaguaConfig);
-
-            res.json({
-                success: true,
-                data: { html }
-            });
-
+            console.log('✅ Preview PDF gerado e enviado');
         } catch (error: any) {
             console.error('❌ Erro ao gerar preview personalizado:', error);
             res.status(500).json({
@@ -142,39 +179,10 @@ export class PDFOrcamentoController {
     static async gerarPDFPersonalizado(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { opacidade = '0.05' } = req.body;
-            const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-            const userId = (req as AuthRequest).user?.userId;
 
             console.log('📄 Gerando PDF personalizado para orçamento:', id);
 
-            let logoUrl: string | undefined;
-            let folhaTimbradaUrl: string | undefined;
-
-            // Converter imagens para data URLs
-            if (files?.logo?.[0]) {
-                const logoBuffer = files.logo[0].buffer;
-                const logoBase64 = logoBuffer.toString('base64');
-                logoUrl = `data:${files.logo[0].mimetype};base64,${logoBase64}`;
-            }
-
-            if (files?.folhaTimbrada?.[0]) {
-                const folhaBuffer = files.folhaTimbrada[0].buffer;
-                const folhaBase64 = folhaBuffer.toString('base64');
-                folhaTimbradaUrl = `data:${files.folhaTimbrada[0].mimetype};base64,${folhaBase64}`;
-            }
-
-            const base = userId ? await resolveMarcaDaguaFromUserTemplate(userId) : { tipo: 'template' as const, opacidade: 0.05 };
-            const opParsed = parseFloat(String(opacidade));
-            const opacidadeFinal = Number.isFinite(opParsed) ? Math.min(1, Math.max(0, opParsed)) : base.opacidade;
-
-            const marcaDaguaConfig = {
-                tipo: 'template' as const,
-                opacidade: opacidadeFinal,
-                logoUrl: logoUrl ?? base.logoUrl,
-                folhaTimbradaUrl: folhaTimbradaUrl ?? base.folhaTimbradaUrl
-            };
-
+            const marcaDaguaConfig = await PDFOrcamentoController.montarMarcaDagua(req);
             const pdfBuffer = await PDFOrcamentoService.gerarPDF(id, marcaDaguaConfig);
             const nomeArquivo = await PDFOrcamentoController.gerarNomeArquivo(id);
 
@@ -208,12 +216,7 @@ export class PDFOrcamentoController {
     static async gerarPDFDownload(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { opacidade } = req.query;
-
-            const marcaDaguaConfig = {
-                tipo: 'template' as const,
-                opacidade: opacidade ? parseFloat(opacidade as string) : 0.05
-            };
+            const marcaDaguaConfig = await PDFOrcamentoController.montarMarcaDagua(req);
 
             console.log('📄 Gerando PDF com pdfmake para orçamento:', id);
 
@@ -251,13 +254,7 @@ export class PDFOrcamentoController {
     static async gerarHTML(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { opacidade, tipo } = req.query;
-
-            const marcaDaguaConfig = {
-                tipo: (tipo as any) || 'template',
-                opacidade: opacidade ? parseFloat(opacidade as string) : 0.05
-            };
-
+            const marcaDaguaConfig = await PDFOrcamentoController.montarMarcaDagua(req);
             const html = await PDFOrcamentoService.gerarHTMLOrcamento(id, marcaDaguaConfig);
 
             // Retornar HTML para o navegador renderizar
