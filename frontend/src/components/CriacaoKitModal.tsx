@@ -77,10 +77,9 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
     const [descricaoKit, setDescricaoKit] = useState('');
     const [tipoKit, setTipoKit] = useState<string>('medidores');
     const [searchTerm, setSearchTerm] = useState('');
-    const [fonteDados, setFonteDados] = useState<'ESTOQUE' | 'COTACOES' | 'SERVICOS'>('ESTOQUE');
+    const [fonteDados, setFonteDados] = useState<'ESTOQUE' | 'SERVICOS'>('ESTOQUE');
     
     const [materiais, setMateriais] = useState<Material[]>([]);
-    const [cotacoes, setCotacoes] = useState<Material[]>([]);
     const [servicos, setServicos] = useState<Servico[]>([]);
     const [itensKit, setItensKit] = useState<ItemKit[]>([]);
     
@@ -92,7 +91,6 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
     useEffect(() => {
         if (isOpen) {
             loadMateriais();
-            loadCotacoes();
             loadServicos();
             
             // Se tem kit para editar, carregar seus dados
@@ -239,54 +237,6 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         }
     };
 
-    const loadCotacoes = async () => {
-        try {
-            const response = await axiosApiService.get('/api/cotacoes');
-            console.log('📦 Resposta cotações:', response);
-            
-            if (response.success && response.data) {
-                const cotacoesArray = Array.isArray(response.data) ? response.data : [];
-                console.log(`📋 Total de cotações brutas: ${cotacoesArray.length}`);
-                
-                // Cada cotação É um item individual, não tem items dentro dela
-                const cotacoesFormatadas = cotacoesArray
-                    .filter((cotacao: any) => cotacao.ativo) // Só cotações ativas
-                    .map((cotacao: any) => {
-                        console.log(`📄 Cotação ${cotacao.id}:`, cotacao);
-                        // Valor de venda: usar o salvo (já com coeficiente 1.55 do sistema) ou fallback compra × 1.55
-                        const valorVenda = cotacao.valorVenda ?? Math.round((cotacao.valorUnitario || 0) * 1.55 * 100) / 100;
-                        return {
-                            id: `cotacao_${cotacao.id}`,
-                            nome: cotacao.nome || 'Item da Cotação',
-                            descricao: cotacao.nome,
-                            // preco representa o valor de compra; valorVenda é o preço para o cliente
-                            preco: cotacao.valorUnitario || 0,
-                            valorVenda,
-                            valorVendaM: cotacao.valorVendaM || null, // Valor de venda em metros
-                            valorVendaCM: cotacao.valorVendaCM || null, // Valor de venda em centímetros
-                            estoque: 0, // Cotações não têm estoque físico
-                            unidadeMedida: cotacao.unidadeMedida || 'un',
-                            _isCotacao: true,
-                            _cotacaoId: cotacao.id,
-                            _itemCotacaoId: cotacao.id,
-                            _dataUltimaCotacao: cotacao.dataAtualizacao || cotacao.updatedAt || cotacao.createdAt,
-                            _fornecedorNome: cotacao.fornecedorNome || 'Sem fornecedor'
-                        };
-                    });
-                
-                console.log(`✅ ${cotacoesFormatadas.length} itens de cotações formatados`);
-                setCotacoes(cotacoesFormatadas);
-                
-                if (cotacoesFormatadas.length > 0) {
-                    console.log('📝 Exemplo de item:', cotacoesFormatadas[0]);
-                }
-            }
-        } catch (error) {
-            console.error('❌ Erro ao carregar cotações:', error);
-            toast.error('Erro ao carregar itens do banco frio');
-        }
-    };
-
     const loadServicos = async () => {
         try {
             const response = await servicosService.listar({ ativo: true });
@@ -302,7 +252,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         }
     };
 
-    // Resultados combinados de busca cruzada (Estoque, Banco Frio e Serviços) — igual à página de orçamentos
+    // Resultados combinados de busca cruzada (estoque e serviços)
     const resultadosBuscaUniversal = useMemo(() => {
         const termo = searchTerm.trim();
         if (!termo) return [];
@@ -310,21 +260,12 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         const termoLower = termo.toLowerCase();
         const list: any[] = [];
 
-        // Materiais do estoque real — busca cruzada (palavra * ou % segunda palavra)
         (materiais || []).filter(m => m && (m as any).ativo !== false).forEach(m => {
             if (matchCrossSearch(termo, m.nome || '') || (m.descricao || '').toLowerCase().includes(termoLower) || (m.id || '').toLowerCase().includes(termoLower)) {
                 list.push({ tipo: 'MATERIAL', raw: m, id: m.id, descricao: m.nome });
             }
         });
 
-        // Cotações (banco frio)
-        (cotacoes || []).forEach(c => {
-            if (matchCrossSearch(termo, c.nome || '') || (c.descricao || '').toLowerCase().includes(termoLower) || (c.id || '').toLowerCase().includes(termoLower)) {
-                list.push({ tipo: 'COTACAO', raw: c, id: c.id, descricao: c.nome });
-            }
-        });
-
-        // Serviços
         (servicos || []).forEach(s => {
             if (matchCrossSearch(termo, s.nome || '') || (s.descricao || '').toLowerCase().includes(termoLower) || (s.codigo || '').toLowerCase().includes(termoLower)) {
                 list.push({ tipo: 'SERVICO', raw: s, id: s.id, descricao: s.nome });
@@ -332,7 +273,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         });
 
         return list;
-    }, [materiais, cotacoes, servicos, searchTerm]);
+    }, [materiais, servicos, searchTerm]);
 
     const materiaisFiltrados = useMemo(() => {
         if (fonteDados === 'SERVICOS') {
@@ -346,19 +287,16 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
             );
         }
         
-        const fonte = fonteDados === 'ESTOQUE' ? materiais : cotacoes;
-        
         if (!searchTerm) {
-            // Não filtrar por estoque aqui — permitir selecionar materiais esgotados também
-            return fonte;
+            return materiais;
         }
         
-        return fonte.filter(m => {
+        return materiais.filter(m => {
             return (m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
                  (m.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
                  m.id.toLowerCase().includes(searchTerm.toLowerCase()));
         });
-    }, [materiais, cotacoes, servicos, fonteDados, searchTerm]);
+    }, [materiais, servicos, fonteDados, searchTerm]);
 
     const valorTotal = useMemo(() => {
         return roundMoney(itensKit.reduce((total, item) => total + item.subtotal, 0));
@@ -673,17 +611,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                 <h3 className="font-semibold text-gray-800 dark:text-white">Fonte de Dados</h3>
                                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                                     {fonteDados === 'ESTOQUE' && 'Materiais cadastrados no sistema (independente da quantidade em estoque)'}
-                                    {fonteDados === 'COTACOES' && 'Usando materiais do banco frio (cotações)'}
                                     {fonteDados === 'SERVICOS' && 'Usando serviços disponíveis'}
                                 </p>
                                 {fonteDados === 'ESTOQUE' && (
                                     <p className="text-xs text-green-700 dark:text-green-300 mt-2 font-medium">
                                         ✓ Qualquer material cadastrado pode ser adicionado ao kit, mesmo com estoque zerado.
-                                    </p>
-                                )}
-                                {fonteDados === 'COTACOES' && (
-                                    <p className="text-xs text-blue-700 mt-2 font-medium">
-                                        ℹ️ Itens do banco frio podem ser adicionados ao kit. Eles devem ser comprados antes de usar em obras.
                                     </p>
                                 )}
                                 {fonteDados === 'SERVICOS' && (
@@ -706,20 +638,6 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                 >
                                     <span>📦</span>
                                     Estoque Real
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setFonteDados('COTACOES');
-                                        setSearchTerm(''); // Limpar busca ao trocar
-                                    }}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                                        fonteDados === 'COTACOES'
-                                            ? 'bg-blue-600 text-white shadow-md'
-                                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
-                                    }`}
-                                >
-                                    <span>❄️</span>
-                                    Banco Frio (Cotações)
                                 </button>
                                 <button
                                     onClick={() => {
@@ -748,7 +666,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                     {fonteDados === 'SERVICOS' ? 'Serviços Disponíveis' : 'Materiais Cadastrados'}
                                 </h3>
                                 <span className="text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
-                                    {searchTerm.trim() ? resultadosBuscaUniversal.length : (fonteDados === 'ESTOQUE' ? materiais.length : fonteDados === 'COTACOES' ? cotacoes.length : servicos.length)} disponíveis
+                                    {searchTerm.trim() ? resultadosBuscaUniversal.length : (fonteDados === 'ESTOQUE' ? materiais.length : servicos.length)} disponíveis
                                 </span>
                             </div>
                             
@@ -827,15 +745,8 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                         <p className="text-gray-500 dark:text-gray-400 font-medium">
                                             {fonteDados === 'ESTOQUE' 
                                                 ? 'Nenhum material cadastrado encontrado' 
-                                                : fonteDados === 'COTACOES'
-                                                ? 'Nenhum item de cotação encontrado'
                                                 : 'Nenhum serviço encontrado'}
                                         </p>
-                                        {fonteDados === 'COTACOES' && cotacoes.length === 0 && (
-                                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                                                Importe cotações na página de Cotações para usar itens do banco frio
-                                            </p>
-                                        )}
                                         {fonteDados === 'SERVICOS' && servicos.length === 0 && (
                                             <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                                                 Cadastre serviços na página de Serviços para adicionar ao kit
@@ -888,7 +799,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                     ))
                                 ) : (
                                     // Lista de materiais (estoque ou cotações)
-                                    materiaisFiltrados.map((material) => (
+                                    (materiaisFiltrados as Material[]).map((material) => (
                                         <div
                                             key={material.id}
                                             className="bg-gray-50 p-3 rounded-lg hover:bg-gray-100 transition-colors"
@@ -899,11 +810,9 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                         {material.nome}
                                                     </p>
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                        {fonteDados === 'ESTOQUE' && (
-                                                            <span className="text-xs text-gray-600">
-                                                                Estoque: {material.estoque} {material.unidadeMedida}
-                                                            </span>
-                                                        )}
+                                                        <span className="text-xs text-gray-600">
+                                                            Estoque: {material.estoque} {material.unidadeMedida}
+                                                        </span>
                                                         <span className="text-xs font-semibold text-teal-700">
                                                             R$ {((material as any).valorVenda || material.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
@@ -911,23 +820,6 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                             <span className="text-xs text-orange-600">
                                                                 (Sem valor de venda - usando compra)
                                                             </span>
-                                                        )}
-                                                        {material._isCotacao && (
-                                                            <>
-                                                                {material._dataUltimaCotacao && (
-                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                        ❄️ {(() => {
-                                                                            const data = new Date(material._dataUltimaCotacao);
-                                                                            return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
-                                                                        })()}
-                                                                    </span>
-                                                                )}
-                                                                {(material as any)._fornecedorNome && (
-                                                                    <span className="text-xs text-gray-600">
-                                                                        📍 {(material as any)._fornecedorNome}
-                                                                    </span>
-                                                                )}
-                                                            </>
                                                         )}
                                                     </div>
                                                 </div>
