@@ -18,6 +18,12 @@ import {
   ConverterUnidadeError,
   sugerirConversoesCompra,
 } from '../services/converterUnidadeCompraItem.service';
+import {
+  buscarFornecedorCanonicoPorCnpj,
+  FornecedorCnpjError,
+  resolverFornecedorParaAtualizacaoCompra,
+} from '../services/fornecedorCnpj.service';
+import { cnpjDeXml } from '../utils/cnpjFornecedor.util';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_'
@@ -218,8 +224,6 @@ export const updateCompra = async (req: Request, res: Response): Promise<void> =
 
     console.log('✏️ Atualizando compra:', id, isRecebido ? '(compra já recebida — permite correção de cadastro/parcelas)' : '');
 
-    const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '');
-
     // Processar data da compra
     const processarData = (raw: any): Date | undefined => {
       if (!raw) return undefined;
@@ -239,29 +243,16 @@ export const updateCompra = async (req: Request, res: Response): Promise<void> =
     if (req.body.status !== undefined) updateData.status = req.body.status;
     if (req.body.classificacao !== undefined) updateData.classificacao = req.body.classificacao;
 
-    const novoCnpjDigits = req.body.fornecedorCNPJ ? digits(req.body.fornecedorCNPJ) : '';
-    const cnpjAtualDigits = digits(compraExistente.fornecedor?.cnpj);
-
-    if (novoCnpjDigits.length >= 14 && novoCnpjDigits !== cnpjAtualDigits) {
-      const todos = await prisma.fornecedor.findMany({
-        select: { id: true, cnpj: true, nome: true }
+    if (req.body.fornecedorId || req.body.fornecedorCNPJ) {
+      const fornecedorCompra = await resolverFornecedorParaAtualizacaoCompra(prisma, {
+        fornecedorId: req.body.fornecedorId,
+        fornecedorCNPJ: req.body.fornecedorCNPJ,
+        fornecedorNome: req.body.fornecedorNome ?? compraExistente.fornecedorNome,
+        telefone: req.body.fornecedorTel,
       });
-      let fornecedor = todos.find((f) => digits(f.cnpj) === novoCnpjDigits) || null;
-
-      if (!fornecedor) {
-        fornecedor = await prisma.fornecedor.create({
-          data: {
-            nome: req.body.fornecedorNome || compraExistente.fornecedorNome || 'Fornecedor',
-            cnpj: novoCnpjDigits,
-            telefone: req.body.fornecedorTel || null
-          }
-        });
-      }
-
-      updateData.fornecedorId = fornecedor.id;
-      if (req.body.fornecedorNome !== undefined) {
-        updateData.fornecedorNome = req.body.fornecedorNome || fornecedor.nome;
-      }
+      updateData.fornecedorId = fornecedorCompra.fornecedorId;
+      updateData.fornecedorCNPJ = fornecedorCompra.fornecedorCNPJ;
+      updateData.fornecedorNome = fornecedorCompra.fornecedorNome;
     }
 
     // Sempre permitir: datas, frete, despesas, observações, condições, valor total, empresa compradora (e duplicatas abaixo)
@@ -354,6 +345,10 @@ export const updateCompra = async (req: Request, res: Response): Promise<void> =
       data: compraAtualizada
     });
   } catch (error) {
+    if (error instanceof FornecedorCnpjError) {
+      res.status(400).json({ success: false, error: error.message });
+      return;
+    }
     console.error('Erro ao atualizar compra:', error);
     res.status(500).json({
       success: false,
@@ -378,10 +373,17 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
     // Estrutura básica de uma NF-e (v4.00)
     const nfe = result?.nfeProc?.NFe?.infNFe || result?.NFe?.infNFe || {};
 
-    // Fornecedor (Emitente)
+    const cnpjEmit = cnpjDeXml(nfe.emit?.CNPJ);
+    const fornecedorCadastro = cnpjEmit
+      ? await buscarFornecedorCanonicoPorCnpj(prisma, cnpjEmit)
+      : null;
+
+    // Fornecedor (Emitente). Se já existe cadastro com os mesmos dígitos, devolve esse id.
     const fornecedor = {
-      nome: nfe.emit?.xNome || '',
-      cnpj: nfe.emit?.CNPJ || '',
+      id: fornecedorCadastro?.id,
+      nome: fornecedorCadastro?.nome || nfe.emit?.xNome || '',
+      cnpj: cnpjEmit,
+      telefone: fornecedorCadastro?.telefone || undefined,
       endereco: nfe.emit?.enderEmit
         ? `${nfe.emit.enderEmit.xLgr}, ${nfe.emit.enderEmit.nro} - ${nfe.emit.enderEmit.xBairro}, ${nfe.emit.enderEmit.xMun}/${nfe.emit.enderEmit.UF}`
         : ''
@@ -408,12 +410,7 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
       materialId?: string;
     }> = [];
 
-    const cnpjEmit = String(nfe.emit?.CNPJ || '').replace(/\D/g, '');
-    let fornecedorId: string | undefined;
-    if (cnpjEmit) {
-      const fornecedores = await prisma.fornecedor.findMany({ select: { id: true, cnpj: true } });
-      fornecedorId = fornecedores.find((f) => String(f.cnpj || '').replace(/\D/g, '') === cnpjEmit)?.id;
-    }
+    const fornecedorId = fornecedorCadastro?.id;
 
     const det = Array.isArray(nfe.det) ? nfe.det : nfe.det ? [nfe.det] : [];
     for (const item of det) {
@@ -524,6 +521,14 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
       success: true,
       data: {
         fornecedor,
+        fornecedorCadastro: fornecedorCadastro
+          ? {
+              id: fornecedorCadastro.id,
+              nome: fornecedorCadastro.nome,
+              cnpj: fornecedorCadastro.cnpj,
+              telefone: fornecedorCadastro.telefone,
+            }
+          : null,
         destinatarioCNPJ,
         destinatarioRazaoSocial,
         numeroNF,
